@@ -281,3 +281,23 @@ button.nav-item {
   font-size: 0.8rem;
   line-height: 1.2;
 }
+
+.sidebar-version {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted, #6b7c93);
+  cursor: pointer;
+  text-align: center;
+}
+
+.sidebar-version:hover {
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--accent-strong, #2f6fdb);
+}

@@ -38,7 +38,7 @@ const DEFAULT_ACCOUNTS: AuthAccount[] = [
 ]
 
 /** Rutas solo para administración. */
-const ADMIN_ONLY_PATHS = new Set(['/configuracion'])
+const ADMIN_ONLY_PATHS = new Set(['/configuracion', '/pagos-cancelados'])
 
 export function canUsePagosPeriodFilters(role: AppRole): boolean {
   return role === 'admin'

@@ -25,6 +25,7 @@ import { labelMotivoCancelacion } from '../lib/pagosCancelados'
 import { pdfBlobUrl, savePdfFile } from '../lib/doctorPaymentsPdf'
 import type { MotivoCancelacionPago, PagoCancelado } from '../types'
 import './pages.css'
+import './pages-pagos-cancelados.css'
 
 type Periodo = 'todo' | 'dia' | 'mes' | 'anio'
 

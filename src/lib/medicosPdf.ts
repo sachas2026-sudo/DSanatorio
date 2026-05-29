@@ -93,8 +93,13 @@ function drawMedicosTotalBar(
   return y + h + 5
 }
 
-function medicosTableColWidths(tableW: number): number[] {
-  const pct = [5, 20, 12, 15, 16, 16, 16]
+function medicosTableColWidths(
+  tableW: number,
+  includePorcentaje: boolean,
+): number[] {
+  const pct = includePorcentaje
+    ? [5, 20, 12, 15, 16, 16, 16]
+    : [6, 24, 14, 18, 18, 20]
   const raw = pct.map((p) => (p / 100) * tableW)
   const sum = raw.reduce((a, b) => a + b, 0)
   const diff = tableW - sum
@@ -102,10 +107,18 @@ function medicosTableColWidths(tableW: number): number[] {
   return raw.map((w) => Math.round(w * 100) / 100)
 }
 
-export function buildMedicosPdf(doctors: Doctor[]): {
+export type BuildMedicosPdfOptions = {
+  includePorcentaje?: boolean
+}
+
+export function buildMedicosPdf(
+  doctors: Doctor[],
+  options: BuildMedicosPdfOptions = {},
+): {
   doc: jsPDF
   filename: string
 } {
+  const includePorcentaje = options.includePorcentaje !== false
   const sorted = sortMedicosAlphabetic(doctors)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
@@ -127,16 +140,25 @@ export function buildMedicosPdf(doctors: Doctor[]): {
   } else {
     const tableLeft = PAGOS_PDF_MARGIN
     const tableWidth = pageW - 2 * PAGOS_PDF_MARGIN
-    const colWidths = medicosTableColWidths(tableWidth)
-    const headers = [
-      '#',
-      'Apellido y nombre',
-      'Matrícula',
-      'Especialidad',
-      'Teléfono',
-      'Email',
-      '%',
-    ]
+    const colWidths = medicosTableColWidths(tableWidth, includePorcentaje)
+    const headers = includePorcentaje
+      ? [
+          '#',
+          'Apellido y nombre',
+          'Matrícula',
+          'Especialidad',
+          'Teléfono',
+          'Email',
+          '%',
+        ]
+      : [
+          '#',
+          'Apellido y nombre',
+          'Matrícula',
+          'Especialidad',
+          'Teléfono',
+          'Email',
+        ]
     const tableStartY = cursorY
 
     const columnStyles: Record<
@@ -158,15 +180,20 @@ export function buildMedicosPdf(doctors: Doctor[]): {
     autoTable(doc, {
       startY: tableStartY,
       head: [headers],
-      body: sorted.map((d, index) => [
-        String(index + 1),
-        `${d.apellido || '—'}, ${d.nombre || '—'}`,
-        d.matricula || '—',
-        d.especialidad || '—',
-        d.telefono || '—',
-        d.email || '—',
-        d.porcentaje != null ? String(d.porcentaje) : '—',
-      ]),
+      body: sorted.map((d, index) => {
+        const row = [
+          String(index + 1),
+          `${d.apellido || '—'}, ${d.nombre || '—'}`,
+          d.matricula || '—',
+          d.especialidad || '—',
+          d.telefono || '—',
+          d.email || '—',
+        ]
+        if (includePorcentaje) {
+          row.push(d.porcentaje != null ? String(d.porcentaje) : '—')
+        }
+        return row
+      }),
       styles: TABLE_BODY_STYLES,
       headStyles: TABLE_HEAD_STYLES,
       alternateRowStyles: { fillColor: [248, 251, 255] },

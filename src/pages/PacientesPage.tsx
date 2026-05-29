@@ -6,7 +6,12 @@ import { ObrasSocialesModal } from '../components/ObrasSocialesModal'
 import { LocalidadesModal } from '../components/LocalidadesModal'
 import { IconActionButton, IconEdit, IconList, IconTrash } from '../components/icons'
 import { useAppState } from '../context/AppStateContext'
+import { useAuth } from '../context/AuthContext'
 import { useConfirm } from '../context/ConfirmContext'
+import {
+  canExportPacientesListado,
+  EXPORT_DENIED_MESSAGE,
+} from '../lib/exportPermissions'
 import { pdfBlobUrl, savePdfFile } from '../lib/doctorPaymentsPdf'
 import { normalizeObraSocial } from '../lib/obrasSociales'
 import { normalizeLocalidad } from '../lib/localidadesMisiones'
@@ -47,6 +52,8 @@ export function PacientesPage() {
     renameLocalidadCustom,
   } = useAppState()
   const { confirm } = useConfirm()
+  const { role } = useAuth()
+  const puedeExportPdf = canExportPacientesListado(role)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [osModalOpen, setOsModalOpen] = useState(false)
   const [locModalOpen, setLocModalOpen] = useState(false)
@@ -175,6 +182,10 @@ export function PacientesPage() {
   }
 
   async function handlePdfPreview() {
+    if (!puedeExportPdf) {
+      void confirm({ message: EXPORT_DENIED_MESSAGE })
+      return
+    }
     try {
       await preloadPdfHeaderBanner()
       const built = buildPacientesPdf(data.patients)
@@ -420,6 +431,7 @@ export function PacientesPage() {
                 Nuevo paciente
               </button>
             )}
+            {puedeExportPdf && (
             <button
               type="button"
               className="btn btn-pdf"
@@ -431,6 +443,7 @@ export function PacientesPage() {
               </span>
               Vista Previa
             </button>
+            )}
             <div className="field field--pill field--search">
               <label className="sr-only" htmlFor="p-search">
                 Buscar paciente

@@ -25,6 +25,10 @@ import { APP_DISPLAY_NAME } from '../lib/pdfBranding'
 import { preloadPdfHeaderBanner } from '../lib/pdfHeaderBanner'
 import { preloadPdfLogo } from '../lib/pdfLogo'
 import { useAuth } from '../context/AuthContext'
+import {
+  canSendClinicalEmailExport,
+  EXPORT_DENIED_MESSAGE,
+} from '../lib/exportPermissions'
 import { useAppState } from '../context/AppStateContext'
 import { useConfirm } from '../context/ConfirmContext'
 import {
@@ -56,9 +60,6 @@ import { pdfBlobUrl, pdfToBase64, savePdfFile } from '../lib/doctorPaymentsPdf'
 import type jsPDF from 'jspdf'
 import {
   validateAppointmentSlot,
-  diaSemanaLabel,
-  diaSemanaLabelLargo,
-  DIAS_SEMANA_FORM,
   eachAgendaWeekDay,
   isAgendaWorkingDay,
 } from '../lib/agendaRules'
@@ -85,6 +86,25 @@ import {
 import type { Appointment, AppointmentEstado, Doctor } from '../types'
 import { createId } from '../lib/id'
 import {
+  AGENDA_COMPACT_ESTADO_THRESHOLD,
+  AGENDA_ESTADOS,
+  dayCitaEstadoParts,
+  formatDayCitaEstado,
+  splitMedicoPillLabel,
+} from '../lib/agendaDisplay'
+import {
+  formatMontoFieldInput,
+  parseMontoInput,
+  PAYMENT_METODOS,
+} from '../lib/paymentInput'
+import {
+  AgendaFranjaTab,
+  AgendaHorariosTab,
+  AgendaLibresTab,
+  AgendaMensualTab,
+} from './agenda/AgendaConfigTabs'
+import { AgendaExportBar } from './agenda/AgendaExportBar'
+import {
   buildMedicoAgendaMessage,
   buildTurnoReminderMessage,
   buildWhatsAppSendUrl,
@@ -94,44 +114,9 @@ import './pages.css'
 
 type Tab = 'turnos' | 'horarios' | 'franja' | 'mensual' | 'libres'
 
-const estados: { value: AppointmentEstado; label: string }[] = [
-  { value: 'programado', label: 'Programado' },
-  { value: 'atendido', label: 'Atendido' },
-  { value: 'cancelado', label: 'Cancelado' },
-]
-
-const AGENDA_COMPACT_ESTADO_THRESHOLD = 8
-
-const estadoAbreviado: Record<AppointmentEstado, string> = {
-  programado: 'Prog.',
-  atendido: 'Atend.',
-  cancelado: 'Canc.',
-}
-
-function dayCitaEstadoParts(c: Appointment, isPagado: boolean) {
-  const base = estados.find((e) => e.value === c.estado)?.label ?? c.estado
-  const parts = [base]
-  if (/urgencia/i.test(c.notas)) parts.push('Urgencia')
-  if (isPagado) parts.push('Pagado')
-  return parts
-}
-
-function formatDayCitaEstado(c: Appointment, isPagado: boolean, compact: boolean) {
-  if (!compact) return dayCitaEstadoParts(c, isPagado).join(' - ')
-  const parts = [estadoAbreviado[c.estado] ?? c.estado]
-  if (/urgencia/i.test(c.notas)) parts.push('Urg.')
-  if (isPagado) parts.push('Pag.')
-  return parts.join(' · ')
-}
-
-function splitMedicoPillLabel(label: string): { name: string; esp: string | null } {
-  const sep = label.indexOf(' - ')
-  if (sep === -1) return { name: label, esp: null }
-  return { name: label.slice(0, sep), esp: label.slice(sep + 3) }
-}
-
 export function AgendaPage() {
   const { role } = useAuth()
+  const puedeEnviarCorreo = canSendClinicalEmailExport(role)
   const {
     data,
     upsertAppointment,
@@ -222,28 +207,6 @@ export function AgendaPage() {
   const [bookingFormError, setBookingFormError] = useState<string | null>(null)
 
   const URGENCIA_DURACION_DEFAULT = 15
-
-  const PAYMENT_METODOS = [
-    'Efectivo',
-    'Tarjeta',
-    'Transferencia',
-    'Obra social',
-    'Otro',
-  ] as const
-
-  function parseMontoInput(value: string): number {
-    const norm = (value ?? '').replace(/\./g, '').replace(/\$/g, '').trim()
-    const n = Number(norm.replace(',', '.'))
-    return Number.isFinite(n) ? n : 0
-  }
-
-  function formatMontoFieldInput(raw: string): string {
-    if (!raw.trim()) return ''
-    const norm = raw.replace(/\./g, '').replace(/\$/g, '').trim()
-    const parsed = Number(norm.replace(',', '.'))
-    if (!Number.isFinite(parsed)) return raw
-    return parsed <= 0 ? '' : formatMonto(parsed)
-  }
 
   const bookingTotalMonto = useMemo(() => {
     return parseMontoInput(bookingMonto) + parseMontoInput(bookingMonto2)
@@ -353,7 +316,7 @@ export function AgendaPage() {
 
   const estadoLabel = useCallback(
     (estado: AppointmentEstado) =>
-      estados.find((e) => e.value === estado)?.label ?? estado,
+      AGENDA_ESTADOS.find((e) => e.value === estado)?.label ?? estado,
     [],
   )
 
@@ -570,6 +533,10 @@ export function AgendaPage() {
   }
 
   async function handleEnviarCorreoAgenda() {
+    if (!puedeEnviarCorreo) {
+      void confirm({ message: EXPORT_DENIED_MESSAGE })
+      return
+    }
     const origen = data.settings.email.trim()
     const to = data.settings.emailGerente.trim()
     const clave = data.settings.clave
@@ -1845,82 +1812,18 @@ export function AgendaPage() {
               Especialidades
             </button>
           </div>
-          <div className="agenda-export-bar">
-          <div className="agenda-export-bar__field">
-            <label className="agenda-export-bar__label" htmlFor="agenda-export-doctor">
-              Médico
-            </label>
-            <select
-              id="agenda-export-doctor"
-              className="agenda-export-bar__select agenda-export-bar__select--doctor"
-              value={agendaExportDoctorId}
-              onChange={(e) => setAgendaExportDoctorId(e.target.value)}
-              aria-label="Médico para PDF y correo"
-            >
-              <option value="">Todos</option>
-              {agendaExportDoctors.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.apellido}, {d.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="agenda-export-bar__field">
-            <label className="agenda-export-bar__label" htmlFor="agenda-export-scope">
-              Exportar
-            </label>
-            <select
-              id="agenda-export-scope"
-              className="agenda-export-bar__select"
-              value={agendaExportScope}
-              onChange={(e) =>
-                setAgendaExportScope(e.target.value as AgendaPdfScope)
-              }
-              aria-label="Período para PDF y correo"
-            >
-              <option value="day">Día</option>
-              <option value="week">Semana</option>
-              <option value="month">Mes</option>
-            </select>
-          </div>
-          <button
-            type="button"
-            className="btn btn-pdf agenda-export-bar__pdf agenda-export-bar__pdf-turnos"
-            onClick={() => void handleAgendaTurnosPdfPreview()}
-          >
-            <span className="btn-pdf__label">PDF Turnos</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-pdf agenda-export-bar__pdf"
-            onClick={handleAgendaPdfPreview}
-          >
-            Vista previa
-          </button>
-          <button
-            type="button"
-            className={`btn btn-email agenda-export-bar__email${enviandoCorreo ? ' btn-email--sending' : ''}`}
-            disabled={enviandoCorreo}
-            aria-busy={enviandoCorreo}
-            onClick={() => void handleEnviarCorreoAgenda()}
-          >
-            {enviandoCorreo ? (
-              <>
-                <span className="btn-email__spinner" aria-hidden />
-                <span className="btn-email__label btn-email__label--sending">
-                  Enviar Correo
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="btn-email__icon" aria-hidden>
-                  @
-                </span>
-                <span className="btn-email__label">Enviar Correo</span>
-              </>
-            )}
-          </button>
-        </div>
+          <AgendaExportBar
+            doctors={agendaExportDoctors}
+            exportDoctorId={agendaExportDoctorId}
+            onExportDoctorIdChange={setAgendaExportDoctorId}
+            exportScope={agendaExportScope}
+            onExportScopeChange={setAgendaExportScope}
+            onTurnosPdf={() => void handleAgendaTurnosPdfPreview()}
+            onPreviewPdf={handleAgendaPdfPreview}
+            puedeEnviarCorreo={puedeEnviarCorreo}
+            enviandoCorreo={enviandoCorreo}
+            onEnviarCorreo={() => void handleEnviarCorreoAgenda()}
+          />
         </div>
         </div>
       </header>
@@ -2168,7 +2071,7 @@ export function AgendaPage() {
                               }))
                             }
                           >
-                            {estados.map((x) => (
+                            {AGENDA_ESTADOS.map((x) => (
                               <option key={x.value} value={x.value}>
                                 {x.label}
                               </option>
@@ -2398,7 +2301,7 @@ export function AgendaPage() {
                                   setBookingEstado(e.target.value as AppointmentEstado)
                                 }
                               >
-                                {estados.map((x) => (
+                                {AGENDA_ESTADOS.map((x) => (
                                   <option key={x.value} value={x.value}>
                                     {x.label}
                                   </option>
@@ -2610,478 +2513,47 @@ export function AgendaPage() {
       )}
 
       {tab === 'franja' && (
-        <>
-          <section className="panel">
-            <h2>Franja del turno por médico</h2>
-            <p className="panel-hint panel-hint--oneline">
-              Cada cuántos minutos se ofrecen turnos (ej. 15 → 8:00, 8:15, 8:30…). Al elegir
-              médico en la reserva se muestra su horario del día.
-            </p>
-            {data.doctors.length === 0 ? (
-              <p className="empty-hint">Primero cargá médicos.</p>
-            ) : (
-              <form onSubmit={submitFranja}>
-                <div className="form-grid form-grid--franja-medico">
-                  <div className="field">
-                    <label htmlFor="f-doc">Médico</label>
-                    <select
-                      id="f-doc"
-                      value={franjaForm.doctorId}
-                      onChange={(e) => {
-                        const id = e.target.value
-                        const doc = doctorById(id)
-                        setFranjaForm({
-                          doctorId: id,
-                          duracionTurnoMinutos: doctorDuracionTurno(doc),
-                          tipoAgenda: doc?.tipoAgenda === 'mensual' ? 'mensual' : 'semanal',
-                        })
-                      }}
-                      required
-                    >
-                      <option value="">Elegir…</option>
-                      {data.doctors.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.apellido}, {d.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field field--pill field--franja-tipo">
-                    <label htmlFor="f-tipo">Tipo de agenda</label>
-                    <div className="pill-select">
-                      <select
-                        id="f-tipo"
-                        value={franjaForm.tipoAgenda}
-                        onChange={(e) =>
-                          setFranjaForm((f) => ({
-                            ...f,
-                            tipoAgenda: e.target.value as 'semanal' | 'mensual',
-                          }))
-                        }
-                      >
-                        <option value="semanal">Semanal (horarios por día)</option>
-                        <option value="mensual">Mensual (fechas puntuales)</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="field">
-                    <label htmlFor="f-dur">Duración de cada turno</label>
-                    <select
-                      id="f-dur"
-                      value={franjaForm.duracionTurnoMinutos}
-                      onChange={(e) =>
-                        setFranjaForm((f) => ({
-                          ...f,
-                          duracionTurnoMinutos: Number(e.target.value),
-                        }))
-                      }
-                    >
-                      {DURACION_TURNO_OPCIONES.map((m) => (
-                        <option key={m} value={m}>
-                          {m} minutos
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-actions">
-                  <button type="submit" className="btn btn-primary">
-                    Guardar
-                  </button>
-                </div>
-              </form>
-            )}
-          </section>
-          {franjaForm.doctorId && (
-            <p className="panel-hint">
-              {franjaForm.tipoAgenda === 'mensual'
-                ? 'Este médico solo aparece en la agenda los días cargados en Atención mensual.'
-                : 'Configurá los días y horarios en Horarios por médico.'}
-            </p>
-          )}
-        </>
+        <AgendaFranjaTab
+          data={data}
+          doctorById={doctorById}
+          franjaForm={franjaForm}
+          setFranjaForm={setFranjaForm}
+          onSubmit={submitFranja}
+        />
       )}
 
       {tab === 'mensual' && (
-        <>
-          <section className="panel">
-            <h2>Atención mensual (fechas puntuales)</h2>
-            <p className="panel-hint panel-hint--oneline">
-              Para médicos que atienden una vez al mes (u otras fechas especiales). Marcá el
-              médico como &quot;Mensual&quot; en Franja del turno.
-            </p>
-            {data.doctors.length === 0 ? (
-              <p className="empty-hint">Primero cargá médicos.</p>
-            ) : (
-              <form onSubmit={submitMensual}>
-                <div className="form-grid">
-                  <div className="field">
-                    <label htmlFor="m-doc">Médico</label>
-                    <select
-                      id="m-doc"
-                      value={mensualForm.doctorId}
-                      onChange={(e) =>
-                        setMensualForm((f) => ({ ...f, doctorId: e.target.value }))
-                      }
-                      required
-                    >
-                      <option value="">Elegir…</option>
-                      {data.doctors
-                        .filter((d) => isDoctorAgendaMensual(d))
-                        .map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.apellido}, {d.nombre}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label htmlFor="m-fecha">Fecha de atención</label>
-                    <input
-                      id="m-fecha"
-                      type="date"
-                      value={mensualForm.fecha}
-                      onChange={(e) =>
-                        setMensualForm((f) => ({ ...f, fecha: e.target.value }))
-                      }
-                      required
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="m-ini">Desde</label>
-                    <input
-                      id="m-ini"
-                      type="time"
-                      value={mensualForm.horaInicio}
-                      onChange={(e) =>
-                        setMensualForm((f) => ({ ...f, horaInicio: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="m-fin">Hasta</label>
-                    <input
-                      id="m-fin"
-                      type="time"
-                      value={mensualForm.horaFin}
-                      onChange={(e) =>
-                        setMensualForm((f) => ({ ...f, horaFin: e.target.value }))
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="form-actions">
-                  <button type="submit" className="btn btn-primary">
-                    Agregar fecha
-                  </button>
-                </div>
-              </form>
-            )}
-          </section>
-          <div className="table-wrap">
-            {data.atencionesMensuales.length === 0 ? (
-              <p className="empty-hint">No hay fechas de atención mensual cargadas.</p>
-            ) : (
-              <table className="data">
-                <thead>
-                  <tr>
-                    <th>Médico</th>
-                    <th>Fecha</th>
-                    <th>Horario</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...data.atencionesMensuales]
-                    .sort((a, b) => b.fecha.localeCompare(a.fecha))
-                    .map((a) => {
-                      const d = doctorById(a.doctorId)
-                      return (
-                        <tr key={a.id}>
-                          <td>{d ? `${d.apellido}, ${d.nombre}` : '—'}</td>
-                          <td>
-                            {format(parseISO(`${a.fecha}T12:00:00`), 'dd/MM/yyyy', {
-                              locale: es,
-                            })}
-                          </td>
-                          <td>
-                            {a.horaInicio} – {a.horaFin}
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-danger"
-                              onClick={() => deleteAtencionMensual(a.id)}
-                            >
-                              Quitar
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
+        <AgendaMensualTab
+          data={data}
+          doctorById={doctorById}
+          mensualForm={mensualForm}
+          setMensualForm={setMensualForm}
+          onSubmit={submitMensual}
+          onDelete={deleteAtencionMensual}
+        />
       )}
 
       {tab === 'horarios' && (
-        <>
-          <section className="panel">
-            <h2>Agregar franja horaria</h2>
-            <p className="panel-hint panel-hint--oneline">
-              Para médicos con agenda semanal. Los de atención mensual usan la pestaña Atención
-              mensual.
-            </p>
-            {data.doctors.length === 0 ? (
-              <p className="empty-hint">Primero cargá médicos.</p>
-            ) : (
-              <form onSubmit={submitHor}>
-                <div className="form-grid">
-                  <div className="field">
-                    <label htmlFor="h-doc">Médico</label>
-                    <select
-                      id="h-doc"
-                      value={horForm.doctorId}
-                      onChange={(e) =>
-                        setHorForm((f) => ({ ...f, doctorId: e.target.value }))
-                      }
-                      required
-                    >
-                      <option value="">Elegir…</option>
-                      {data.doctors.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.apellido}, {d.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label htmlFor="h-dia">Día de la semana</label>
-                    <select
-                      id="h-dia"
-                      value={horForm.diaSemana}
-                      onChange={(e) =>
-                        setHorForm((f) => ({
-                          ...f,
-                          diaSemana: Number(e.target.value),
-                        }))
-                      }
-                    >
-                      {[0, 1, 2, 3, 4, 5, 6].map((n) => (
-                        <option key={n} value={n}>
-                          {diaSemanaLabel(n)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label htmlFor="h-ini">Desde</label>
-                    <input
-                      id="h-ini"
-                      type="time"
-                      value={horForm.horaInicio}
-                      onChange={(e) =>
-                        setHorForm((f) => ({ ...f, horaInicio: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="h-fin">Hasta</label>
-                    <input
-                      id="h-fin"
-                      type="time"
-                      value={horForm.horaFin}
-                      onChange={(e) =>
-                        setHorForm((f) => ({ ...f, horaFin: e.target.value }))
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="form-actions">
-                  <button type="submit" className="btn btn-primary">
-                    Agregar franja
-                  </button>
-                </div>
-              </form>
-            )}
-          </section>
-
-          <div className="table-wrap">
-            {data.horarios.length === 0 ? (
-              <p className="empty-hint">
-                Sin horarios: los turnos no se validan contra franjas (solo días
-                libres y solapamientos).
-              </p>
-            ) : (
-              <table className="data">
-                <thead>
-                  <tr>
-                    <th>Médico</th>
-                    <th>Día</th>
-                    <th>Franja</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.horarios.map((h) => {
-                    const d = doctorById(h.doctorId)
-                    return (
-                      <tr key={h.id}>
-                        <td>{d ? `${d.apellido}, ${d.nombre}` : '—'}</td>
-                        <td>{diaSemanaLabel(h.diaSemana)}</td>
-                        <td>
-                          {h.horaInicio} – {h.horaFin}
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-danger"
-                            onClick={() => deleteHorario(h.id)}
-                          >
-                            Quitar
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
+        <AgendaHorariosTab
+          data={data}
+          doctorById={doctorById}
+          horForm={horForm}
+          setHorForm={setHorForm}
+          onSubmit={submitHor}
+          onDelete={deleteHorario}
+        />
       )}
 
       {tab === 'libres' && (
-        <>
-          <section className="panel">
-            <h2>Días que no atiende</h2>
-            <p className="panel-hint panel-hint--oneline">
-              Marcá los días sin atención (ej. lunes y martes); el médico no aparecerá en la agenda esos días.
-            </p>
-            {data.doctors.length === 0 ? (
-              <p className="empty-hint">Primero cargá médicos.</p>
-            ) : (
-              <form onSubmit={submitLib}>
-                <div className="form-grid form-grid--dias-libres">
-                  <div className="field field--dias-libres-medico">
-                    <label htmlFor="l-doc">Médico</label>
-                    <select
-                      id="l-doc"
-                      value={libForm.doctorId}
-                      onChange={(e) =>
-                        setLibForm((f) => ({
-                          ...f,
-                          doctorId: e.target.value,
-                          diasSemana: [],
-                        }))
-                      }
-                      required
-                    >
-                      <option value="">Elegir…</option>
-                      {data.doctors.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.apellido}, {d.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field field--dias-libres-dias">
-                    <span className="field-label-block">Días sin atención</span>
-                    <div className="dias-libres-picks" role="group" aria-label="Días de la semana">
-                      {DIAS_SEMANA_FORM.map((n) => {
-                        const ya =
-                          libForm.doctorId &&
-                          data.diasLibres.some(
-                            (d) =>
-                              d.doctorId === libForm.doctorId &&
-                              d.diaSemana === n,
-                          )
-                        return (
-                          <label
-                            key={n}
-                            className={`dias-libres-pick${ya ? ' dias-libres-pick--saved' : ''}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={libForm.diasSemana.includes(n)}
-                              disabled={!libForm.doctorId || !!ya}
-                              onChange={() => toggleLibDia(n)}
-                            />
-                            <span>{diaSemanaLabelLargo(n)}</span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                    {libForm.doctorId && (
-                      <p className="dias-libres-picks__hint">
-                        Los días ya guardados aparecen atenuados. Marcá otros y
-                        pulsá Guardar.
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="form-actions">
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    disabled={
-                      !libForm.doctorId || libForm.diasSemana.length === 0
-                    }
-                  >
-                    Guardar días
-                  </button>
-                </div>
-              </form>
-            )}
-          </section>
-
-          <div className="table-wrap">
-            {data.diasLibres.length === 0 ? (
-              <p className="empty-hint">
-                No hay días de la semana marcados como libres.
-              </p>
-            ) : (
-              <table className="data data--dias-libres">
-                <thead>
-                  <tr>
-                    <th>Médico</th>
-                    <th>Días sin atención</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {diasLibresPorMedico.map((row) => (
-                    <tr key={row.doctorId}>
-                      <td className="dias-libres-lista__medico">{row.nombre}</td>
-                      <td>
-                        <span className="dias-libres-lista-linea">
-                          {row.dias.map((d, i) => (
-                            <span key={d.id} className="dias-libres-lista-item">
-                              {i > 0 && (
-                                <span className="dias-libres-lista-sep">, </span>
-                              )}
-                              <span>{diaSemanaLabelLargo(d.diaSemana)}</span>
-                              <button
-                                type="button"
-                                className="dias-libres-lista-quitar"
-                                onClick={() => deleteDiaLibre(d.id)}
-                                aria-label={`Quitar ${diaSemanaLabelLargo(d.diaSemana)}`}
-                                title="Quitar día"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          ))}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
+        <AgendaLibresTab
+          data={data}
+          libForm={libForm}
+          setLibForm={setLibForm}
+          diasLibresPorMedico={diasLibresPorMedico}
+          onSubmit={submitLib}
+          onToggleDia={toggleLibDia}
+          onDeleteDia={deleteDiaLibre}
+        />
       )}
 
       {medicosEspModalOpen && (

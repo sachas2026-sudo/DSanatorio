@@ -10,7 +10,13 @@ import {
 } from '../lib/medicosPdf'
 import { IconActionButton, IconEdit, IconList, IconTrash } from '../components/icons'
 import { useAppState } from '../context/AppStateContext'
+import { useAuth } from '../context/AuthContext'
 import { useConfirm } from '../context/ConfirmContext'
+import {
+  canExportMedicosListado,
+  canViewDoctorPorcentaje,
+  EXPORT_DENIED_MESSAGE,
+} from '../lib/exportPermissions'
 import type { Doctor } from '../types'
 import type jsPDF from 'jspdf'
 import './pages.css'
@@ -61,6 +67,9 @@ export function MedicosPage() {
     renameLocalidadCustom,
   } = useAppState()
   const { confirm } = useConfirm()
+  const { role } = useAuth()
+  const puedeVerPorcentaje = canViewDoctorPorcentaje(role)
+  const puedeExportPdf = canExportMedicosListado(role)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [espModalOpen, setEspModalOpen] = useState(false)
@@ -115,9 +124,14 @@ export function MedicosPage() {
   function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.nombre.trim() || !form.apellido.trim()) return
+    const porcentaje = puedeVerPorcentaje
+      ? parsePorcentajeInput(form.porcentaje)
+      : editingId
+        ? data.doctors.find((d) => d.id === editingId)?.porcentaje
+        : undefined
     upsertDoctor({
       ...form,
-      porcentaje: parsePorcentajeInput(form.porcentaje),
+      porcentaje,
       id: editingId ?? undefined,
     })
     startNew()
@@ -152,9 +166,15 @@ export function MedicosPage() {
   }
 
   async function handlePdfPreview() {
+    if (!puedeExportPdf) {
+      void confirm({ message: EXPORT_DENIED_MESSAGE })
+      return
+    }
     try {
       await preloadPdfHeaderBanner()
-      const built = buildMedicosPdf(data.doctors)
+      const built = buildMedicosPdf(data.doctors, {
+        includePorcentaje: puedeVerPorcentaje,
+      })
       pdfDocRef.current = built.doc
       if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url)
       setPdfPreview({
@@ -319,6 +339,7 @@ export function MedicosPage() {
                 onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
               />
             </div>
+            {puedeVerPorcentaje && (
             <div className="field field--medico-porcentaje">
               <label htmlFor="m-pct">Porcentaje</label>
               <input
@@ -336,6 +357,7 @@ export function MedicosPage() {
                 }
               />
             </div>
+            )}
           </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary">
@@ -346,6 +368,7 @@ export function MedicosPage() {
                 Nuevo médico
               </button>
             )}
+            {puedeExportPdf && (
             <button
               type="button"
               className="btn btn-pdf"
@@ -357,6 +380,7 @@ export function MedicosPage() {
               </span>
               Vista Previa
             </button>
+            )}
             <div className="field field--pill field--search">
               <label className="sr-only" htmlFor="m-search">
                 Buscar médico
@@ -405,7 +429,7 @@ export function MedicosPage() {
                   <td>
                     {d.telefono || '—'}
                     {d.email ? ` · ${d.email}` : ''}
-                    {d.porcentaje != null ? ` · ${d.porcentaje}%` : ''}
+                    {puedeVerPorcentaje && d.porcentaje != null ? ` · ${d.porcentaje}%` : ''}
                   </td>
                   <td>
                     <div

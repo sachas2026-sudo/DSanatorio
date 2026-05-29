@@ -33,12 +33,19 @@ import {
   type BackupSlot,
 } from '../lib/appBackup'
 import {
-  loadStorageRaw,
   saveStorageRaw,
   serializeAppData,
 } from '../lib/appStorage'
+import {
+  EMPTY_APP_DATA,
+  enrichLoadedData,
+  loadFromStorage,
+  parseStoredData,
+  saveAppData,
+  withDemoData,
+} from '../lib/appStateLoad'
 import { isTauri } from '@tauri-apps/api/core'
-import { generateDemoDoctors, generateDemoPatients } from '../lib/seedData'
+import { generateDemoDoctors } from '../lib/seedData'
 import type {
   AppData,
   AppSettings,
@@ -55,106 +62,14 @@ import type {
 import { sendDatabaseBackupEmail } from '../lib/backupEmail'
 import { formatPersistError, logAppError } from '../lib/persistAlert'
 import {
-  migrateSmtpSecretFromSettings,
   saveSmtpSecret,
 } from '../lib/smtpSecret'
-import { parseAppDataJson } from '../lib/parseAppData'
 import {
   isLocalidadMisionera,
   localidadKey,
   mergeLocalidadesAny,
   normalizeLocalidad,
 } from '../lib/localidadesMisiones'
-const empty: AppData = {
-  patients: [],
-  doctors: [],
-  horarios: [],
-  diasLibres: [],
-  atencionesMensuales: [],
-  appointments: [],
-  payments: [],
-  pagosCancelados: [],
-  especialidadesCustom: [],
-  obrasSocialesCustom: [],
-  localidadesCustom: [],
-  settings: {
-    email: '',
-    emailGerente: '',
-    telefonoGerente: '',
-    clave: '',
-    telefono: '',
-    cuit: '',
-  },
-}
-
-function withDemoData(data: AppData): AppData {
-  const needsPatients = data.patients.length === 0
-  const needsDoctors = data.doctors.length === 0
-  if (!needsPatients && !needsDoctors) return data
-  return {
-    ...data,
-    patients: needsPatients ? generateDemoPatients() : data.patients,
-    doctors: needsDoctors ? generateDemoDoctors() : data.doctors,
-  }
-}
-
-function parseStoredData(raw: string): AppData {
-  return withDemoData(parseAppDataJson(raw))
-}
-
-type StorageLoadResult =
-  | { kind: 'ok'; data: AppData }
-  | { kind: 'empty' }
-  | { kind: 'corrupt'; message: string }
-
-async function loadFromStorage(): Promise<StorageLoadResult> {
-  try {
-    let timeoutId: ReturnType<typeof window.setTimeout> | undefined
-    const raw = await Promise.race([
-      loadStorageRaw(),
-      new Promise<string | null>((_, reject) => {
-        timeoutId = window.setTimeout(
-          () =>
-            reject(
-              new Error(
-                'Tardó demasiado en leer la base de datos. Cerrá otros programas que la usen o reiniciá la PC.',
-              ),
-            ),
-          LOAD_READ_TIMEOUT_MS,
-        )
-      }),
-    ])
-    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
-    if (!raw?.trim()) return { kind: 'empty' }
-    try {
-      const data = parseStoredData(raw)
-      return { kind: 'ok', data }
-    } catch (err) {
-      const detail =
-        err instanceof Error ? err.message : 'Error al interpretar el archivo.'
-      return {
-        kind: 'corrupt',
-        message: detail,
-      }
-    }
-  } catch (err) {
-    const detail =
-      err instanceof Error ? err.message : 'No se pudo leer el archivo de datos.'
-    return { kind: 'corrupt', message: detail }
-  }
-}
-
-async function enrichLoadedData(data: AppData): Promise<AppData> {
-  const clave = await migrateSmtpSecretFromSettings(data.settings)
-  return {
-    ...data,
-    settings: { ...data.settings, clave },
-  }
-}
-
-async function save(data: AppData): Promise<void> {
-  await saveStorageRaw(serializeAppData(data))
-}
 
 type Ctx = {
   data: AppData
@@ -233,8 +148,6 @@ const AppStateContext = createContext<Ctx | null>(null)
 
 /** Si la carga tarda más que esto, se muestra pantalla de carga. */
 const SLOW_LOAD_MS = 450
-/** Tiempo máximo para leer el archivo de datos desde disco. */
-const LOAD_READ_TIMEOUT_MS = 25_000
 /** Espera tras el último cambio antes de escribir en disco (evita muchas escrituras seguidas). */
 const SAVE_DEBOUNCE_MS = 400
 /** Copia de resguardo automática cada hora (con la app abierta). */
@@ -271,7 +184,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     const snapshot = dataRef.current
     if (!snapshot) return
     saveChainRef.current = saveChainRef.current
-      .then(() => save(snapshot))
+      .then(() => saveAppData(snapshot))
       .catch((err) => {
         console.error('No se pudieron guardar los datos en disco:', err)
         reportPersistError(
@@ -318,7 +231,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         return
       }
       if (result.kind === 'empty') {
-        setData(await enrichLoadedData(withDemoData({ ...empty })))
+        setData(await enrichLoadedData(withDemoData({ ...EMPTY_APP_DATA })))
         return
       }
       setData(await enrichLoadedData(result.data))
@@ -347,7 +260,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       const snapshot = dataRef.current
       if (!snapshot) return
       saveChainRef.current = saveChainRef.current
-        .then(() => save(snapshot))
+        .then(() => saveAppData(snapshot))
         .catch((err) => {
           console.error('No se pudieron guardar los datos en disco:', err)
           reportPersistError(
@@ -1352,7 +1265,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             cancelLabel: 'Cancelar',
           })
           if (!ok) return
-          const vacia = { ...empty }
+          const vacia = { ...EMPTY_APP_DATA }
           dataRef.current = vacia
           skipAutosaveOnceRef.current = true
           setData(vacia)

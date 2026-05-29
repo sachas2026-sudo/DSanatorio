@@ -1,8 +1,12 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
 import { SystemAlertBanner } from './SystemAlertBanner'
 import { SidebarWeather } from './SidebarWeather'
+import { AppInfoModal } from './AppInfoModal'
 import { useAppState } from '../context/AppStateContext'
 import { useAuth } from '../context/AuthContext'
+import { APP_VERSION } from '../lib/appVersion'
+import { bindAppShortcuts } from '../lib/appShortcuts'
 import { exitApp } from '../lib/exitApp'
 import { APP_DISPLAY_NAME } from '../lib/pdfBranding'
 import logoUrl from '../../Logo.jpeg?url'
@@ -21,6 +25,15 @@ const ALL_LINKS: { to: string; label: string; end?: boolean }[] = [
 export function Layout() {
   const { requestExit, systemAlert, dismissSystemAlert } = useAppState()
   const { session, logout, canAccessPath } = useAuth()
+  const navigate = useNavigate()
+  const [infoOpen, setInfoOpen] = useState(false)
+
+  const openInfo = useCallback(() => setInfoOpen(true), [])
+  const closeInfo = useCallback(() => setInfoOpen(false), [])
+
+  useEffect(() => {
+    return bindAppShortcuts(navigate, canAccessPath, openInfo)
+  }, [navigate, canAccessPath, openInfo])
 
   const links = ALL_LINKS.filter((l) => canAccessPath(l.to))
 
@@ -84,9 +97,20 @@ export function Layout() {
         </nav>
         <div className="sidebar-bottom">
           <SidebarWeather />
+          <button
+            type="button"
+            className="sidebar-version"
+            title="Versión, novedades y atajos (F1)"
+            onClick={openInfo}
+          >
+            v{APP_VERSION} · F1 ayuda
+          </button>
         </div>
       </aside>
       <main className="main-area">
+        {infoOpen && (
+          <AppInfoModal onClose={closeInfo} canAccessPath={canAccessPath} />
+        )}
         {systemAlert && (
           <SystemAlertBanner
             message={systemAlert}

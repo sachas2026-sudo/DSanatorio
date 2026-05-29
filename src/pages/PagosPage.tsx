@@ -11,6 +11,14 @@ import { useAuth } from '../context/AuthContext'
 import { useAppState } from '../context/AppStateContext'
 import { canUsePagosPeriodFilters } from '../lib/auth'
 import {
+  canExportPagosDetallePacientes,
+  canExportPagosGerencia,
+  canSendClinicalEmailExport,
+  canViewDoctorPorcentaje,
+  canViewPagosPendientes,
+  EXPORT_DENIED_MESSAGE,
+} from '../lib/exportPermissions'
+import {
   buildMailtoUrl,
   isGmailAddress,
   isSmtpAuthError,
@@ -47,6 +55,10 @@ import {
   periodBounds,
   type Periodo,
 } from '../lib/periodBounds'
+import {
+  parseMontoInput,
+  PAYMENT_METODOS,
+} from '../lib/paymentInput'
 import type jsPDF from 'jspdf'
 import type { Payment } from '../types'
 import './pages.css'
@@ -55,22 +67,13 @@ type ResumenMedicoScope = 'dia' | 'mes' | 'anio'
 
 const PDF_MEDICO_TODOS = '__todos__'
 
-const PAYMENT_METODOS = [
-  'Efectivo',
-  'Tarjeta',
-  'Transferencia',
-  'Obra social',
-  'Otro',
-] as const
-
-function parseMontoInput(value: string): number {
-  const n = Number(String(value).replace(',', '.').trim())
-  return Number.isFinite(n) ? n : 0
-}
-
 export function PagosPage() {
   const { role } = useAuth()
   const puedeFiltrarMesAnio = canUsePagosPeriodFilters(role)
+  const puedeExportGerencia = canExportPagosGerencia(role)
+  const puedeExportDetalle = canExportPagosDetallePacientes(role)
+  const puedeVerPorcentaje = canViewDoctorPorcentaje(role)
+  const puedeVerPendientes = canViewPagosPendientes(role)
 
   const {
     data,
@@ -488,8 +491,11 @@ export function PagosPage() {
   ) {
     const doctor = doctorById(doctorId)
     if (!doctor) return null
+    const doctorForPdf = puedeVerPorcentaje
+      ? doctor
+      : { ...doctor, porcentaje: undefined }
     return buildDoctorPaymentsPdf({
-      doctor,
+      doctor: doctorForPdf,
       periodLabel,
       payments,
       patientLabel: patientLabelForPdf,
@@ -571,6 +577,10 @@ export function PagosPage() {
   }
 
   async function handleGerenciaExcelExport() {
+    if (!puedeExportGerencia) {
+      void confirm({ message: EXPORT_DENIED_MESSAGE })
+      return
+    }
     if (!pdfMedicoId) return
     try {
       const { start, end } = exportResumenBounds
@@ -643,7 +653,9 @@ export function PagosPage() {
         patientLabel: patientLabelForPdf,
         obraSocialLabel: obraSocialLabelForPdf,
         doctorLabel: doctorLabelForPdf,
-        doctorPorcentaje: (id) => doctorById(id)?.porcentaje,
+        doctorPorcentaje: puedeVerPorcentaje
+          ? (id) => doctorById(id)?.porcentaje
+          : undefined,
         doctorEspecialidad: (id) => doctorById(id)?.especialidad,
         scope: resumenPdfScope,
         fileStamp,
@@ -699,7 +711,9 @@ export function PagosPage() {
       patientLabel: patientLabelForPdf,
       obraSocialLabel: obraSocialLabelForPdf,
       doctorLabel: doctorLabelForPdf,
-      doctorPorcentaje: (id) => doctorById(id)?.porcentaje,
+      doctorPorcentaje: puedeVerPorcentaje
+        ? (id) => doctorById(id)?.porcentaje
+        : undefined,
       doctorEspecialidad: (id) => doctorById(id)?.especialidad,
       scope: resumenPdfScope,
       fileStamp,
@@ -714,6 +728,10 @@ export function PagosPage() {
   }
 
   async function handleResumenMedicoPdfPreview() {
+    if (!puedeExportDetalle) {
+      void confirm({ message: EXPORT_DENIED_MESSAGE })
+      return
+    }
     if (!pdfMedicoId) return
     try {
       await Promise.all([preloadPdfLogo(), preloadPdfHeaderBanner()])
@@ -735,6 +753,10 @@ export function PagosPage() {
   }
 
   async function handleResumenObraSocialPdfPreview() {
+    if (!puedeExportGerencia) {
+      void confirm({ message: EXPORT_DENIED_MESSAGE })
+      return
+    }
     if (!pdfMedicoId) return
     try {
       await Promise.all([preloadPdfLogo(), preloadPdfHeaderBanner()])
@@ -775,6 +797,10 @@ export function PagosPage() {
   }
 
   async function handleEnviarCorreoPagos() {
+    if (!canSendClinicalEmailExport(role)) {
+      void confirm({ message: EXPORT_DENIED_MESSAGE })
+      return
+    }
     const origen = data.settings.email.trim()
     const to = data.settings.emailGerente.trim()
     const clave = data.settings.clave
@@ -918,7 +944,7 @@ export function PagosPage() {
           <h2>Resumen</h2>
         </div>
         <div className="resumen-pdf-pills resumen-pdf-pills--line">
-          {!puedeFiltrarMesAnio && (
+          {!puedeFiltrarMesAnio && puedeExportDetalle && (
             <div className="pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--filter resumen-pdf-pill--medico">
               <span className="resumen-pdf-pill__scope resumen-pdf-pill__scope--static">
                 Médico
@@ -944,6 +970,7 @@ export function PagosPage() {
               </div>
             </div>
           )}
+          {puedeExportDetalle && (
           <div className="pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--filter">
             <span className="resumen-pdf-pill__scope resumen-pdf-pill__scope--static">
               Resumen por Médico
@@ -960,34 +987,39 @@ export function PagosPage() {
               </button>
             </div>
           </div>
-          <div className="pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--filter">
-            <span className="resumen-pdf-pill__scope resumen-pdf-pill__scope--static">
-              Desde
-            </span>
-            <div className="field field--pill pdf-export-pill__field field--pdf-fecha">
-              <input
-                id="excel-desde"
-                type="date"
-                aria-label="Desde"
-                value={excelDesdeRef}
-                onChange={(e) => setExcelDesdeRef(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--filter">
-            <span className="resumen-pdf-pill__scope resumen-pdf-pill__scope--static">
-              Hasta
-            </span>
-            <div className="field field--pill pdf-export-pill__field field--pdf-fecha">
-              <input
-                id="excel-hasta"
-                type="date"
-                aria-label="Hasta"
-                value={excelHastaRef}
-                onChange={(e) => setExcelHastaRef(e.target.value)}
-              />
-            </div>
-          </div>
+          )}
+          {puedeExportGerencia && (
+            <>
+              <div className="pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--filter">
+                <span className="resumen-pdf-pill__scope resumen-pdf-pill__scope--static">
+                  Desde
+                </span>
+                <div className="field field--pill pdf-export-pill__field field--pdf-fecha">
+                  <input
+                    id="excel-desde"
+                    type="date"
+                    aria-label="Desde"
+                    value={excelDesdeRef}
+                    onChange={(e) => setExcelDesdeRef(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--filter">
+                <span className="resumen-pdf-pill__scope resumen-pdf-pill__scope--static">
+                  Hasta
+                </span>
+                <div className="field field--pill pdf-export-pill__field field--pdf-fecha">
+                  <input
+                    id="excel-hasta"
+                    type="date"
+                    aria-label="Hasta"
+                    value={excelHastaRef}
+                    onChange={(e) => setExcelHastaRef(e.target.value)}
+                  />
+                </div>
+              </div>
+            </>
+          )}
           {puedeFiltrarMesAnio && (
             <div
               className={`pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--filter${periodo === 'mes' ? ' is-active' : ''}`}
@@ -1068,6 +1100,7 @@ export function PagosPage() {
               </div>
             </div>
           )}
+          {puedeExportGerencia && (
           <div className="pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--export">
             <span className="resumen-pdf-pill__scope resumen-pdf-pill__scope--static">
               Exportar
@@ -1122,6 +1155,8 @@ export function PagosPage() {
               </button>
             </div>
           </div>
+          )}
+          {puedeVerPendientes && (
           <div className="pdf-export-pill resumen-pdf-pill resumen-pdf-pill--inline resumen-pdf-pill--pendientes">
             <span className="resumen-pdf-pill__scope resumen-pdf-pill__scope--static">
               Pendientes
@@ -1137,6 +1172,7 @@ export function PagosPage() {
               </button>
             </div>
           </div>
+          )}
         </div>
         <div className="resumen-ventana-row">
           <p className="resumen-ventana">
@@ -1153,7 +1189,7 @@ export function PagosPage() {
               <strong>{formatMonto(totalPeriodo)}</strong>
             </p>
           )}
-          {puedeFiltrarMesAnio && pdfMedicoId && (
+          {puedeFiltrarMesAnio && pdfMedicoId && puedeExportGerencia && (
             <p className="resumen-pdf-hint">
               Exportaciones (PDF, Excel, correo) usan{' '}
               <strong>{exportResumenBounds.label}</strong>
