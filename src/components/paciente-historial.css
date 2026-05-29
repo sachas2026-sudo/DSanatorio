@@ -1,0 +1,213 @@
+.paciente-historial {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+.page--pacientes .panel--paciente-historial {
+  margin-top: 0.75rem;
+}
+
+.paciente-historial__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.3rem;
+  scrollbar-gutter: stable;
+}
+
+.paciente-historial__scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.paciente-historial__scroll::-webkit-scrollbar-thumb {
+  background: #c5d4eb;
+  border-radius: 999px;
+}
+
+.paciente-historial__scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.paciente-historial__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  margin-bottom: 0.75rem;
+  flex-shrink: 0;
+}
+
+.paciente-historial__head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e3a5f;
+}
+
+.paciente-historial__meta {
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.paciente-historial__table-head,
+.paciente-historial__orphans h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.paciente-historial__table-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 1.25rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.paciente-historial__list .obra-pill {
+  font-size: 0.74rem;
+  vertical-align: baseline;
+}
+
+.paciente-historial__table-body {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.paciente-historial__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 1.25rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.paciente-historial__cell {
+  min-width: 0;
+}
+
+.paciente-historial__item {
+  display: grid;
+  grid-template-columns: 6.75rem minmax(0, 1fr);
+  gap: 0.5rem;
+  font-size: 0.86rem;
+}
+
+.paciente-historial__item--empty {
+  opacity: 0.65;
+}
+
+.paciente-historial__empty {
+  color: #94a3b8;
+}
+
+.paciente-historial__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.paciente-historial__list li {
+  display: grid;
+  grid-template-columns: 6.75rem minmax(0, 1fr);
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.86rem;
+}
+
+.paciente-historial__date {
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+}
+
+.paciente-historial__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: #1e293b;
+}
+
+.paciente-historial__pago-line {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem;
+}
+
+.paciente-historial__sub {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.paciente-historial__hc {
+  color: #334155;
+}
+
+.paciente-historial__estado {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.paciente-historial__estado--programado {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.paciente-historial__estado--atendido {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.paciente-historial__estado--cancelado {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.paciente-historial__links {
+  margin: 0.65rem 0 0;
+  font-size: 0.85rem;
+}
+
+.paciente-historial__links a {
+  color: #1a4a8a;
+  text-decoration: none;
+}
+
+.paciente-historial__links a:hover {
+  text-decoration: underline;
+}
+
+.paciente-historial__orphans {
+  margin-top: 0.85rem;
+}
+
+@media (max-width: 720px) {
+  .paciente-historial__table-head,
+  .paciente-historial__row {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .paciente-historial__table-head span:nth-child(2) {
+    display: none;
+  }
+
+  .paciente-historial__row {
+    padding: 0.4rem 0;
+  }
+}

@@ -1,0 +1,8 @@
+"$schema" = "schemas/schema.json"
+
+[[permission]]
+identifier = "allow-whatsapp-urls"
+description = "Permite abrir la app de WhatsApp (protocolo whatsapp://)."
+
+[[permission.scope.allow]]
+url = "whatsapp://*"

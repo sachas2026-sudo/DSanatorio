@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Ventana principal: datos vía comandos Rust; sin acceso fs amplio desde el webview.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "process:allow-exit",
+    "opener:default",
+    "allow-whatsapp-urls",
+    "allow-sanatorio-commands"
+  ]
+}

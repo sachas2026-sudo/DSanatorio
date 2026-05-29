@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Local env / secrets
+*.local
+.env
+.env.*
+
+# Resguardos / artefactos locales (no versionar)
+*.zip
+_verify-installer/
+Recuperar Zip.txt
+
+# Assets sueltos en raíz (copias locales; el logo está en src/)
+/Logo.jpeg
+/PdfHeaderPlain.png
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

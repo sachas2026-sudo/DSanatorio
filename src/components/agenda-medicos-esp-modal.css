@@ -1,0 +1,142 @@
+.especialidades-sheet--medicos-esp {
+  width: min(920px, 100%);
+  height: min(92vh, 860px);
+  max-height: min(92vh, 860px);
+}
+
+.especialidades-sheet--medicos-esp .especialidades-sheet__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.medicos-esp-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.85rem;
+  flex-shrink: 0;
+}
+
+.medicos-esp-search {
+  flex: 1;
+  min-width: 12rem;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #c5d4eb;
+  background: #fff;
+  color: var(--heading, #1a2744);
+}
+
+.medicos-esp-search:focus {
+  outline: none;
+  border-color: #5b8def;
+  box-shadow: 0 0 0 2px rgba(91, 141, 239, 0.2);
+}
+
+.medicos-esp-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #6b7c93;
+  white-space: nowrap;
+}
+
+.medicos-esp-table-wrap {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #dde4f0;
+  border-radius: 9px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #b8c9e8 #eef3fb;
+}
+
+.medicos-esp-table-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.medicos-esp-table-wrap::-webkit-scrollbar-thumb {
+  background: #b8c9e8;
+  border-radius: 999px;
+}
+
+.medicos-esp-table-wrap::-webkit-scrollbar-track {
+  background: #eef3fb;
+  border-radius: 999px;
+}
+
+.medicos-esp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.medicos-esp-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.medicos-esp-table th {
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: linear-gradient(180deg, #3d7fd4 0%, #2f6fdb 100%);
+  border-bottom: 1px solid #2563c7;
+}
+
+.medicos-esp-table td {
+  padding: 0.5rem 0.75rem;
+  color: #3d4a5c;
+  border-bottom: 1px solid #e8eef6;
+  vertical-align: top;
+}
+
+.medicos-esp-table tbody tr:nth-child(even) td {
+  background: #f8fbff;
+}
+
+.medicos-esp-table tbody tr:hover td {
+  background: #eef4ff;
+}
+
+.medicos-esp-table__medico {
+  font-weight: 600;
+  color: #1a4a8a;
+  white-space: nowrap;
+}
+
+.medicos-esp-table__dias {
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: #4a5568;
+}
+
+.medicos-esp-table__horario {
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: #4a5568;
+  font-variant-numeric: tabular-nums;
+}
+
+.medicos-esp-table__duracion {
+  font-size: 0.84rem;
+  color: #4a5568;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.medicos-esp-table th:last-child {
+  text-align: center;
+}

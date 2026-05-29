@@ -1,0 +1,23 @@
+[[permission]]
+identifier = "allow-sanatorio-commands"
+description = "Comandos de almacenamiento, respaldo, correo y guardar PDF."
+commands.allow = [
+  "load_app_data",
+  "save_app_data",
+  "get_app_data_file_path",
+  "get_backup_dir",
+  "get_backup_locations",
+  "list_data_backups",
+  "finalize_exit",
+  "rotate_data_backups",
+  "restore_data_backup",
+  "save_daily_data_backup",
+  "list_daily_data_backups",
+  "load_smtp_secret",
+  "save_smtp_secret",
+  "save_pdf_dialog",
+  "save_excel_dialog",
+  "send_email_gmail",
+  "send_agenda_email",
+  "open_agenda_email_draft"
+]
