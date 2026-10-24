@@ -1,35 +1,43 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { Layout } from './components/Layout'
-import { LoadingScreen } from './components/LoadingScreen'
-import { ProtectedRoute } from './components/ProtectedRoute'
+import { Layout } from './shared/components/Layout'
+import { LoadingScreen } from './shared/components/LoadingScreen'
+import { ProtectedRoute } from './shared/components/ProtectedRoute'
 import { preloadPdfHeaderBanner } from './lib/pdfHeaderBanner'
 import { preloadPdfLogo } from './lib/pdfLogo'
 
 const HomePage = lazy(() =>
-  import('./pages/HomePage').then((m) => ({ default: m.HomePage })),
+  import('./shared/components/HomePage').then((m) => ({ default: m.HomePage })),
 )
 const PacientesPage = lazy(() =>
-  import('./pages/PacientesPage').then((m) => ({ default: m.PacientesPage })),
+  import('./modules/pacientes/pages/PacientesPage').then((m) => ({ default: m.PacientesPage })),
 )
 const MedicosPage = lazy(() =>
-  import('./pages/MedicosPage').then((m) => ({ default: m.MedicosPage })),
+  import('./modules/medicos/pages/MedicosPage').then((m) => ({ default: m.MedicosPage })),
 )
 const AgendaPage = lazy(() =>
-  import('./pages/AgendaPage').then((m) => ({ default: m.AgendaPage })),
+  import('./modules/agenda/pages/AgendaPage').then((m) => ({ default: m.AgendaPage })),
 )
 const PagosPage = lazy(() =>
-  import('./pages/PagosPage').then((m) => ({ default: m.PagosPage })),
+  import('./modules/pagos/pages/PagosPage').then((m) => ({ default: m.PagosPage })),
 )
 const PagosCanceladosPage = lazy(() =>
-  import('./pages/PagosCanceladosPage').then((m) => ({
+  import('./modules/pagos/pages/PagosCanceladosPage').then((m) => ({
     default: m.PagosCanceladosPage,
   })),
 )
 const ConfiguracionPage = lazy(() =>
-  import('./pages/ConfiguracionPage').then((m) => ({
+  import('./modules/configuracion/pages/ConfiguracionPage').then((m) => ({
     default: m.ConfiguracionPage,
   })),
+)
+const MantenimientoPage = lazy(() =>
+  import('./modules/configuracion/pages/MantenimientoPage').then((m) => ({
+    default: m.MantenimientoPage,
+  })),
+)
+const AfiliadosPage = lazy(() =>
+  import('./modules/afiliados/pages/AfiliadosPage').then((m) => ({ default: m.AfiliadosPage })),
 )
 
 export default function App() {
@@ -67,6 +75,30 @@ export default function App() {
               element={
                 <ProtectedRoute path="/configuracion">
                   <ConfiguracionPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="backup"
+              element={
+                <ProtectedRoute path="/backup">
+                  <ConfiguracionPage backupOnly />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="mantenimiento"
+              element={
+                <ProtectedRoute path="/mantenimiento">
+                  <MantenimientoPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="afiliados"
+              element={
+                <ProtectedRoute path="/afiliados">
+                  <AfiliadosPage />
                 </ProtectedRoute>
               }
             />

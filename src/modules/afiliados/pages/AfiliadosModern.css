@@ -1,0 +1,842 @@
+/* Afiliados Modern UI — diseño "planes arriba" + tabla con filas expandibles.
+   Reusa los tokens globales de index.css (--card, --border, --muted, --heading…). */
+
+.af-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0;
+  padding: 0.5rem 1rem 1.5rem 0.5rem;
+  box-sizing: border-box;
+  /* La página ocupa el alto disponible y NO scrollea: si el contenido
+     creciera, el scroll vertical aparecería en el borde derecho de la ventana.
+     El scroll queda adentro del contenedor de la tabla (ver .af-card--list). */
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+
+  --af-primary: #0891b2;
+  --af-primary-dark: #0e7490;
+  --af-primary-soft: #e0f4f8;
+  --af-primary-mid: #63adbc;
+  --af-ok: #16a34a;
+  --af-ok-soft: #dcfce7;
+  --af-warn: #d97706;
+  --af-warn-soft: #fef3c7;
+  --af-danger: #dc2626;
+  --af-danger-soft: #fee2e2;
+  --af-radius: 12px;
+}
+
+/* ── Encabezado de página ─────────────────────────────────────────── */
+.af-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.af-head h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--heading);
+  margin-right: auto;
+}
+.af-head__actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* ── Botones ──────────────────────────────────────────────────────── */
+.af-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.af-btn:hover:not(:disabled) {
+  border-color: var(--af-primary);
+  color: var(--af-primary-dark);
+  background: var(--af-primary-soft);
+}
+.af-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.af-btn--primary {
+  background: var(--af-primary);
+  border-color: var(--af-primary);
+  color: #fff;
+}
+.af-btn--primary:hover:not(:disabled) {
+  background: var(--af-primary-dark);
+  border-color: var(--af-primary-dark);
+  color: #fff;
+}
+.af-btn--soft {
+  background: var(--af-primary-soft);
+  border-color: #bfe6ee;
+  color: var(--af-primary-dark);
+}
+.af-btn--danger {
+  background: var(--af-danger-soft);
+  border-color: #f8c9c9;
+  color: var(--af-danger);
+}
+.af-btn--danger:hover:not(:disabled) {
+  background: var(--af-danger);
+  border-color: var(--af-danger);
+  color: #fff;
+}
+.af-btn--icon {
+  padding: 0.35rem;
+  min-width: 30px;
+  justify-content: center;
+}
+.af-btn--icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+/* ── Tarjetas ─────────────────────────────────────────────────────── */
+.af-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--af-radius);
+  box-shadow: var(--card-shadow);
+  padding: 1rem 1.1rem;
+}
+/* La tarjeta de afiliados se estira hasta el borde de abajo de la ventana y
+   deja que la tabla scrollee dentro, para que la página no desborde.
+   min-height: 0 es imprescindible: sin él, el hijo con overflow no puede
+   encogerse por debajo de su contenido. */
+.af-card--list {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0.6rem;
+}
+.af-card--list .af-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Botón "Volver" del drill-down de un afiliado. */
+.af-btn--volver {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.6rem;
+  font-size: 0.78rem;
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+  white-space: nowrap;
+}
+.af-btn--volver:hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+.af-card__title {
+  margin: 0 0 0.85rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* Barra de la tarjeta de Planes: título y contador a la izquierda, acciones
+   a la derecha. `margin-left: auto` empuja el grupo hasta el extremo. */
+.af-card__title--bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.af-card__actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-left: auto;
+}
+/* Los botones se bajan un poco respecto de la línea del título, sin cambiar
+   su tamaño. Se usa translateY y no margin-top a propósito: margin-top
+   crecería la barra de la tarjeta y el título subiría con ella, en vez de
+   bajar sólo los botones. */
+.af-card__actions .af-btn {
+  transform: translateY(0.5rem);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  border-radius: 8px;
+  /* El título de la tarjeta va en mayúsculas; los botones no deben heredarlo. */
+  text-transform: none;
+  letter-spacing: normal;
+}
+.af-card__actions .af-btn--primary {
+  padding: 0.24rem 0.5rem;
+  font-size: 0.74rem;
+}
+.af-count {
+  font-size: 0.76rem;
+  color: var(--muted);
+  background: var(--page-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.12rem 0.55rem;
+  white-space: nowrap;
+}
+
+/* ── Planes (arriba) ──────────────────────────────────────────────── */
+/* Fila: grilla de tarjetas (crece) + filtro pegado a la derecha */
+.af-planes-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.af-planes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 0.7rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.af-plan {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--af-radius);
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbfd 100%);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+}
+.af-plan:hover {
+  border-color: var(--af-primary-mid);
+  box-shadow: 0 4px 14px rgba(8, 145, 178, 0.12);
+}
+.af-plan--active {
+  border-color: var(--af-primary);
+  box-shadow: 0 0 0 2px rgba(8, 145, 178, 0.16);
+}
+/* El botón de filtro del plan y el de la tarjeta comparten caja; la tarjeta
+   es <div> con rol de botón y el filtro es un <button> real. */
+.af-plan__top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.af-plan__name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.af-plan__price {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--af-primary-dark);
+  line-height: 1.2;
+}
+.af-plan__price small {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.af-plan__desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.af-plan__foot {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: auto;
+  padding-top: 0.1rem;
+}
+.af-plan__count {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-right: auto;
+  white-space: nowrap;
+}
+/* Botones de la tarjeta más chicos que los generales, para no estirar la fila */
+.af-plan__foot .af-btn--icon {
+  min-width: 24px;
+  padding: 0.2rem;
+}
+/* Cupo de consultas del plan, en el pie de la tarjeta. Se muestra después
+   del contador de afiliados y antes de los botones. */
+.af-plan__cupo {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--af-primary-dark);
+  background: var(--af-primary-soft);
+  border-radius: 5px;
+  padding: 0.05rem 0.35rem;
+  margin-right: 0.25rem;
+  white-space: nowrap;
+}
+.af-plan--new {
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-height: 66px;
+  border-style: dashed;
+  background: #fbfeff;
+  color: var(--af-primary-dark);
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+.af-plan--new:hover {
+  background: var(--af-primary-soft);
+  color: var(--af-primary-dark);
+}
+.af-plan--inactive {
+  opacity: 0.62;
+}
+
+/* ── Chips de filtro por plan ─────────────────────────────────────── */
+/* margin-left:auto lo empuja al extremo derecho de la fila; align-self:center
+   lo centra contra las tarjetas. */
+.af-filter {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: center;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+.af-filter__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 0.15rem;
+}
+.af-chip {
+  padding: 0.3rem 0.8rem;
+  /* Redondeo leve, no pastilla completa */
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.af-chip:hover {
+  border-color: var(--af-primary-mid);
+  color: var(--af-primary-dark);
+}
+.af-chip--on {
+  background: var(--af-primary);
+  border-color: var(--af-primary);
+  color: #fff;
+}
+.af-chip--on:hover {
+  color: #fff;
+}
+
+/* ── Buscador ─────────────────────────────────────────────────────── */
+.af-search {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+.af-search svg {
+  position: absolute;
+  left: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.af-input,
+.af-select {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+}
+.af-search .af-input {
+  padding-left: 1.95rem;
+}
+.af-input:focus,
+.af-select:focus {
+  outline: none;
+  border-color: var(--af-primary);
+  box-shadow: 0 0 0 2px rgba(8, 145, 178, 0.16);
+}
+
+/* ── Tabla de afiliados ───────────────────────────────────────────── */
+.af-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+/* Con un afiliado desplegado se oculta el resto del listado: sin encabezado
+   y sin las demás filas. Quedan sólo el paciente elegido y su detalle.
+   `display: none` en las filas no rompe la tabla: no hay celdas que alineen
+   porque el detalle usa colSpan y ocupa el ancho completo. */
+.af-table-wrap--solo .af-table thead {
+  display: none;
+}
+.af-table-wrap--solo .af-row:not(.af-row--open) {
+  display: none;
+}
+/* Sin las otras columnas, el ancho mínimo de la tabla sobra y podría
+   disparar un scroll lateral innecesario. */
+.af-table-wrap--solo .af-table {
+  min-width: 0;
+}
+.af-table {
+  width: 100%;
+  border-collapse: collapse;
+  /* Piso bajo a propósito: con 720px la tabla empujaba el ancho de la página y
+     aparecía scroll lateral en ventanas angostas. */
+  min-width: 560px;
+}
+.af-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f4f8fb;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.af-table td {
+  padding: 0.18rem 0.7rem;
+  font-size: 0.86rem;
+  line-height: 1.3;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.af-row {
+  cursor: pointer;
+}
+.af-row:hover {
+  background: #f6fbfd;
+}
+.af-row--open {
+  background: var(--af-primary-soft);
+}
+.af-row--open:hover {
+  background: var(--af-primary-soft);
+}
+.af-row__name {
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.25;
+}
+.af-row__sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.25;
+}
+/* Paciente: nombre y DNI en un único renglón */
+.af-cell-paciente {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.af-cell-paciente .af-row__name {
+  /* min-width:0 + flex-shrink permiten que el nombre se encoja y se recorte con
+     "...". Sin esto, nowrap + min-width:auto impide encoger, la tabla impone su
+     ancho mínimo y aparece el scroll lateral. */
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.af-cell-paciente .af-row__sub {
+  flex: none;
+  white-space: nowrap;
+  /* Nombre y DNI van en negrita: la regla general de .af-row__sub los dejaba
+     en peso normal (igual que la columna "Desde"), y ahí sí se lee mejor tenue. */
+  font-weight: 700;
+}
+.af-caret {
+  width: 15px;
+  height: 15px;
+  transition: transform 0.15s;
+  color: var(--muted);
+  flex: none;
+}
+.af-caret--open {
+  transform: rotate(90deg);
+  color: var(--af-primary-dark);
+}
+.af-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Píldoras de estado */
+.af-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.af-badge--ok {
+  background: var(--af-ok-soft);
+  color: var(--af-ok);
+}
+.af-badge--warn {
+  background: var(--af-warn-soft);
+  color: var(--af-warn);
+}
+.af-badge--muted {
+  background: var(--page-bg);
+  color: var(--muted);
+}
+.af-badge--info {
+  background: var(--af-primary-soft);
+  color: var(--af-primary-dark);
+}
+/* La pastilla del plan ("Plan Plus · $60.000/mes") es un dato, no un estado:
+   con radio leve se lee como etiqueta y no como píldora de estado. */
+.af-badge--plan {
+  border-radius: 6px;
+  padding: 0.12rem 0.55rem;
+}
+
+/* ── Detalle expandido (cuotas) ───────────────────────────────────── */
+.af-detail {
+  background: #fbfdfe;
+  border-bottom: 2px solid var(--af-primary-mid);
+}
+.af-detail__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 0.85rem 0.5rem;
+}
+.af-detail__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--heading);
+}
+.af-year {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.15rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.af-year__btn {
+  border: 0;
+  background: var(--af-primary);
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.af-year__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.af-year__val {
+  min-width: 4ch;
+  text-align: center;
+  font-weight: 700;
+  color: var(--heading);
+}
+.af-cuotas {
+  width: 100%;
+  border-collapse: collapse;
+  /* Sin piso de ancho: la tabla se ajusta al contenido y sólo scrollea si de
+     verdad no entra (antes min-width:820px forzaba scroll lateral siempre). */
+  min-width: 0;
+  table-layout: auto;
+}
+.af-cuotas th {
+  background: transparent;
+  padding: 0.25rem 0.3rem;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.af-cuotas td {
+  padding: 0.2rem 0.3rem;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  border-bottom: 1px solid #eef3f7;
+}
+.af-cuotas .af-num input {
+  width: 62px;
+  padding: 0.1rem 0.25rem;
+  text-align: right;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+.af-cuotas .af-num input:hover {
+  border-color: var(--border);
+  background: var(--card);
+}
+.af-cuotas .af-num input:focus {
+  outline: none;
+  border-color: var(--af-primary);
+  background: var(--card);
+  box-shadow: 0 0 0 2px rgba(8, 145, 178, 0.16);
+}
+.af-cuotas select {
+  padding: 0.08rem 0.18rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.73rem;
+  line-height: 1.2;
+  max-width: 76px;
+}
+/* Input de fecha compacto: sólo el calendario nativo, sin texto duplicado */
+.af-date-input {
+  width: 100px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.06rem 0.2rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.73rem;
+  line-height: 1.2;
+}
+.af-date-input:hover {
+  border-color: var(--border);
+  background: var(--card);
+}
+.af-date-input:focus {
+  outline: none;
+  border-color: var(--af-primary);
+  background: var(--card);
+  box-shadow: 0 0 0 2px rgba(8, 145, 178, 0.16);
+}
+/* Botones de acción de la fila: más pegados */
+.af-cuotas .af-btn {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.73rem;
+}
+.af-cuotas .af-btn--icon {
+  padding: 0.15rem 0.3rem;
+  min-width: 26px;
+}
+.af-date-btn input[type='date']:hover {
+  border-color: var(--border);
+  background: var(--card);
+}
+
+.af-resumen {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0.7rem 0 0.9rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  background: #e8f4f8;
+  border: 1px solid #cfe6ee;
+}
+.af-resumen span {
+  font-size: 0.86rem;
+  color: var(--text);
+}
+.af-resumen .af-resumen__total {
+  margin-left: auto;
+  font-weight: 700;
+}
+/* Consultas consumidas contra el cupo. Va después del contador de pagadas,
+   antes de los totales, para que se lea como parte del resumen del mes. */
+.af-resumen .af-resumen__usos {
+  color: var(--af-primary-dark);
+  background: #fff;
+  border: 1px solid #cfe6ee;
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+/* ── Columna "Total Atención" ───────────────────────────────────────
+   Muestra `usadas/cupo` del mes en curso. Con el cupo lleno la pastilla
+   pasa a ámbar: es la señal de que la cobertura por plan ya no está
+   disponible, que es lo mismo que ve el usuario en la Agenda. */
+.af-atencion {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  padding: 0.08rem 0.45rem;
+  border-radius: 6px;
+  background: #eef2f7;
+  color: #334155;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.af-atencion strong {
+  font-weight: 700;
+  color: var(--heading);
+}
+/* Plan sin cupo: se muestra el número solo, sin la parte "/ cupo". */
+.af-atencion--libre {
+  background: transparent;
+  color: #6b7c93;
+  font-weight: 600;
+}
+.af-atencion--lleno {
+  background: #fef3c7;
+  color: #b45309;
+}
+.af-atencion--lleno strong {
+  color: #b45309;
+}
+
+/* ── Modal ────────────────────────────────────────────────────────── */
+.af-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(26, 39, 68, 0.42);
+}
+.af-modal {
+  width: 100%;
+  max-width: 430px;
+  background: var(--card);
+  border-radius: var(--af-radius);
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 48px rgba(20, 40, 80, 0.24);
+  padding: 1.1rem 1.2rem;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.af-modal__title {
+  margin: 0 0 0.9rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--heading);
+}
+.af-field {
+  margin-bottom: 0.7rem;
+}
+.af-field label {
+  display: block;
+  margin-bottom: 0.22rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.af-msg {
+  margin: 0 0 0.6rem;
+  font-size: 0.8rem;
+  color: var(--af-danger);
+  font-weight: 600;
+}
+.af-modal__foot {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.af-modal__foot .af-btn:last-child {
+  margin-left: auto;
+}
+
+/* ── Estados vacíos ───────────────────────────────────────────────── */
+.af-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.af-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .af-head h1 {
+    font-size: 1.15rem;
+  }
+  .af-planes {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .af-resumen .af-resumen__total {
+    margin-left: 0;
+  }
+}

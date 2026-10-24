@@ -15,6 +15,7 @@ import { es } from 'date-fns/locale'
 import { PdfPreviewModal } from '../components/PdfPreviewModal'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAppState } from '../context/AppStateContext'
+import { useAuth } from '../context/AuthContext'
 import { preloadPdfHeaderBanner } from '../lib/pdfHeaderBanner'
 import {
   buildPagosCanceladosPdf,
@@ -44,8 +45,10 @@ function formatMoney(n: number): string {
 }
 
 export function PagosCanceladosPage() {
-  const { data, patientById, doctorById } = useAppState()
+  const { data, patientById, doctorById, clearPagosCancelados } = useAppState()
+  const { role } = useAuth()
   const { confirm } = useConfirm()
+  const esAdmi = role === 'admin'
   const [periodo, setPeriodo] = useState<Periodo>('mes')
   const [refDia, setRefDia] = useState(() => format(new Date(), 'yyyy-MM-dd'))
   const [refMes, setRefMes] = useState(() => format(new Date(), 'yyyy-MM'))
@@ -185,6 +188,20 @@ export function PagosCanceladosPage() {
     })
   }
 
+  async function handleEliminarTodos() {
+    const total = data.pagosCancelados.length
+    if (total === 0) return
+    const ok = await confirm({
+      title: 'Eliminar todos los pagos cancelados',
+      message: `Se eliminarán permanentemente ${total} registro${total === 1 ? '' : 's'} de pagos cancelados.\n\nNo quedará ningún historial en esta sección y no se podrá recuperar la información.\n\n¿Desea continuar?`,
+      confirmLabel: 'Eliminar todo',
+      cancelLabel: 'Cancelar',
+    })
+    if (!ok) return
+    clearPagosCancelados()
+    setSelectedId(null)
+  }
+
   function renderDetalle(r: PagoCancelado) {
     const pac = patientById(r.payment.patientId)
     const doc = doctorById(r.payment.doctorId)
@@ -303,6 +320,24 @@ export function PagosCanceladosPage() {
               <span className="value">{stats.porMotivo.otros}</span>
             </div>
           </div>
+          {esAdmi && (
+            <button
+              type="button"
+              className="summary-card summary-card--eliminar-todos"
+              disabled={data.pagosCancelados.length === 0}
+              title={
+                data.pagosCancelados.length === 0
+                  ? 'No hay registros para eliminar'
+                  : 'Eliminar todos los pagos cancelados de la base'
+              }
+              onClick={() => void handleEliminarTodos()}
+            >
+              <span className="summary-card__headline">
+                <span className="label">Eliminar todos</span>
+                <span className="value value--eliminar-hint">Sin recuperar</span>
+              </span>
+            </button>
+          )}
         </div>
 
         <div className="resumen-pdf-pills resumen-pdf-pills--line pagos-cancelados-filtros">

@@ -1,0 +1,6 @@
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
+import { drawPdfHeader, pdfBodyStartYAfterHeader } from './pdfHeader'
+import { formatMonto } from './formatMonto'
+export type CanceladoPdfRow={cancelado:string;pago:string;paciente:string;medico:string;monto:number;motivo:string;metodo:string}
+export function buildTurnosCanceladosPdf(mes:string,rows:CanceladoPdfRow[],paciente:number,medico:number,otros:number){const d=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}),w=d.internal.pageSize.getWidth(),m=12,total=rows.reduce((s,r)=>s+r.monto,0);let y=pdfBodyStartYAfterHeader(drawPdfHeader(d,w,'Turnos Cancelados',{secondLine:mes}),5);d.setFontSize(9);d.setTextColor(86,106,132);d.text(`Cancelados: ${rows.length}  ·  Monto total: ${formatMonto(total)}  ·  Paciente: ${paciente}  ·  Médico: ${medico}  ·  Otros: ${otros}`,w/2,y,{align:'center'});y+=7;autoTable(d,{startY:y,head:[['Cancelado','Fecha pago','Paciente','Médico','Monto','Motivo','Método']],body:rows.map(r=>[r.cancelado,r.pago,r.paciente,r.medico,formatMonto(r.monto),r.motivo,r.metodo]),margin:{left:m,right:m},styles:{fontSize:7,cellPadding:1.5,lineColor:[223,230,238],lineWidth:.15},headStyles:{fillColor:[76,129,149],textColor:255,fontStyle:'bold'},columnStyles:{4:{halign:'right'},6:{halign:'right'}}});return d}

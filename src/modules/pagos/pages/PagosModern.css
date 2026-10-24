@@ -1,0 +1,1192 @@
+/* Pagos Modern UI - Modelo Pagos de Consultas */
+
+.page--pagos-modern {
+  display: flex;
+  flex-direction: column;
+  max-width: 1440px;
+  margin: 0;
+  margin-right: auto;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem 0.85rem 1rem 0;
+  background: transparent;
+  gap: 0.5rem;
+  color: #1e293b;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+/* Header */
+.pagos-modern-header {
+  box-sizing: border-box;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  height: 60px;
+  min-height: 60px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(15, 40, 80, 0.04);
+  padding: 0 1rem;
+}
+
+.pagos-modern-header__left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pagos-modern-header__title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #0f2942;
+  margin: 0;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.pagos-modern-header__subtitle {
+  font-size: 0.78rem;
+  color: #64748b;
+  margin: 0;
+  font-weight: 400;
+}
+
+/* Date Range Pill / Popover */
+.pagos-date-pill-container {
+  position: relative;
+}
+
+.pagos-date-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.7rem;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #1e293b;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s ease;
+}
+
+.pagos-date-pill-btn:hover {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+}
+
+.pagos-date-pill-btn.is-active {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12);
+}
+
+.pagos-date-pill-btn__icon {
+  color: #0284c7;
+  display: flex;
+  align-items: center;
+}
+
+.pagos-date-pill-btn__chevron {
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  transition: transform 0.2s;
+}
+
+.pagos-date-pill-btn.is-active .pagos-date-pill-btn__chevron {
+  transform: rotate(180deg);
+}
+
+.pagos-date-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+  padding: 0.85rem;
+  width: 290px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.pagos-date-popover__presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.pagos-date-popover__preset-btn {
+  padding: 0.35rem 0.5rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+}
+
+.pagos-date-popover__preset-btn:hover {
+  background: #e0f2fe;
+  color: #0284c7;
+  border-color: #bae6fd;
+}
+
+.pagos-date-popover__inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 0.65rem;
+}
+
+.pagos-date-popover__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.pagos-date-popover__field label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.pagos-date-popover__field input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: #1e293b;
+  outline: none;
+}
+
+.pagos-date-popover__field input:focus {
+  border-color: #0284c7;
+}
+
+.pagos-date-popover__apply-btn {
+  margin-top: 0.25rem;
+  padding: 0.45rem 0.7rem;
+  background: #0284c7;
+  color: #ffffff !important;
+  border: 1px solid #0284c7;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.pagos-date-popover__apply-btn:hover {
+  background: #0369a1;
+  border-color: #0369a1;
+}
+
+/* KPI / Metrics Grid */
+.pagos-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.35rem;
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .pagos-metrics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .pagos-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 580px) {
+  .pagos-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pagos-metric-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.38rem 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+  min-width: 0;
+}
+
+.pagos-metric-card:hover {
+  background: #edf2f7;
+  border-color: #cbd5e1;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.pagos-metric-card--chart {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.42rem 0.65rem;
+  gap: 0.2rem;
+}
+
+.pagos-metric-card--motivos {
+  padding: 0.42rem 0.65rem;
+}
+
+.pagos-metric-card--motivos .pagos-chart-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pagos-metric-card--motivos .pagos-chart-legend-count {
+  font-size: 0.64rem;
+  padding: 0.08rem 0.35rem;
+}
+
+.pagos-metric-card--motivos .pagos-chart-svg {
+  height: 38px;
+}
+
+.pagos-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.pagos-chart-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pagos-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.64rem;
+  color: #64748b;
+}
+
+.pagos-chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.pagos-chart-legend-count {
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: #4f46e5;
+  background: #eef2ff;
+  padding: 0.08rem 0.3rem;
+  border-radius: 4px;
+}
+
+.pagos-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  font-size: 0.68rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.pagos-chart-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.pagos-chart-svg {
+  width: 100%;
+  height: 36px;
+  display: block;
+}
+
+.pagos-metric-icon-wrap {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #e0f2fe;
+  color: #0284c7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pagos-metric-icon-wrap svg {
+  width: 18px;
+  height: 18px;
+}
+
+.pagos-metric-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.02rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.pagos-metric-label {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.pagos-metric-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.pagos-metric-trend {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.64rem;
+  margin-top: 0.02rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pagos-metric-trend-pct {
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pagos-metric-trend-pct.is-up {
+  color: #16a34a;
+}
+
+.pagos-metric-trend-pct.is-down {
+  color: #dc2626;
+}
+
+.pagos-metric-trend-period {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.pagos-metric-card--entregar {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+}
+
+.pagos-metric-card--entregar:hover {
+  background: #bae6fd;
+  border-color: #38bdf8;
+}
+
+.pagos-metric-card--entregar .pagos-metric-icon-wrap {
+  background: #ffffff;
+  color: #0284c7;
+  box-shadow: 0 1px 2px rgba(2, 132, 199, 0.12);
+}
+
+.pagos-metric-card--entregar .pagos-metric-label {
+  color: #0369a1;
+  font-weight: 600;
+}
+
+.pagos-metric-card--entregar .pagos-metric-value {
+  color: #0c4a6e;
+}
+
+.pagos-metric-card--deuda {
+  align-items: flex-start;
+}
+
+.pagos-deuda-medicos {
+  display: flex;
+  flex-direction: column;
+  gap: 0.04rem;
+  margin-top: 0.08rem;
+  min-width: 0;
+  color: #64748b;
+  font-size: 0.56rem;
+  line-height: 1.15;
+}
+
+.pagos-deuda-medicos span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pagos-deuda-medicos--compact {
+  font-size: 0.48rem;
+  line-height: 1.05;
+}
+
+/* Filter Bar */
+.pagos-filters-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  width: 100%;
+}
+
+.pagos-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 155px;
+  padding: 0.25rem 0.3rem;
+  border-radius: 8px;
+  transition: background-color 0.18s ease;
+}
+
+.pagos-filter-group:hover {
+  background: #e2e8f0;
+}
+
+.pagos-filter-group label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.pagos-filter-select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+.pagos-filter-select-wrap:hover {
+  border-color: #cbd5e1;
+  background: #edf2f7;
+}
+
+.pagos-filter-select-wrap:focus-within {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.12);
+}
+
+.pagos-filter-icon {
+  position: absolute;
+  left: 10px;
+  color: #64748b;
+  pointer-events: none;
+}
+
+.pagos-filter-chevron {
+  position: absolute;
+  right: 10px;
+  color: #64748b;
+  pointer-events: none;
+}
+
+.pagos-filter-select-wrap select {
+  width: 100%;
+  height: 34px;
+  border: none;
+  background: transparent;
+  padding: 0 28px 0 32px;
+  font-size: 0.8rem;
+  color: #334155;
+  font-weight: 500;
+  appearance: none;
+  cursor: pointer;
+  border-radius: 8px;
+  outline: none;
+}
+
+.pagos-filter-select-btn {
+  width: 100%;
+  height: 34px;
+  border: none;
+  background: transparent;
+  padding: 0 12px 0 32px;
+  font-size: 0.8rem;
+  color: #334155;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+  outline: none;
+  white-space: nowrap;
+}
+
+.pagos-filter-select-btn:disabled {
+  color: #94a3b8;
+  cursor: progress;
+}
+
+.pagos-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  height: 36px;
+  padding: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.pagos-filter-actions:hover {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.12);
+}
+
+.pagos-btn-export {
+  height: 36px;
+  padding: 0 0.8rem;
+  background: transparent;
+  color: #334155 !important;
+  border: none;
+  border-radius: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.pagos-btn-export:hover {
+  background: #f8fafc;
+  color: #0f172a !important;
+  box-shadow: none;
+}
+
+.pagos-btn-history {
+  height: 34px;
+  padding: 0 0.8rem;
+  background: #f1f5f9;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.pagos-btn-history:hover {
+  background: #e2e8f0;
+  border-color: #0284c7;
+  color: #0f172a !important;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+.pagos-btn-filter {
+  height: 34px;
+  padding: 0 0.85rem;
+  background: #f1f5f9;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pagos-btn-filter:hover {
+  background: #e2e8f0;
+  border-color: #0284c7;
+  color: #0f172a !important;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+.pagos-btn-action {
+  height: 34px;
+  padding: 0 0.8rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.pagos-btn-action--primary {
+  background: #0284c7;
+  color: #ffffff !important;
+  border: 1px solid #0284c7;
+}
+
+.pagos-btn-action--primary:hover {
+  background: #0369a1;
+  border-color: #0369a1;
+}
+
+.pagos-btn-action--secondary {
+  background: #f1f5f9;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1;
+}
+
+.pagos-btn-action--secondary:hover {
+  background: #e2e8f0;
+  border-color: #0284c7;
+  color: #0f172a !important;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+.pagos-btn-action--warning {
+  background: #fef3c7;
+  color: #b45309 !important;
+  border: 1px solid #fde68a;
+}
+
+.pagos-btn-action--warning:hover {
+  background: #fde68a;
+  border-color: #0284c7;
+  color: #92400e !important;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+/* Compact Form Card */
+.pagos-form-card {
+  background: #ffffff;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  padding: 0.45rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.08);
+  width: 100%;
+}
+
+.pagos-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  line-height: 1;
+}
+
+.pagos-form-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #0369a1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+
+.pagos-form-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.85rem;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.pagos-form-close-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.pagos-compact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.pagos-form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.pagos-form-row--actions {
+  align-items: flex-end;
+}
+
+.pagos-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 110px;
+}
+
+.pagos-form-field label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.pagos-form-field input,
+.pagos-form-field select {
+  height: 29px;
+  padding: 0 0.45rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  color: #1e293b;
+  background: #ffffff;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pagos-form-field input:focus,
+.pagos-form-field select:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+.pagos-form-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.pagos-btn-form-submit {
+  height: 29px;
+  padding: 0 0.85rem;
+  background: #0284c7;
+  color: #ffffff !important;
+  border: 1px solid #0284c7;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.pagos-btn-form-submit:hover {
+  background: #0369a1;
+  border-color: #0369a1;
+}
+
+.pagos-btn-form-cancel {
+  height: 29px;
+  padding: 0 0.65rem;
+  background: #ffffff;
+  color: #64748b !important;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.pagos-btn-form-cancel:hover {
+  background: #f8fafc;
+  color: #0f172a !important;
+}
+
+/* Table Section */
+.pagos-table-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+.pagos-table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.pagos-table-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.pagos-table-nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pagos-btn-subnav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  height: 34px;
+  padding: 0 0.85rem;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  /* Sólo colores: con `all` el hover interpolaba también el padding del
+     botón seleccionado y se veía un salto al pasar el mouse. */
+  transition: background-color 0.18s ease, border-color 0.18s ease,
+    color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.pagos-btn-subnav:hover {
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0284c7;
+}
+
+.pagos-btn-subnav--active {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff !important;
+}
+
+.pagos-btn-subnav--active:hover {
+  background: #0369a1;
+  border-color: #0369a1;
+  color: #ffffff !important;
+}
+
+/* Grupo "Obras Sociales" + sus dos vistas: los tres comparten el mismo azul.
+   La vista elegida se distingue con un anillo blanco interior, no con otro
+   color, para que el grupo no quede mezclando azules y grises. */
+.pagos-btn-subnav--ingroup {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff !important;
+}
+/*
+  El hover se ata al contenedor para ganarle en especificidad a la regla base
+  `.pagos-btn-subnav:hover`, que pinta el fondo casi blanco. Con sólo una clase
+  más empataban en especificidad y dependía del orden del archivo.
+  Así estos botones nunca se ven blancos al pasar el mouse: sólo se oscurecen.
+*/
+.pagos-table-nav-buttons .pagos-btn-subnav--ingroup:hover,
+.pagos-table-nav-buttons .pagos-btn-subnav--selected:hover {
+  background: #0369a1;
+  border-color: #0369a1;
+  color: #ffffff !important;
+}
+.pagos-btn-subnav--selected {
+  /* La vista activa NO se marca con un anillo: el inset se veía como una
+     segunda línea y quedaba el mismo defecto de antes. Se marca con el
+     tilde que agrega el JSX, que no altera el borde ni el padding. */
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff !important;
+}
+/* Tilde de la vista activa. Va antes del texto, con el mismo gap que los
+   otros íconos del grupo. */
+.pagos-btn-subnav__check {
+  display: inline-flex;
+  flex: none;
+  margin-left: -0.2rem;
+}
+.pagos-btn-subnav--selected:focus-visible {
+  outline: 2px solid #0369a1;
+  outline-offset: 2px;
+}
+
+/* Filtro corto de obra social, junto a los botones de vista */
+.pagos-os-shortfilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.3rem;
+  padding: 0 0.5rem;
+  height: 28px;
+  border: 1px solid #d5dbe5;
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+}
+.pagos-os-shortfilter__label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7c93;
+  white-space: nowrap;
+}
+.pagos-os-shortfilter__select {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0 0.2rem;
+  max-width: 170px;
+  cursor: pointer;
+}
+.pagos-os-shortfilter__select:focus {
+  outline: none;
+}
+.pagos-os-shortfilter:focus-within {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.16);
+}
+
+.pagos-table-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1e293b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+
+.pagos-table-count-badge {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 0.15rem 0.5rem;
+  border-radius: 5px;
+}
+
+.pagos-table-wrap {
+  width: 100%;
+  max-height: clamp(280px, calc(100vh - 360px), 650px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.pagos-table-wrap::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.pagos-table-wrap::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 4px;
+}
+
+.pagos-table-wrap::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.pagos-table-wrap--listado {
+  /* 13 filas a la vista; el resto baja con scroll interno.
+     416px = thead 25 + 13 filas × 28 + tfoot 27.
+     El min() contra el clamp de la caja base es lo que evita que la página
+     entera scrollee: en una ventana baja el alto fijo de 416px desbordaba y
+     obligaba a scrollear la ventana general. */
+  max-height: min(416px, clamp(280px, calc(100vh - 360px), 650px));
+}
+
+/* Fijamos el alto de fila para que ese 416px siga siendo 13 filas aunque se
+   apague "mostrarAccionesEnListaPagos": los botones de 14px + 0.15rem de
+   padding miden 18.8px y sin ellos la celda sólo llega a 14px, o sea que las
+   filas pasarían de 28 a ~23 y entrarían ~16 filas en el mismo espacio. */
+.pagos-table-wrap--listado tbody tr {
+  height: 28px;
+}
+
+.pagos-table-wrap--obras {
+  /* 20 filas a la vista; el resto baja con scroll interno.
+     612px = thead 25 + 20 filas × 28 + tfoot 27.
+     Mismo min() que el listado: en ventana de 1020px entran las 20 filas, y en
+     una más chica la caja se achica para que la página no scrollee. */
+  max-height: min(612px, clamp(280px, calc(100vh - 360px), 650px));
+}
+
+/* Mismo alto de fila que el listado de médicos: las celdas son de una línea
+   (white-space: nowrap) y los botones de acción miden lo mismo. */
+.pagos-table-wrap--obras tbody tr {
+  height: 28px;
+}
+
+.pagos-table-wrap--pendientes {
+  /* Sólo 5 filas a la vista; el resto baja con scroll interno.
+     165px = thead 25 + 5 filas × 22.7 + tfoot 27, según el padding y el
+     line-height de .pagos-table. Sin min-height: si quedaran menos de 5
+     pendientes la caja se ajusta al contenido en vez de dejar un hueco. */
+  max-height: 165px;
+  overflow-x: hidden;
+}
+
+.pagos-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.73rem;
+  text-align: left;
+  line-height: 1.2;
+}
+
+.pagos-table th {
+  background: #f1f5f9;
+  color: #475569;
+  font-weight: 700;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid #cbd5e1;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.pagos-table td {
+  padding: 0.24rem 0.45rem;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.pagos-table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.pagos-table tbody tr:hover {
+  background: #e2e8f0;
+}
+
+.pagos-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.pagos-table tfoot td {
+  background: #f1f5f9;
+  font-weight: 700;
+  font-size: 0.73rem;
+  color: #1e293b;
+  border-top: 2px solid #cbd5e1;
+  padding: 0.35rem 0.45rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+.pagos-table .text-right {
+  text-align: right;
+}
+
+.pagos-table .text-center {
+  text-align: center;
+}
+
+.pagos-table__pendiente-cobro {
+  color: #b91c1c;
+  font-weight: 600;
+  font-style: italic;
+}
+
+/* "% Cuidar" negativo cuya deuda a Cuidar (Sanatorio) ya fue cancelada por
+   el médico: verde + cursor de ayuda, y el tooltip enseña fecha y monto del
+   pago con el que saldó. */
+.pagos-table td.pagos-table__cuidar-pagado {
+  color: #15803d;
+  font-weight: 700;
+}
+
+.pagos-table-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  justify-content: flex-end;
+}
+
+.pagos-table-action-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.15rem;
+  border-radius: 4px;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.pagos-table-action-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.pagos-table-action-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.pagos-table-action-btn--delete:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}

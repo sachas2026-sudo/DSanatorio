@@ -92,7 +92,7 @@ describe('appBackup (navegador)', () => {
     )
   })
 
-  it('saveDailyDataBackup elimina copias más viejas que 30 días', async () => {
+  it('saveDailyDataBackup elimina copias más viejas que 60 días', async () => {
     localStorage.setItem(`${STORAGE_KEY}-diario-2026-01-01`, '{"old":true}')
     await saveDailyDataBackup('{"today":true}', '2026-05-29')
     const list = await listDailyDataBackups()
@@ -112,10 +112,10 @@ describe('appBackup (Tauri)', () => {
     expect(invokeMock).toHaveBeenCalledWith('finalize_exit', { json: '{"x":1}' })
   })
 
-  it('restoreDataBackup invoca restore_data_backup', async () => {
+  it('restoreDataBackup invoca read_data_backup sin escribir', async () => {
     invokeMock.mockResolvedValueOnce('{"restored":true}')
     await expect(restoreDataBackup(1)).resolves.toBe('{"restored":true}')
-    expect(invokeMock).toHaveBeenCalledWith('restore_data_backup', { slot: 1 })
+    expect(invokeMock).toHaveBeenCalledWith('read_data_backup', { slot: 1 })
   })
 
   it('saveDailyDataBackup invoca save_daily_data_backup', async () => {

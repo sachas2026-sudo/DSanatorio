@@ -1,6 +1,10 @@
 import { addDays, isWithinInterval, subMonths } from 'date-fns'
 import { periodBounds } from './periodBounds'
 import { safeParseISO } from './safeParseDate'
+import {
+  MOTIVO_CONSULTA_DEFAULT,
+  motivosConsultaDelTurno,
+} from './motivoConsulta'
 import type { AppData, Appointment } from '../types'
 
 export type HomeStats = {
@@ -11,6 +15,7 @@ export type HomeStats = {
   mesAnteriorLabel: string
   turnosMes: { programado: number; atendido: number; cancelado: number }
   topObrasSociales: { nombre: string; cantidad: number }[]
+  motivosConsultaMes: { nombre: string; cantidad: number }[]
 }
 
 export type HomeAlertTurno = {
@@ -53,6 +58,31 @@ function countTurnosMes(
   return out
 }
 
+export function rankMotivosConsultaMes(
+  appointments: Appointment[],
+  motivosCustom: string[],
+  ref = new Date(),
+): { nombre: string; cantidad: number }[] {
+  const { start, end } = periodBounds('mes', ref)
+  const counts = new Map<string, number>()
+  for (const appointment of appointments) {
+    if (appointment.estado === 'cancelado') continue
+    const when = safeParseISO(appointment.fechaHora)
+    if (!when || !isWithinInterval(when, { start, end })) continue
+    const motivos = motivosConsultaDelTurno(
+      appointment.notas ?? '',
+      appointment.motivoConsulta2,
+      motivosCustom,
+    )
+    for (const motivo of motivos.length ? motivos : [MOTIVO_CONSULTA_DEFAULT]) {
+      counts.set(motivo, (counts.get(motivo) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()]
+    .map(([nombre, cantidad]) => ({ nombre, cantidad }))
+    .sort((a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre, 'es'))
+}
+
 export function computeHomeStats(data: AppData, ref = new Date()): HomeStats {
   const hoy = periodBounds('dia', ref)
   const mes = periodBounds('mes', ref)
@@ -67,7 +97,7 @@ export function computeHomeStats(data: AppData, ref = new Date()): HomeStats {
   const topObrasSociales = [...topMap.entries()]
     .map(([nombre, cantidad]) => ({ nombre, cantidad }))
     .sort((a, b) => b.cantidad - a.cantidad)
-    .slice(0, 5)
+    .slice(0, 6)
 
   return {
     ingresosHoy: sumPaymentsInInterval(data.payments, hoy.start, hoy.end),
@@ -81,6 +111,11 @@ export function computeHomeStats(data: AppData, ref = new Date()): HomeStats {
     mesAnteriorLabel: mesAnt.label,
     turnosMes: countTurnosMes(data.appointments, mes.start, mes.end),
     topObrasSociales,
+    motivosConsultaMes: rankMotivosConsultaMes(
+      data.appointments,
+      data.motivosConsultaCustom,
+      ref,
+    ),
   }
 }
 
@@ -94,38 +129,46 @@ export function computeHomeAlerts(
 ): HomeAlerts {
   const manana = addDays(ref, 1)
   const mananaBounds = periodBounds('dia', manana)
-  const paidCitaIds = new Set(
-    data.payments.map((p) => p.citaId).filter((id): id is string => Boolean(id)),
-  )
+  const paidCitaIds = new Set<string>()
+  for (const p of data.payments) {
+    if (p.citaId) paidCitaIds.add(p.citaId)
+  }
 
   const turnosManana: HomeAlertTurno[] = []
   const atendidosSinPago: HomeAlertTurno[] = []
 
-  const sortedAppts = [...data.appointments].sort((a, b) => {
-    const ta = safeParseISO(a.fechaHora)?.getTime() ?? 0
-    const tb = safeParseISO(b.fechaHora)?.getTime() ?? 0
-    return ta - tb
-  })
-
-  for (const c of sortedAppts) {
+  for (const c of data.appointments) {
     const t = safeParseISO(c.fechaHora)
     if (!t) continue
+
+    const isManana =
+      c.estado !== 'cancelado' &&
+      isWithinInterval(t, { start: mananaBounds.start, end: mananaBounds.end })
+    const isAtendidoSinPago =
+      c.estado === 'atendido' && !paidCitaIds.has(c.id)
+
+    if (!isManana && !isAtendidoSinPago) continue
+
     const row: HomeAlertTurno = {
       id: c.id,
       fechaHora: c.fechaHora,
       patientLabel: labels.patientLabel(c.patientId),
       doctorLabel: labels.doctorLabel(c.doctorId),
     }
-    if (
-      c.estado !== 'cancelado' &&
-      isWithinInterval(t, { start: mananaBounds.start, end: mananaBounds.end })
-    ) {
-      turnosManana.push(row)
-    }
-    if (c.estado === 'atendido' && !paidCitaIds.has(c.id)) {
-      atendidosSinPago.push(row)
-    }
+    if (isManana) turnosManana.push(row)
+    if (isAtendidoSinPago) atendidosSinPago.push(row)
   }
+
+  turnosManana.sort(
+    (a, b) =>
+      (safeParseISO(a.fechaHora)?.getTime() ?? 0) -
+      (safeParseISO(b.fechaHora)?.getTime() ?? 0),
+  )
+  atendidosSinPago.sort(
+    (a, b) =>
+      (safeParseISO(a.fechaHora)?.getTime() ?? 0) -
+      (safeParseISO(b.fechaHora)?.getTime() ?? 0),
+  )
 
   return { turnosManana, atendidosSinPago }
 }

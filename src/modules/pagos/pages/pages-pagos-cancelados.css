@@ -1,0 +1,196 @@
+/* —— Pagos Cancelados —— */
+.page--pagos-cancelados table.data th {
+  color: #000;
+}
+
+.page--pagos-cancelados .summary-cards--pagos-cancelados {
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+}
+
+.page--pagos-cancelados
+  .summary-cards--pagos-cancelados
+  .summary-card__headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.page--pagos-cancelados
+  .summary-cards--pagos-cancelados
+  .summary-card__headline
+  .label {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.page--pagos-cancelados
+  .summary-cards--pagos-cancelados
+  .summary-card__headline
+  .value {
+  flex: 1 1 100%;
+  margin: 0;
+  line-height: 1;
+}
+
+.page--pagos-cancelados .summary-card .value.value--money {
+  font-size: 1.1rem;
+}
+
+.page--pagos-cancelados .summary-card--motivo-paciente {
+  border-color: #c5daf5;
+  background: linear-gradient(180deg, #fff 0%, #f0f6ff 100%);
+}
+
+.page--pagos-cancelados .summary-card--motivo-doctor {
+  border-color: #d4e8dc;
+  background: linear-gradient(180deg, #fff 0%, #f2faf5 100%);
+}
+
+.page--pagos-cancelados .summary-card--motivo-otros {
+  border-color: #e8dfd0;
+  background: linear-gradient(180deg, #fff 0%, #faf6f0 100%);
+}
+
+.page--pagos-cancelados .summary-card--motivo-otros,
+.page--pagos-cancelados .summary-card--eliminar-todos {
+  height: 4.35rem;
+  box-sizing: border-box;
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos {
+  width: 100%;
+  border-color: #e8b4b4;
+  background: linear-gradient(180deg, #fff 0%, #fff0f0 100%);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos:hover:not(:disabled) {
+  border-color: #d49090;
+  background: linear-gradient(180deg, #fff 0%, #ffe8e8 100%);
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos .label {
+  color: #9b1c1c;
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos .value--eliminar-hint {
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #b42318;
+}
+
+.pagos-cancelados-filtros {
+  margin-top: 0.25rem;
+  margin-bottom: 0;
+}
+
+.page--pagos-cancelados .pagos-cancelados-filtros .resumen-pdf-pill--actions {
+  flex: 0 0 auto;
+  width: 8.75rem;
+  min-width: 8.75rem;
+  max-width: 8.75rem;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.4rem;
+}
+
+.page--pagos-cancelados .pagos-cancelados-filtros .resumen-pdf-pill--actions .btn-pdf {
+  padding: 0.95rem 0.5rem;
+  font-size: 0.8rem;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  justify-content: center;
+}
+
+.panel--pago-cancelado-detalle {
+  margin-bottom: 1rem;
+}
+
+.pago-cancelado-detalle {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.85rem 1.25rem;
+  margin: 0;
+}
+
+.pago-cancelado-detalle dt {
+  margin: 0 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.pago-cancelado-detalle dd {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--heading);
+  font-weight: 500;
+}
+
+.pago-cancelado-detalle__full {
+  grid-column: 1 / -1;
+}
+
+.motivo-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.motivo-badge--paciente {
+  background: #e8f1ff;
+  color: #1a4d8c;
+}
+
+.motivo-badge--doctor {
+  background: #e6f5ec;
+  color: #1a5c38;
+}
+
+.motivo-badge--otros {
+  background: #f5efe6;
+  color: #6b4a1a;
+}
+
+.page--pagos-cancelados table.data tbody tr {
+  cursor: pointer;
+}
+
+.page--pagos-cancelados table.data tbody tr:hover {
+  background: #f4f8ff;
+}
+
+.page--pagos-cancelados table.data tbody tr.data-row--selected {
+  background: #e8f1ff;
+  box-shadow: inset 3px 0 0 var(--accent, #3b7ddd);
+}
+
+.page--pagos-cancelados table.data tbody tr.data-row--selected:hover {
+  background: #dfeaff;
+}

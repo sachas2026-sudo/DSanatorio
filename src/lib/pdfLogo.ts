@@ -1,4 +1,4 @@
-import logoAssetUrl from '../../Logo.jpeg?url'
+import logoAssetUrl from '../assets/Logo.jpeg?url'
 
 export type PdfLogoCache = {
   dataUrl: string

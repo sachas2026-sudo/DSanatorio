@@ -1,0 +1,333 @@
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(26, 39, 68, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(20, 40, 80, 0.2);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal--medicos-dia {
+  max-width: 1100px;
+  width: 95vw;
+}
+
+.modal__header-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.modal--modern {
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  border: none;
+}
+
+.modal-overlay--modern {
+  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal__header--modern {
+  background: linear-gradient(135deg, #4b92a1 0%, #357380 100%);
+  color: white;
+  border-radius: 16px 16px 0 0;
+  padding: 1.5rem 2rem;
+}
+
+.modal__header-icon {
+  font-size: 2.5rem;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.modal__header-text {
+  flex: 1;
+}
+
+.modal__header--modern .modal__title {
+  color: white;
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.medicos-dia__date-header {
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.modal__close--modern {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  transition: all 0.3s ease;
+}
+
+.modal__close--modern:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: rotate(90deg);
+}
+
+.modal__body--modern {
+  padding: 2rem;
+  background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
+}
+
+.medicos-dia__empty--modern {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.medicos-dia__empty-illustration {
+  margin-bottom: 1.5rem;
+}
+
+.medicos-dia__empty-circle {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4b92a1 0%, #357380 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 30px rgba(75, 146, 161, 0.3);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.medicos-dia__empty-emoji {
+  font-size: 3rem;
+}
+
+.medicos-dia__empty-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 0.5rem 0;
+}
+
+.medicos-dia__empty-text {
+  font-size: 1rem;
+  color: #666;
+  margin: 0;
+}
+
+.medicos-dia__grid--modern {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.medicos-dia__card--modern {
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  padding: 0.75rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  position: relative;
+  overflow: hidden;
+}
+
+.medicos-dia__card--modern::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #4b92a1 0%, #357380 100%);
+}
+
+.medicos-dia__card--modern:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(75, 146, 161, 0.2);
+  border-color: #4b92a1;
+}
+
+.medicos-dia__card-header--modern {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.medicos-dia__avatar--modern {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4b92a1 0%, #357380 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(75, 146, 161, 0.3);
+  border: 2px solid white;
+}
+
+.medicos-dia__info--modern {
+  flex: 1;
+  min-width: 0;
+}
+
+.medicos-dia__nombre--modern {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #333;
+  margin-bottom: 0.2rem;
+  line-height: 1.1;
+}
+
+.medicos-dia__especialidad--modern {
+  font-size: 0.7rem;
+  color: #333;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.medicos-dia__card-body--modern {
+  padding-top: 0.4rem;
+  border-top: 1px solid #f0f0f0;
+}
+
+.medicos-dia__contact--modern {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+  padding: 0.3rem;
+  background: #f8f9fa;
+  border-radius: 5px;
+}
+
+.medicos-dia__contact-icon {
+  font-size: 0.9rem;
+}
+
+.medicos-dia__contact-value {
+  font-size: 0.75rem;
+  color: #333;
+  font-weight: 500;
+}
+
+.medicos-dia__obras--modern {
+  margin-top: 0.3rem;
+}
+
+.medicos-dia__obras-icon {
+  font-size: 0.9rem;
+  margin-bottom: 0.2rem;
+}
+
+.medicos-dia__obras-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.medicos-dia__obra--modern {
+  font-size: 0.65rem;
+  background: linear-gradient(135deg, #4b92a1 0%, #357380 100%);
+  color: white;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-weight: 600;
+  box-shadow: 0 2px 4px rgba(75, 146, 161, 0.2);
+}
+
+.modal__footer--modern {
+  background: #f8f9fa;
+  border-top: 1px solid #e9ecef;
+  border-radius: 0 0 16px 16px;
+  padding: 1.25rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.medicos-dia__summary--modern {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  color: #333;
+  font-weight: 600;
+}
+
+.medicos-dia__summary-icon {
+  font-size: 1.3rem;
+  animation: sparkle 1.5s ease-in-out infinite;
+}
+
+@keyframes sparkle {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+.btn--modern {
+  background: linear-gradient(135deg, #4b92a1 0%, #357380 100%);
+  border: none;
+  color: white;
+  padding: 0.75rem 2rem;
+  font-weight: 600;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(75, 146, 161, 0.3);
+  transition: all 0.3s ease;
+}
+
+.btn--modern:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(75, 146, 161, 0.4);
+}
+
+.btn--modern:active {
+  transform: translateY(0);
+}

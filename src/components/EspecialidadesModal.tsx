@@ -1,6 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { PdfPreviewModal } from './PdfPreviewModal'
 import { IconActionButton, IconEdit, IconTrash } from './icons'
-import { ESPECIALIDADES_COMUNES } from '../lib/especialidades'
+import { useAuth } from '../context/AuthContext'
+import { useConfirm } from '../context/ConfirmContext'
+import { ESPECIALIDADES_COMUNES, isEspecialidadComun, normalizeEspecialidad } from '../lib/especialidades'
+import {
+  buildEspecialidadesCatalogPdf,
+  especialidadesCatalogPdfPreviewTitle,
+} from '../lib/especialidadesCatalogPdf'
+import { pdfBlobUrl, savePdfFile } from '../lib/doctorPaymentsPdf'
+import { canExportMedicosListado, EXPORT_DENIED_MESSAGE } from '../lib/exportPermissions'
+import { preloadPdfHeaderBanner } from '../lib/pdfHeaderBanner'
+import type jsPDF from 'jspdf'
 import './especialidades-modal.css'
 
 type Props = {
@@ -18,12 +29,30 @@ export function EspecialidadesModal({
   onRemove,
   onRename,
 }: Props) {
+  const { role } = useAuth()
+  const { confirm } = useConfirm()
+  const puedeExportPdf = canExportMedicosListado(role)
   const [nueva, setNueva] = useState('')
   const [msg, setMsg] = useState<{ type: 'err' | 'ok'; text: string } | null>(
     null,
   )
   const [editing, setEditing] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const pdfDocRef = useRef<jsPDF | null>(null)
+  const [pdfPreview, setPdfPreview] = useState<{
+    url: string
+    filename: string
+    title: string
+  } | null>(null)
+
+  const catalogCount = useMemo(() => {
+    let count = ESPECIALIDADES_COMUNES.length
+    for (const raw of custom) {
+      const nombre = normalizeEspecialidad(raw)
+      if (nombre && !isEspecialidadComun(nombre)) count += 1
+    }
+    return count
+  }, [custom])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -32,6 +61,55 @@ export function EspecialidadesModal({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  useEffect(() => {
+    return () => {
+      if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url)
+    }
+  }, [pdfPreview?.url])
+
+  function closePdfPreview() {
+    if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url)
+    setPdfPreview(null)
+    pdfDocRef.current = null
+  }
+
+  async function handlePdfPreview() {
+    if (!puedeExportPdf) {
+      void confirm({ message: EXPORT_DENIED_MESSAGE })
+      return
+    }
+    try {
+      await preloadPdfHeaderBanner()
+      const built = buildEspecialidadesCatalogPdf(custom)
+      pdfDocRef.current = built.doc
+      if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url)
+      setPdfPreview({
+        url: pdfBlobUrl(built.doc),
+        filename: built.filename,
+        title: especialidadesCatalogPdfPreviewTitle(catalogCount),
+      })
+    } catch (err) {
+      console.error(err)
+      void confirm({
+        message: 'No se pudo generar el PDF. Probá de nuevo.',
+      })
+    }
+  }
+
+  async function handlePdfDownload() {
+    const doc = pdfDocRef.current
+    const filename = pdfPreview?.filename
+    if (!doc || !filename) return
+    try {
+      await savePdfFile(doc, filename)
+    } catch (err) {
+      console.error(err)
+      void confirm({
+        message: 'No se pudo guardar el PDF.',
+      })
+    }
+  }
 
   function handleAdd(e: React.FormEvent) {
     e.preventDefault()
@@ -191,11 +269,34 @@ export function EspecialidadesModal({
         </div>
 
         <footer className="especialidades-sheet__foot">
+          {puedeExportPdf && (
+            <button
+              type="button"
+              className="btn btn-pdf"
+              title="Vista previa del listado de especialidades"
+              onClick={() => void handlePdfPreview()}
+            >
+              <span className="btn-pdf__icon" aria-hidden>
+                PDF
+              </span>
+              Vista Previa
+            </button>
+          )}
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cerrar
           </button>
         </footer>
       </div>
+
+      {pdfPreview && (
+        <PdfPreviewModal
+          title={pdfPreview.title}
+          url={pdfPreview.url}
+          filename={pdfPreview.filename}
+          onClose={closePdfPreview}
+          onDownload={() => void handlePdfDownload()}
+        />
+      )}
     </div>
   )
 }

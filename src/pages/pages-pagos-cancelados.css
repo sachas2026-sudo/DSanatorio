@@ -56,6 +56,45 @@
   background: linear-gradient(180deg, #fff 0%, #faf6f0 100%);
 }
 
+.page--pagos-cancelados .summary-card--motivo-otros,
+.page--pagos-cancelados .summary-card--eliminar-todos {
+  height: 4.35rem;
+  box-sizing: border-box;
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos {
+  width: 100%;
+  border-color: #e8b4b4;
+  background: linear-gradient(180deg, #fff 0%, #fff0f0 100%);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos:hover:not(:disabled) {
+  border-color: #d49090;
+  background: linear-gradient(180deg, #fff 0%, #ffe8e8 100%);
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos .label {
+  color: #9b1c1c;
+}
+
+.page--pagos-cancelados .summary-card--eliminar-todos .value--eliminar-hint {
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #b42318;
+}
+
 .pagos-cancelados-filtros {
   margin-top: 0.25rem;
   margin-bottom: 0;

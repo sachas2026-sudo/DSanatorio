@@ -1,0 +1,90 @@
+.reprog-wa-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  z-index: 80;
+}
+
+.reprog-wa-sheet {
+  width: min(28rem, 100%);
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 24px 75px rgba(2, 6, 23, 0.28);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.reprog-wa__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 1rem;
+  padding: 1rem 1.1rem 0.75rem;
+  border-bottom: 1px solid #eef2f7;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 75%);
+}
+
+.reprog-wa__head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.reprog-wa__sub {
+  margin: 0.15rem 0 0;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.reprog-wa__close {
+  border: 1px solid #d8dee8;
+  background: #fff;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 10px;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.reprog-wa__body {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.reprog-wa__label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.reprog-wa__input {
+  width: 100%;
+  border: 1px solid #d8dee8;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.95rem;
+}
+
+.reprog-wa__hint {
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.reprog-wa__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.85rem 1.1rem 1rem;
+  border-top: 1px solid #eef2f7;
+}

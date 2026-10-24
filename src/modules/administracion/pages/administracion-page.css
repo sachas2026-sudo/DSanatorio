@@ -1,0 +1,568 @@
+.page--administracion { max-width:none; padding-top:.55rem; }
+.admin-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.6rem; }.admin-header h1 { margin:0; color:#174f92; font-size:1.6rem; letter-spacing:.02em; text-transform:uppercase; }.admin-header__actions { display:flex; align-items:center; gap:.55rem; }.admin-header__button { min-height:2.75rem; padding:.55rem 1.05rem; border-color:#4f8294; color:#174f92; font-weight:700; background:#d7eaf0; box-shadow:inset 0 1px rgba(255,255,255,.65); }.admin-header__button:hover { background:#c9e1e8; border-color:#376d80; }.admin-header__button b { display:inline-grid; place-items:center; min-width:1.25rem; height:1.25rem; margin-left:.28rem; border-radius:999px; color:#fff; background:#eda900; font-size:.7rem; }.admin-whatsapp { display:grid; place-items:center; width:2.75rem; height:2.75rem; padding:0; border:1px solid #10936d; border-radius:8px; color:#087754; background:#e6f8ef; font-size:1.4rem; font-weight:700; }
+.admin-filtros { display:grid; grid-template-columns:1.45fr 1.15fr .9fr .75fr .55fr .55fr .65fr; align-items:end; gap:.65rem .8rem; margin-bottom:.55rem; padding:.62rem .9rem .5rem; border:1px solid #e3eaf4; border-radius:14px; background:#fff; box-shadow:none; }.admin-filtros .field { min-width:0; margin:0; }.admin-filtros__buscar { min-width:180px; }.admin-filtros .field span { display:block; margin-bottom:.25rem; color:#51708f; font-size:.7rem; font-weight:800; letter-spacing:.05em; text-transform:uppercase; }.admin-filtros input,.admin-filtros select { width:100%; min-height:2rem; padding:.28rem .72rem; border:1px solid #c8d9ef; border-radius:8px; color:#395274; background:#fff; font:inherit; font-size:.88rem; }.admin-periodo__buttons { display:flex; gap:.35rem; }.admin-periodo__buttons button { min-height:2rem; padding:.25rem .76rem; border:1px solid #174f92; border-radius:8px; color:#174f92; background:#edf3fb; font:inherit; font-size:.88rem; }.admin-periodo__buttons button.is-active { background:#d7f2df; border-color:#174f92; }.admin-mes input { font-size:.8rem; }.admin-filtros input,.admin-filtros select,.admin-periodo__buttons button { cursor:pointer; }
+.admin-summary { grid-template-columns:repeat(6,minmax(130px,1fr)); gap:.35rem; margin:0 0 1rem; }.admin-summary .summary-card { display:flex; align-items:center; gap:.5rem; min-height:2.75rem; padding:.35rem .65rem; border-color:#a6cddd; border-radius:9px; background:#dff0f5; }.admin-summary .summary-card::before { content:'○'; display:grid; place-items:center; width:1.7rem; height:1.7rem; flex:0 0 auto; border:1px solid #83aec4; border-radius:50%; color:#356b86; background:#fff; font-size:1.05rem; }.admin-summary .label { display:block; font-size:.57rem; font-weight:800; color:#39708f; }.admin-summary .value { display:block; margin-top:.06rem; color:#1f5d7f; white-space:nowrap; font-size:.96rem; }.summary-card--admin-medico { background:#dff0f5 !important; border-color:#a6cddd !important; }
+.admin-panel { margin-bottom:1rem; padding:0; overflow:hidden; }.admin-panel__head { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem 1rem .8rem; }.admin-panel__head h2 { margin:0; color:var(--heading); font-size:1.05rem; }.admin-panel__head p { margin:.2rem 0 0; color:var(--muted); font-size:.86rem; }.admin-table-scroll { max-height:min(45vh,520px); }.admin-table { min-width:1100px; }.admin-table td,.admin-table th { padding:.56rem .68rem; white-space:nowrap; }.admin-table tfoot th { background:#e5f2f7; color:var(--heading); }.admin-money { text-align:right !important; font-variant-numeric:tabular-nums; }.admin-money--doctor { color:#12663e; font-weight:700; }.admin-empty { padding:1.3rem !important; color:var(--muted); text-align:center !important; }.admin-resumen-medicos { padding-bottom:1rem; }.admin-medicos-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(235px,1fr)); gap:.75rem; padding:0 1rem; }.admin-medico-card { display:flex; flex-direction:column; gap:.24rem; padding:.85rem; border:1px solid var(--border); border-radius:8px; background:#fbfdff; }.admin-medico-card h3 { margin:0; color:var(--heading); font-size:.92rem; }.admin-medico-card p,.admin-medico-card small { margin:0; color:var(--muted); font-size:.78rem; }.admin-medico-card strong { margin-top:.35rem; color:#12663e; font-size:1.18rem; }.admin-medico-card span { color:#356649; font-size:.75rem; font-weight:600; }
+@media (max-width:1250px){.admin-filtros{grid-template-columns:repeat(4,minmax(160px,1fr))}.admin-summary{grid-template-columns:repeat(3,minmax(160px,1fr))}.admin-header{align-items:flex-start;flex-direction:column}}@media (max-width:680px){.admin-filtros,.admin-summary{grid-template-columns:1fr}.admin-header__actions{flex-wrap:wrap}.admin-header__button{font-size:.8rem}}
+.admin-gastos-resumen { overflow:hidden; margin-top:.5rem; border:1px solid #9fc2cf; border-radius:10px; background:#fff; }
+.admin-gastos-resumen__row { display:flex; align-items:center; justify-content:space-between; min-height:1.55rem; padding:.12rem .78rem; border-bottom:1px solid #c6d9e0; color:#46657a; font-size:.78rem; }
+.admin-gastos-resumen__row strong { color:#315b71; font-variant-numeric:tabular-nums; }
+.admin-gastos-resumen__row--total { background:#d8ecf2; border-bottom-color:#8eb3c2; font-weight:700; }
+.admin-gastos-resumen__row--subtotal { background:#e3f1f4; }
+.admin-gastos-resumen__row--general { border:0; color:#fff; background:#4f8294; font-weight:800; }
+.admin-gastos-resumen__row--general strong { color:#fff; }.admin-modal-backdrop{position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:2rem;background:rgba(31,56,83,.48);backdrop-filter:blur(3px)}.admin-gastos-modal{display:flex;flex-direction:column;width:min(850px,100%);max-height:min(88vh,640px);overflow:hidden;border-radius:12px;background:#fff;box-shadow:0 20px 50px rgba(20,43,72,.35)}.admin-gastos-modal>header,.admin-gastos-modal>footer{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.2rem}.admin-gastos-modal>header{border-bottom:1px solid #d7e1ed}.admin-gastos-modal h2{margin:0;color:#133f75;font-size:1.05rem}.admin-gastos-modal header p{margin:.35rem 0 0;color:#647b99;font-size:.78rem}.admin-gastos-modal>header>button{width:2rem;height:2rem;border:1px solid #d5e1ef;border-radius:7px;color:#52708f;background:#fff;font-size:1.3rem}.admin-gastos-modal__body{min-height:0;overflow:auto;padding:.9rem 1.2rem}.admin-gastos-modal__add{display:flex;gap:.5rem;margin-bottom:.85rem}.admin-gastos-modal__add input{flex:1;min-height:2.1rem;padding:.35rem .65rem;border:1px solid #d2dfef;border-radius:7px;text-align:right}.admin-gastos-modal__add .btn,.admin-gastos-modal footer .btn:last-child{color:#fff;background:#1d5598;border-color:#1d5598}.admin-gastos-modal__table{overflow:auto;border:1px solid #d8e2ef;border-radius:8px}.admin-gastos-modal table{width:100%;min-width:720px;border-collapse:collapse}.admin-gastos-modal th,.admin-gastos-modal td{padding:.48rem .55rem;border-bottom:1px solid #e0e8f1;text-align:left;font-size:.8rem}.admin-gastos-modal th{color:#273c60;background:#f0f5fb;font-weight:700}.admin-gastos-modal td:first-child{font-weight:700;color:#253653}.admin-gastos-modal td:nth-child(2){color:#60708a}.admin-gastos-modal td input{width:100%;box-sizing:border-box;min-height:2rem;padding:.25rem .45rem;border:1px solid #d3dfef;border-radius:6px;text-align:right}.admin-gastos-modal__delete{border:0;color:#d93636;background:transparent;font-size:1.25rem}.admin-gastos-modal footer{justify-content:flex-end;border-top:1px solid #d7e1ed}@media(max-width:700px){.admin-modal-backdrop{padding:.5rem}.admin-gastos-modal>header,.admin-gastos-modal>footer{padding:.8rem}.admin-gastos-modal__body{padding:.7rem}}.admin-obras-modal{display:flex;flex-direction:column;width:min(1280px,100%);height:min(86vh,850px);overflow:hidden;border-radius:12px;background:#fff;box-shadow:0 20px 50px rgba(20,43,72,.35)}.admin-obras-modal>header{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1rem;border-bottom:1px solid #d7e1ed}.admin-obras-modal h2{margin:0;color:#174f92;font-size:1.15rem}.admin-obras-modal>header button{width:2rem;height:2rem;border:1px solid #d5e1ef;border-radius:7px;background:#fff;color:#52708f;font-size:1.3rem}.admin-obras-modal__filters{display:flex;align-items:end;flex-wrap:wrap;gap:.65rem;padding:.75rem 1rem;background:#f7faff}.admin-obras-modal__filters label{display:flex;flex-direction:column;gap:.25rem;color:#51708f;font-size:.68rem;font-weight:800;text-transform:uppercase}.admin-obras-modal__filters select,.admin-obras-modal__filters input{min-width:145px;min-height:2.1rem;padding:.3rem .6rem;border:1px solid #c8d9ef;border-radius:8px;color:#395274;background:#fff;font:inherit;font-size:.84rem}.admin-obras-modal__filters .btn{min-height:2.1rem;border-color:#174f92;color:#174f92;background:#eaf0f7}.admin-obras-modal__table{flex:1;overflow:auto;margin:.45rem 1rem 1rem;border:1px solid #9fc2cf;border-radius:10px}.admin-obras-modal table{width:100%;min-width:900px;border-collapse:collapse}.admin-obras-modal th,.admin-obras-modal td{padding:.35rem .5rem;border-bottom:1px solid #d9e4ec;font-size:.76rem;text-align:left;white-space:nowrap}.admin-obras-modal thead th{color:#fff;background:#4f8294;font-weight:700}.admin-obras-modal td:nth-child(n+4),.admin-obras-modal th:nth-child(n+4){text-align:right}.admin-obras-modal tfoot th{color:#315b71;background:#d8ecf2;font-weight:800}.admin-obras-config{display:flex;flex-direction:column;width:min(420px,100%);max-height:min(88vh,680px);overflow:hidden;border-radius:12px;background:#fff;box-shadow:0 20px 50px rgba(20,43,72,.35)}.admin-obras-config>header,.admin-obras-config>footer{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.2rem}.admin-obras-config>header{align-items:flex-start;border-bottom:1px solid #d7e1ed}.admin-obras-config h2{margin:0;color:#174f92;font-size:1.1rem}.admin-obras-config header p{max-width:310px;margin:.3rem 0 0;color:#617a9b;font-size:.78rem;line-height:1.45}.admin-obras-config>header button{width:2rem;height:2rem;border:1px solid #d5e1ef;border-radius:7px;background:#fff;color:#52708f;font-size:1.3rem}.admin-obras-config__body{overflow:auto;padding:.85rem 1.2rem}.admin-obras-config table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #d7e1ed;border-radius:8px;overflow:hidden}.admin-obras-config th,.admin-obras-config td{padding:.42rem .55rem;border-bottom:1px solid #e1e8f1;font-size:.82rem}.admin-obras-config th{color:#273c60;background:#f0f5fb;text-align:left}.admin-obras-config td:first-child{font-weight:700;color:#2b3c5b}.admin-obras-config td:nth-child(2){display:flex;align-items:center;gap:.25rem;color:#526b89}.admin-obras-config input{width:74px;min-height:2rem;padding:.25rem .45rem;border:1px solid #d2dfef;border-radius:6px;text-align:right;font:inherit}.admin-obras-config td:nth-child(3) input{width:44px}.admin-obras-config__delete{width:2rem;height:2rem;border:1px solid #d9e4ef;border-radius:7px;color:#e12e2e;background:#fff;font-size:1rem}.admin-obras-config footer{justify-content:flex-end;border-top:1px solid #d7e1ed}.admin-obras-config footer .btn:last-child{color:#fff;background:#1d5598;border-color:#1d5598}.admin-cancelados-modal{display:flex;flex-direction:column;width:min(1300px,100%);height:min(84vh,720px);overflow:hidden;border-radius:12px;background:#f4f8fc;box-shadow:0 20px 50px rgba(20,43,72,.35)}.admin-cancelados-modal>header{display:flex;align-items:flex-start;justify-content:space-between;padding:1rem 1.2rem}.admin-cancelados-modal h2{margin:0;color:#174f92;font-size:1.25rem}.admin-cancelados-modal header p{margin:.35rem 0 0;color:#617a9b;font-size:.8rem}.admin-cancelados-modal>header button{width:2rem;height:2rem;border:1px solid #d5e1ef;border-radius:7px;background:#fff;color:#52708f;font-size:1.3rem}.admin-cancelados-modal__body{flex:1;overflow:auto;margin:0 1.2rem 1.2rem;padding:1rem;border:1px solid #c8dbea;border-radius:12px;background:#fff}.admin-cancelados-modal h3{margin:0 0 .7rem;color:#172f55;font-size:.95rem}.admin-cancelados-summary{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:.6rem}.admin-cancelados-summary div{padding:.7rem;border:1px solid #b9d4e3;border-radius:9px;background:#dceef5}.admin-cancelados-summary span{display:block;color:#3b7192;font-size:.65rem;font-weight:800;text-transform:uppercase}.admin-cancelados-summary b{display:block;margin-top:.3rem;color:#124f8a;font-size:1.05rem}.admin-cancelados-filters{display:flex;align-items:end;flex-wrap:wrap;gap:.5rem;margin:1rem 0}.admin-cancelados-filters button{min-height:2.1rem;padding:.35rem .7rem;border:1px solid #bdd4e7;border-radius:8px;color:#26567d;background:#fff;font:inherit;font-size:.78rem}.admin-cancelados-filters button.is-active{border-color:#174f92;background:#d8eff7;font-weight:700}.admin-cancelados-filters label{display:flex;flex-direction:column;gap:.18rem;color:#51708f;font-size:.65rem;font-weight:800;text-transform:uppercase}.admin-cancelados-filters input{min-height:2.1rem;border:1px solid #c8d9ef;border-radius:8px;padding:.25rem .5rem;font:inherit}.admin-cancelados-filters span{color:#174f92;font-size:.8rem;font-weight:700}.admin-cancelados-table{overflow:auto;border:1px solid #b3ccdb;border-radius:9px}.admin-cancelados-table table{width:100%;min-width:950px;border-collapse:collapse}.admin-cancelados-table th,.admin-cancelados-table td{padding:.5rem .65rem;border-bottom:1px solid #dbe6ef;text-align:left;font-size:.76rem}.admin-cancelados-table th{color:#fff;background:#54899e}.admin-cancelados-table td:nth-child(5){text-align:right}
+.admin-egresos-modal{display:flex;flex-direction:column;width:min(1720px,calc(100vw - 1rem));height:min(90vh,920px);overflow:hidden;border-radius:12px;background:#edf4fa;box-shadow:0 20px 50px rgba(20,43,72,.35)}.admin-egresos-modal>header{display:flex;align-items:center;justify-content:space-between;padding:.7rem 1.1rem}.admin-egresos-modal h2{margin:0;color:#365e76;font-size:1.25rem}.admin-egresos-modal>header button{width:2rem;height:2rem;border:1px solid #c8dcea;border-radius:7px;color:#52708f;background:#fff;font-size:1.3rem}.admin-egresos-body{flex:1;overflow:auto;padding:.6rem .8rem 1rem}.admin-egresos-top{display:flex;justify-content:flex-end;gap:.5rem;margin:-2.8rem 0 .85rem}.admin-egresos-top select,.admin-egresos-top input{min-height:2.1rem;padding:.3rem .65rem;border:1px solid #c6d9e8;border-radius:8px;background:#fff;font:inherit;font-size:.82rem}.admin-egresos-top input{min-width:220px}.admin-egresos-metrics{display:grid;grid-template-columns:repeat(6,minmax(140px,1fr));gap:.5rem;margin-bottom:.75rem}.admin-egresos-metrics div{min-height:3.4rem;padding:.6rem .75rem;border:1px solid #b8d5e2;border-radius:9px;background:#d9ebf2}.admin-egresos-metrics span{display:block;color:#39708f;font-size:.65rem;font-weight:800;text-transform:uppercase}.admin-egresos-metrics b{display:block;margin-top:.3rem;color:#315b71;font-size:1rem}.admin-egresos-panels{display:grid;grid-template-columns:3fr 2fr;gap:.75rem;margin-bottom:.75rem}.admin-egresos-panels article{min-height:8.8rem;overflow:hidden;border:1px solid #bfd6e5;border-radius:10px;background:#fff}.admin-egresos-panels h3,.admin-egresos-carga h3{display:flex;align-items:center;justify-content:space-between;margin:0;padding:.65rem .85rem;color:#fff;background:#54899e;font-size:.82rem;text-transform:uppercase}.admin-egresos-panels p{margin:3rem 1rem;color:#597a99;text-align:center;font-size:.9rem}.admin-egresos-panels article+article p{margin:1rem;text-align:left}.admin-egresos-carga{min-height:calc(100% - 16rem);overflow:hidden;border:1px solid #bfd6e5;border-radius:10px;background:#fff}.admin-egresos-carga h3 .btn{padding:.25rem .75rem;border-color:#174f92;color:#174f92;background:#fff}.admin-egresos-form{display:grid;grid-template-columns:90px 118px 62px minmax(115px,1fr) minmax(125px,1fr) 170px 85px 80px 82px;gap:.45rem;padding:.75rem}.admin-egresos-form input,.admin-egresos-form select{min-width:0;min-height:2.1rem;padding:.28rem .5rem;border:1px solid #bfd5e5;border-radius:8px;background:#fff;font:inherit;font-size:.78rem}.admin-egresos-form .btn{color:#fff;background:#54899e;border-color:#54899e;font-weight:700}.admin-egresos-table{overflow:auto;margin:0 .75rem .75rem;border:1px solid #b3ccdb;border-radius:9px}.admin-egresos-table table{width:100%;border-collapse:collapse}.admin-egresos-table th,.admin-egresos-table td{padding:.5rem .65rem;border-bottom:1px solid #dbe6ef;font-size:.76rem}.admin-egresos-table th{color:#fff;background:#54899e;text-align:left}.admin-egresos-table td:nth-child(6){text-align:right}.admin-egresos-table td[colspan]{padding:1rem;text-align:center;color:#597a99}@media(max-width:1000px){.admin-egresos-metrics{grid-template-columns:repeat(3,1fr)}.admin-egresos-panels{grid-template-columns:1fr}.admin-egresos-form{grid-template-columns:repeat(3,1fr)}.admin-egresos-top{margin:0 0 .8rem;justify-content:flex-start;flex-wrap:wrap}} .admin-egresos-rubros{padding:.7rem .9rem}.admin-egresos-rubros div{position:relative;display:grid;grid-template-columns:1fr auto;gap:.4rem;padding:.3rem 0 .55rem;color:#315b71;font-size:.8rem}.admin-egresos-rubros strong{font-weight:500}.admin-egresos-rubros i{position:absolute;bottom:0;left:0;height:4px;max-width:100%;border-radius:4px;background:#54899e}.admin-egresos-analisis{display:flex;flex-direction:column;gap:.45rem;padding:.9rem;color:#315b71;font-size:.8rem}.admin-egresos-analisis b{margin-top:.15rem;color:#203e5d}.admin-egresos-analisis span{display:flex;justify-content:space-between}.admin-egresos-analisis strong{font-weight:500}
+/* Control Gastos: sin scroll exterior; solo el listado se desplaza cuando es necesario. */
+.admin-egresos-modal{overflow:hidden}.admin-egresos-body{display:flex;flex-direction:column;min-height:0;overflow:hidden}.admin-egresos-carga{display:flex;flex:1;flex-direction:column;min-height:0}.admin-egresos-form{flex:0 0 auto}.admin-egresos-table{flex:1;min-height:0;overflow:auto}.admin-egresos-table::-webkit-scrollbar{width:8px;height:8px}.admin-egresos-table::-webkit-scrollbar-thumb{border-radius:999px;background:#9abccc}.admin-egresos-table::-webkit-scrollbar-track{background:transparent}
+.admin-liquidaciones-modal{display:flex;flex-direction:column;width:min(900px,100%);max-height:86vh;overflow:hidden;border-radius:12px;background:#fff;box-shadow:0 20px 50px rgba(20,43,72,.35)}.admin-liquidaciones-modal>header{display:flex;align-items:flex-start;justify-content:space-between;padding:1rem 1.2rem;border-bottom:1px solid #d8e3ef}.admin-liquidaciones-modal h2{margin:0;color:#123f75;font-size:1.1rem}.admin-liquidaciones-modal header p{margin:.35rem 0 0;color:#667d9b;font-size:.8rem}.admin-liquidaciones-modal>header button{width:2rem;height:2rem;border:1px solid #d5e1ef;border-radius:7px;background:#fff;color:#52708f;font-size:1.3rem}.admin-liquidaciones-body{overflow:auto;padding:1rem 1.2rem}.admin-liquidaciones-periodo{position:relative;padding:.85rem;border:1px solid #bfd9ed;border-radius:10px;background:#edf6ff;color:#273c60}.admin-liquidaciones-periodo>b{display:block;color:#22578e;font-size:.7rem;text-transform:uppercase}.admin-liquidaciones-periodo>span{position:absolute;right:.85rem;top:.65rem;padding:.25rem .55rem;border:1px solid #a9cfdf;border-radius:6px;background:#d9eef3;color:#365e76;font-size:.74rem;font-weight:700}.admin-liquidaciones-periodo p{margin:.65rem 0 .35rem;font-size:1rem}.admin-liquidaciones-periodo small{color:#637b98;font-size:.75rem}.admin-liquidaciones-periodo hr{border:0;border-top:1px dashed #bdd7e8;margin:.45rem 0}.admin-liquidaciones-counts{display:flex;gap:.5rem;margin:.75rem 0}.admin-liquidaciones-counts b{padding:.45rem .7rem;border:1px solid #caddea;border-radius:8px;background:#eef4f8;color:#42627e;font-size:.85rem}.admin-liquidaciones-counts b:nth-child(2){background:#dceef5}.admin-liquidaciones-counts b:nth-child(3){background:#d8f0df;color:#256746}.admin-liquidaciones-counts small{font-weight:500}.admin-liquidaciones-note{display:flex;justify-content:space-between;align-items:center;margin:.6rem 0;color:#617a9b;font-size:.8rem}.admin-liquidaciones-note label{display:flex;align-items:center;gap:.45rem}.admin-liquidaciones-table{overflow:auto;border:1px solid #c3d8e7;border-radius:9px}.admin-liquidaciones-table table{width:100%;border-collapse:collapse}.admin-liquidaciones-table th,.admin-liquidaciones-table td{padding:.5rem .65rem;border-bottom:1px solid #e0e8f0;font-size:.8rem;text-align:left}.admin-liquidaciones-table th{color:#fff;background:#54899e}.admin-liquidaciones-table td:nth-child(2),.admin-liquidaciones-table td:nth-child(3){text-align:right}.admin-liquidacion-status{display:inline-block;padding:.16rem .4rem;border-radius:999px;background:#e4eaf0;color:#53708d;font-size:.67rem;font-weight:800;text-transform:uppercase}.admin-liquidacion-status--rendido{background:#dceef5;color:#25627e}.admin-liquidacion-status--pagado{background:#d8f0df;color:#256746}.admin-liquidaciones-table td:last-child{white-space:nowrap}.admin-liquidaciones-table td:last-child button{padding:.25rem .48rem;margin-right:.22rem;border:1px solid #b9d2e5;border-radius:6px;color:#43657f;background:#fff;font-size:.72rem}.admin-liquidaciones-table td:last-child button.is-active{border-color:#1b5ca4;background:#e2f1f7;color:#174f92;font-weight:700}.admin-liquidaciones-modal>footer{display:flex;justify-content:flex-end;padding:.8rem 1.2rem;border-top:1px solid #d8e3ef;background:#f8fbff}.admin-liquidaciones-modal>footer .btn{min-width:96px;border-color:#174f92;color:#174f92;background:#edf4fb;font-weight:700}
+/* Acciones superiores de Administración: mismo celeste que Obra Social. */
+.admin-header__button {
+  border-color: #4f8294;
+  color: #174f92;
+  background: linear-gradient(135deg, #5b9fd4 0%, #7ec8e8 42%, #a8daf5 100%);
+  box-shadow: 0 4px 12px rgba(91, 159, 212, 0.28);
+}
+
+.admin-header__button:hover {
+  background: linear-gradient(135deg, #5293c6 0%, #70bbdb 42%, #9bcdea 100%);
+  border-color: #376d80;
+}
+
+/* Administración: el listado aprovecha el alto disponible y el resumen queda al pie. */
+.page--administracion .admin-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100svh - 28rem);
+  margin-bottom: 0.55rem;
+}
+
+.page--administracion .admin-panel > .table-wrap {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.page--administracion .admin-table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.page--administracion .admin-gastos-resumen {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+@media (max-width: 700px) {
+  .page--administracion .admin-panel {
+    min-height: auto;
+  }
+
+  .page--administracion .admin-table-scroll {
+    max-height: min(68svh, 42rem);
+  }
+}
+
+/* Íconos del resumen de Administración. */
+.admin-summary .summary-card::before {
+  content: '';
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 1.08rem 1.08rem;
+}
+
+.admin-summary .summary-card:nth-child(1)::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23356b86' stroke-width='1.7' viewBox='0 0 24 24'%3E%3Crect x='3.5' y='6.5' width='17' height='12' rx='2.5'/%3E%3Cpath d='M16 12h2.5'/%3E%3C/svg%3E");
+}
+
+.admin-summary .summary-card:nth-child(2)::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23356b86' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='M7 7h10l-3-3M17 17H7l3 3M17 7l3 3M7 17l-3-3'/%3E%3C/svg%3E");
+}
+
+.admin-summary .summary-card:nth-child(3)::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23356b86' stroke-width='1.7' viewBox='0 0 24 24'%3E%3Crect x='3.5' y='6.5' width='17' height='11' rx='2'/%3E%3Ccircle cx='12' cy='12' r='2.2'/%3E%3Cpath d='M6.5 9.5h.1M17.4 14.5h.1'/%3E%3C/svg%3E");
+}
+
+.admin-summary .summary-card:nth-child(4)::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23356b86' stroke-width='1.7' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='8' r='3.2'/%3E%3Cpath d='M5.5 19c.7-3.2 3.2-5 6.5-5s5.8 1.8 6.5 5'/%3E%3C/svg%3E");
+}
+
+.admin-summary .summary-card:nth-child(5)::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23356b86' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='M7 3.8h10v16.4H7z'/%3E%3Cpath d='M10 8h4M10 12h4M10 16h4'/%3E%3C/svg%3E");
+}
+
+.admin-summary .summary-card:nth-child(6)::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23356b86' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m3.8 10 8.2-6.2 8.2 6.2v9.2H3.8z'/%3E%3Cpath d='M9.5 19.2v-5.5h5v5.5'/%3E%3C/svg%3E");
+}
+
+/* Tabla de liquidación: esquema compacto de Administración. */
+.page--administracion .admin-table {
+  min-width: 1450px;
+}
+
+.page--administracion .admin-table th,
+.page--administracion .admin-table td {
+  padding: 0.36rem 0.52rem;
+  font-size: 0.76rem;
+  line-height: 1.15;
+}
+
+.page--administracion .admin-table thead th {
+  color: #fff;
+  background: #54899e;
+  font-weight: 700;
+}
+
+.page--administracion .admin-table tfoot th {
+  color: #315b71;
+  background: #d8ecf2;
+  font-weight: 800;
+}
+
+.page--administracion .admin-table th:nth-child(7),
+.page--administracion .admin-table th:nth-child(9),
+.page--administracion .admin-table th:nth-child(10),
+.page--administracion .admin-table th:nth-child(11),
+.page--administracion .admin-table th:nth-child(12),
+.page--administracion .admin-table th:nth-child(13) {
+  text-align: right;
+}
+
+.page--administracion .admin-panel__head--inline {
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 0.6rem;
+  padding: 0.65rem 1rem 0.5rem;
+}
+
+.page--administracion .admin-panel__head--inline p {
+  margin: 0;
+}
+
+.page--administracion .admin-table tfoot th {
+  color: #fff;
+  background: #54899e;
+}
+
+.page--administracion .admin-table tfoot .admin-money--doctor {
+  color: #fff;
+}
+
+/* El listado conserva una altura estable y se desplaza internamente al superar el espacio disponible. */
+.page--administracion .admin-panel {
+  min-height: 0;
+}
+
+.page--administracion .admin-panel > .table-wrap {
+  flex: 0 1 auto;
+}
+
+.page--administracion .admin-table-scroll {
+  height: min(68svh, 42rem);
+  max-height: min(68svh, 42rem);
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+/* Totales siempre visibles al pie del scroll interno. */
+.page--administracion .admin-table tfoot th {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  box-shadow: 0 -1px 0 #3e7185;
+}
+
+.page--administracion .admin-table tfoot th {
+  bottom: -3px;
+}
+
+/* Pie de tabla fijo y opaco: no deja ver filas por detrás. */
+.page--administracion .admin-table tfoot th {
+  bottom: 0;
+  background-color: #54899e;
+  background-clip: padding-box;
+}
+
+/* El pie se fija como una única barra para evitar transparencias entre celdas. */
+.page--administracion .admin-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.page--administracion .admin-table tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 8;
+}
+
+.page--administracion .admin-table tfoot th {
+  position: static;
+  background: #54899e;
+  background-clip: border-box;
+  box-shadow: inset 0 1px 0 #3e7185;
+}
+
+/* Administración usa solamente el scroll interno del listado. */
+.main-area:has(.page--administracion) {
+  overflow-y: hidden;
+}
+
+/* Sin espacio vacío: el listado crece según sus filas hasta activar su scroll máximo. */
+.page--administracion .admin-table-scroll {
+  height: auto;
+}
+
+/* Administración replica el pie de tabla de Pagos de Secretaría. */
+.page--administracion .admin-table tfoot th {
+  color: #315b71;
+  background: #d8ecf2;
+  box-shadow: inset 0 1px 0 #8eb3c2;
+}
+
+.page--administracion .admin-table tfoot .admin-money--doctor {
+  color: #315b71;
+}
+
+/* Acciones de Obras Sociales separadas de los filtros. */
+.admin-obras-modal__filters > button:first-of-type {
+  margin-left: 1.4rem;
+}
+
+.admin-obras-modal__filters > button:first-of-type {
+  margin-left: 5rem;
+}
+
+.admin-obras-modal__filters > button:first-of-type {
+  margin-left: 9rem;
+}
+
+/* Obras Sociales: el listado se desplaza dentro de su propio panel si excede la altura. */
+.admin-obras-modal__table {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.admin-obras-modal__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.admin-obras-modal__table tfoot th {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
+/* Grupo de acciones alineado a la derecha, sin salto de Salir. */
+.admin-obras-modal__filters > button:first-of-type {
+  margin-left: auto;
+}
+
+/* Turnos Cancelados: acciones de cierre junto al PDF. */
+.admin-cancelados-filters .admin-cancelados-pdf {
+  min-width: 5.8rem;
+  padding-inline: 1rem;
+}
+
+.admin-cancelados-filters .admin-cancelados-salir {
+  min-width: 4.6rem;
+  border-color: #174f92;
+  color: #174f92;
+  background: #edf4fb;
+  font-weight: 700;
+}
+
+.admin-cancelados-filters .admin-cancelados-pdf-info {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.1rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #c6dceb;
+  border-radius: 8px;
+  color: #174f92;
+  background: #edf6fb;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.admin-cancelados-filters .admin-cancelados-pdf {
+  margin-left: auto;
+}
+
+/* Fechas de Turnos Cancelados: campos más amplios y lectura regular. */
+.admin-cancelados-filters input[type='date'] {
+  width: 10.5rem;
+  font-size: 0.86rem;
+  font-weight: 400;
+}
+
+.admin-cancelados-filters .admin-cancelados-pdf-info {
+  flex: 1 1 auto;
+  min-width: 15rem;
+}
+
+.admin-cancelados-filters .admin-cancelados-pdf {
+  margin-left: 0.45rem;
+}
+
+/* Carga de egresos: prioriza monto y compacta concepto. */
+.admin-egresos-form {
+  grid-template-columns: 90px 118px 62px minmax(150px, 1fr) minmax(110px, 0.7fr) 170px 110px 80px 82px;
+}
+
+.admin-egresos-form input[placeholder='Monto'] {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.admin-egresos-form input,
+.admin-egresos-form select,
+.admin-egresos-form .btn {
+  font-size: 0.88rem;
+}
+
+.admin-egresos-form {
+  grid-template-columns: 102px 118px 62px minmax(145px, 1fr) minmax(105px, 0.7fr) 170px 110px 80px 82px;
+}
+
+.admin-egresos-table__row {
+  cursor: pointer;
+}
+
+.admin-egresos-table__row:hover {
+  background: #edf6fb;
+}
+
+.admin-egresos-modal {
+  width: min(1840px, calc(100vw - 0.5rem));
+}
+
+.admin-egresos-form {
+  grid-template-columns: 102px 118px 62px minmax(145px, 1fr) minmax(105px, 0.7fr) 170px 110px 80px 50px;
+}
+
+.admin-egresos-form .btn {
+  justify-content: center;
+  padding-inline: 0.35rem;
+  font-size: 1.15rem;
+}
+
+/* Distribución equilibrada de los campos de carga rápida. */
+.admin-egresos-form {
+  grid-template-columns: 102px 118px 62px minmax(150px, 1fr) minmax(150px, 1fr) 170px 110px 80px 50px;
+}
+
+/* Fila de carga rápida un poco más compacta. */
+.admin-egresos-form input,
+.admin-egresos-form select,
+.admin-egresos-form .btn {
+  min-height: 2rem;
+  padding-top: 0.22rem;
+  padding-bottom: 0.22rem;
+}
+
+/* Listado inferior de egresos con desplazamiento propio. */
+.admin-egresos-carga {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.admin-egresos-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.admin-egresos-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.admin-egresos-carga__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.admin-egresos-carga__actions .btn:last-child {
+  min-width: 4.6rem;
+  color: #174f92;
+  background: #edf4fb;
+  border-color: #174f92;
+  font-weight: 700;
+}
+
+/* Acciones del Control de Egresos junto a la métrica Movimientos. */
+.admin-egresos-metrics {
+  grid-template-columns: repeat(5, minmax(140px, 1fr)) 118px 170px;
+}
+
+.admin-egresos-metrics__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
+.admin-egresos-metrics__actions .btn {
+  min-height: 3.4rem;
+  color: #174f92;
+  background: #edf4fb;
+  border-color: #174f92;
+  font-weight: 700;
+}
+
+.admin-egresos-metrics__actions .btn:first-child {
+  color: #fff;
+  background: #54899e;
+  border-color: #54899e;
+}
+
+.admin-header__button--pdf {
+  color: #fff;
+  border-color: #3e7185;
+  background: linear-gradient(135deg, #56899c 0%, #6fa6b8 50%, #89bdcb 100%);
+  box-shadow: 0 4px 12px rgba(57, 108, 127, 0.28);
+}
+
+.admin-header__button--pdf:hover {
+  background: linear-gradient(135deg, #4d7d90 0%, #6399aa 50%, #7eb0be 100%);
+}
+
+/* Rango que usa el PDF de Control de Egresos. */
+.admin-egresos-pdf-fechas {
+  display: inline-flex;
+  align-items: end;
+  gap: 0.55rem;
+}
+
+.admin-egresos-pdf-fechas label {
+  display: grid;
+  gap: 0.15rem;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-egresos-pdf-fechas input {
+  width: 9.3rem;
+  min-height: 1.9rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid #c7dce8;
+  border-radius: 7px;
+  color: #315b71;
+  background: #fff;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.admin-egresos-pdf-fechas {
+  margin-left: auto;
+}
+
+.admin-egresos-pdf-button {
+  min-width: 4.4rem;
+  min-height: 2rem !important;
+  color: #174f92 !important;
+  background: #fff !important;
+  border-color: #174f92 !important;
+  font-size: 0.8rem !important;
+  font-weight: 700;
+}
+
+.admin-egresos-metrics__actions {
+  grid-template-columns: 1fr;
+}
+
+/* Barra de carga: rango cerca del título y acción alineada visualmente abajo. */
+.admin-egresos-pdf-fechas {
+  margin-left: 1.25rem;
+}
+
+.admin-egresos-pdf-button {
+  margin-left: 0.35rem;
+  margin-top: 0.55rem;
+  align-self: flex-end;
+}
+
+/* PDF alineado con los campos de fecha dentro de la barra azul. */
+.admin-egresos-pdf-button {
+  margin-top: 0.3rem;
+  align-self: center;
+}
+
+.admin-egresos-pdf-button {
+  margin-top: 0.1rem;
+}
+
+/* Métricas equilibradas y salida compacta. */
+.admin-egresos-metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr)) 5.2rem;
+}
+
+.admin-egresos-metrics__actions .btn {
+  min-width: 0;
+  padding-inline: 0.35rem;
+}
+
+/* Fechas y PDF forman un único grupo compacto a la derecha. */
+.admin-egresos-carga h3 {
+  justify-content: flex-start;
+}
+
+.admin-egresos-pdf-fechas {
+  margin-left: auto;
+  gap: 0.35rem;
+}
+
+.admin-egresos-pdf-button {
+  margin-left: 0.25rem;
+}
+
+.admin-egresos-pdf-button {
+  margin-top: 0.28rem;
+}
+
+.admin-egresos-pdf-button {
+  margin-top: 0.9rem;
+}
+
+/* Acciones de Gastos Administrativos con el celeste del botón principal. */
+.admin-gastos-modal__add .btn,
+.admin-gastos-modal footer .btn {
+  color: #174f92;
+  border-color: #4f8294;
+  background: linear-gradient(135deg, #5b9fd4 0%, #7ec8e8 42%, #a8daf5 100%);
+  box-shadow: 0 3px 10px rgba(91, 159, 212, 0.24);
+}
+
+.admin-gastos-modal__add .btn:hover,
+.admin-gastos-modal footer .btn:hover {
+  background: linear-gradient(135deg, #5293c6 0%, #70bbdb 42%, #9bcdea 100%);
+}
+
+/* Acciones de la ventana Obras Sociales con el mismo celeste institucional. */
+.admin-obras-modal .btn {
+  color: #174f92;
+  border-color: #4f8294;
+  background: linear-gradient(135deg, #5b9fd4 0%, #7ec8e8 42%, #a8daf5 100%);
+  box-shadow: 0 3px 10px rgba(91, 159, 212, 0.24);
+}
+
+.admin-obras-modal .btn:hover {
+  background: linear-gradient(135deg, #5293c6 0%, #70bbdb 42%, #9bcdea 100%);
+}
+
+/* Resumen por médico seleccionado, equivalente a Pagos. */
+.admin-medico-resumen {
+  margin: 0.35rem 0 0.45rem;
+  color: #1768d7;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}

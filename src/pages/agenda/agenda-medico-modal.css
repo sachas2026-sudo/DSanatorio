@@ -1,0 +1,265 @@
+.agenda-medico-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  z-index: 60;
+}
+
+.agenda-medico-sheet {
+  width: min(72rem, 100%);
+  max-height: min(92vh, 60rem);
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 24px 75px rgba(2, 6, 23, 0.28);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.agenda-medico-sheet__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 1rem;
+  padding: 1rem 1.1rem 0.75rem;
+  border-bottom: 1px solid #eef2f7;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 75%);
+}
+
+.agenda-medico-sheet__head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.agenda-medico-sheet__sub {
+  margin: 0.15rem 0 0;
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.agenda-medico-sheet__close {
+  border: 1px solid #e3eaf5;
+  background: #fff;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.agenda-medico-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 0.65rem 1.1rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.agenda-medico-toolbar__doctor {
+  min-width: 18rem;
+  flex: 1 1 22rem;
+}
+
+.agenda-medico-toolbar__doctor select {
+  min-height: 2.05rem;
+  padding-top: 0.32rem;
+  padding-bottom: 0.32rem;
+  border-radius: 9px;
+}
+
+.agenda-medico-doctor-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.agenda-medico-doctor-row select {
+  flex: 0 0 auto;
+  min-width: 14.5rem;
+}
+
+.agenda-medico-doctor-os {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.82rem;
+  color: #14532d;
+  font-weight: 700;
+}
+
+.agenda-medico-toolbar__week {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex: 1 1 18rem;
+}
+
+.agenda-medico-toolbar__week-label {
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  color: #1e293b;
+  white-space: nowrap;
+}
+
+.agenda-medico-toolbar__week-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.agenda-medico-toolbar__pdf {
+  min-height: 1.85rem;
+  height: 1.85rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  line-height: 1;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.agenda-medico-sheet .week-nav__arrow {
+  min-height: 1.85rem;
+  height: 1.85rem;
+  min-width: 2.15rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 9px;
+  font-size: 1.05rem;
+  line-height: 1;
+  border-width: 1px;
+  border-color: #cfd8e3;
+  border-style: solid;
+  box-shadow: none !important;
+  background: #e6f5ec;
+  color: #64748b;
+  filter: none !important;
+  transform: none !important;
+}
+
+.agenda-medico-sheet .week-nav__arrow:hover:not(:disabled) {
+  background: #e6f5ec;
+  border-color: #cfd8e3;
+  box-shadow: none !important;
+  filter: none !important;
+  transform: none !important;
+}
+
+.agenda-medico-grid {
+  padding: 0.95rem 1.1rem 1rem;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+  overflow: auto;
+}
+
+@media (max-width: 980px) {
+  .agenda-medico-grid {
+    grid-template-columns: repeat(3, minmax(9.5rem, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .agenda-medico-grid {
+    grid-template-columns: repeat(2, minmax(9.5rem, 1fr));
+  }
+}
+
+.agenda-medico-day {
+  border: 1px solid #dbe4f2;
+  border-radius: 11px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  padding-bottom: 0.45rem;
+}
+
+.agenda-medico-day--off {
+  background: linear-gradient(180deg, #fff 0%, #f7fafc 100%);
+  border-color: rgba(100, 116, 139, 0.35);
+}
+
+.agenda-medico-day__head {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid #a8d4b8;
+  background: #d8f0e0;
+}
+
+.agenda-medico-day__meta {
+  text-align: center;
+}
+
+.agenda-medico-day__dow {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #000;
+}
+
+.agenda-medico-day__month {
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-top: 0.05rem;
+  letter-spacing: 0.04em;
+}
+
+.agenda-medico-day__empty {
+  padding: 0.8rem 0.75rem;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.agenda-medico-day__slots {
+  padding: 0.55rem 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow: visible;
+  align-items: center;
+}
+
+.agenda-medico-slot {
+  border: 1px solid #dbe4f2;
+  background: #fff;
+  border-radius: 9px;
+  padding: 0.24rem 0.45rem;
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 0.8rem;
+  width: 100%;
+  max-width: 7.25rem;
+}
+
+.agenda-medico-slot:hover {
+  background: #f0faf3;
+  border-color: #6fb883;
+}
+
+.agenda-medico-sheet__actions {
+  padding: 0.85rem 1.1rem 1rem;
+  border-top: 1px solid #eef2f7;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  background: #fff;
+}
+

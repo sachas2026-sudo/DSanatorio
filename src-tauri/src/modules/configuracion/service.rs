@@ -1,0 +1,533 @@
+use std::fs;
+use std::path::PathBuf;
+use tauri::Manager;
+use crate::core::error::AppError;
+use crate::core::db;
+use crate::core::config::settings;
+use super::dto::*;
+use super::repository;
+
+pub struct InstanceLock {
+    #[cfg(windows)]
+    _file: Option<std::fs::File>,
+}
+
+pub fn try_acquire_single_instance_lock(
+    _app: &tauri::AppHandle,
+) -> Result<InstanceLock, String> {
+    #[cfg(windows)]
+    {
+        if cfg!(debug_assertions) {
+            return Ok(InstanceLock { _file: None });
+        }
+        use std::fs::OpenOptions;
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+
+        let dir = settings::data_dir();
+        let _ = fs::create_dir_all(&dir);
+        let lock_path = dir.join("sanatorio.lock");
+        match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .share_mode(0)
+            .open(&lock_path)
+        {
+            Ok(file) => Ok(InstanceLock { _file: Some(file) }),
+            Err(err) if err.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => Err(
+                "Ya hay otra ventana de Sanatorio abierta.\nCierre la otra antes de volver a abrir."
+                    .into(),
+            ),
+            Err(err) => Err(format!("No se pudo bloquear instancia única: {err}")),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(InstanceLock {})
+    }
+}
+
+pub fn ensure_initialized() -> Result<(), AppError> {
+    let db_path = db::db_file_path()?;
+    let json_path = db::json_export_path()?;
+
+    // Si la base de datos no existe y el JSON legacy existe, realizamos la migración automática
+    if !db_path.is_file() && json_path.is_file() {
+        let raw = fs::read_to_string(&json_path)?;
+        if !raw.trim().is_empty() {
+            match serde_json::from_str::<AppData>(&raw) {
+                Ok(data) => {
+                    // Inicializar la conexión (crea el archivo y corre migraciones init)
+                    let _conn = db::open_connection()?;
+                    
+                    // Guardar los datos en SQLite
+                    save_app_data_direct(&data)?;
+                    
+                    // Renombrar el JSON original a .migrado para marcar el éxito
+                    let migrated_path = json_path.with_extension("json.migrado");
+                    fs::rename(&json_path, &migrated_path)?;
+                    
+                    println!("[Sanatorio] Migración de datos JSON a SQLite completada con éxito.");
+                    return Ok(());
+                }
+                Err(e) => {
+                    eprintln!("[Sanatorio] Error al parsear JSON legacy para migración: {e}");
+                }
+            }
+        }
+    }
+
+    // Inicializar conexión normal si no hay migración
+    let _conn = db::open_connection()?;
+    Ok(())
+}
+
+pub fn load_app_data() -> Result<AppData, AppError> {
+    let conn = db::open_connection()?;
+
+    let patients = repository::load_patients(&conn)?;
+    let doctors = repository::load_doctors(&conn)?;
+    let horarios = repository::load_horarios(&conn)?;
+    let dias_libres = repository::load_dias_libres(&conn)?;
+    let atenciones_mensuales = repository::load_atenciones_mensuales(&conn)?;
+    let appointments = repository::load_appointments(&conn)?;
+    let payments = repository::load_payments(&conn)?;
+    let atenciones_sin_turno = repository::load_atenciones_sin_turno(&conn)?;
+    let pagos_cancelados = repository::load_pagos_cancelados(&conn)?;
+    let pagos_deudas_medicos = repository::load_pagos_deudas_medicos(&conn)?;
+    
+    let especialidades_custom = repository::load_custom_list(&conn, "especialidades_custom")?;
+    let obras_sociales_custom = repository::load_custom_list(&conn, "obras_sociales_custom")?;
+    let localidades_custom = repository::load_custom_list(&conn, "localidades_custom")?;
+    let motivos_consulta_custom = repository::load_custom_list(&conn, "motivos_consulta_custom")?;
+    
+    let settings = repository::load_settings(&conn)?;
+
+    Ok(AppData {
+        patients,
+        doctors,
+        horarios,
+        dias_libres,
+        atenciones_mensuales,
+        appointments,
+        payments,
+        atenciones_sin_turno,
+        pagos_cancelados,
+        pagos_deudas_medicos,
+        especialidades_custom,
+        obras_sociales_custom,
+        localidades_custom,
+        motivos_consulta_custom,
+        settings,
+    })
+}
+
+pub fn save_app_data_direct(data: &AppData) -> Result<(), AppError> {
+    save_app_data_with_mode(data, false)
+}
+
+/// Reemplaza todos los datos durante una restauración. Se limpian primero las
+/// tablas dependientes para que las copias antiguas no choquen con las claves
+/// foráneas de la base actual.
+pub fn replace_app_data_direct(data: &AppData) -> Result<(), AppError> {
+    save_app_data_with_mode(data, true)
+}
+
+fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppError> {
+    let mut conn = db::open_connection()?;
+    let tx = conn.transaction()?;
+
+    if replace_all {
+        tx.execute_batch(
+            "DELETE FROM payments;
+             DELETE FROM appointments;
+             DELETE FROM atenciones_sin_turno;
+             DELETE FROM pagos_deudas_medicos;
+             DELETE FROM horarios;
+             DELETE FROM dias_libres;
+             DELETE FROM atenciones_mensuales;
+             DELETE FROM pagos_cancelados;
+             DELETE FROM patients;
+             DELETE FROM doctors;
+             DELETE FROM especialidades_custom;
+             DELETE FROM obras_sociales_custom;
+             DELETE FROM localidades_custom;
+             DELETE FROM motivos_consulta_custom;
+             DELETE FROM app_settings;"
+        )?;
+    }
+
+    repository::save_patients(&tx, &data.patients)?;
+    if !replace_all {
+        let patient_ids: Vec<String> = data.patients.iter().map(|p| p.id.clone()).collect();
+        db::delete_orphans(&tx, "patients", "id", &patient_ids)?;
+    }
+
+    repository::save_doctors(&tx, &data.doctors)?;
+    if !replace_all {
+        let doctor_ids: Vec<String> = data.doctors.iter().map(|d| d.id.clone()).collect();
+        db::delete_orphans(&tx, "doctors", "id", &doctor_ids)?;
+    }
+
+    repository::save_horarios(&tx, &data.horarios)?;
+    if !replace_all {
+        let horario_ids: Vec<String> = data.horarios.iter().map(|h| h.id.clone()).collect();
+        db::delete_orphans(&tx, "horarios", "id", &horario_ids)?;
+    }
+
+    repository::save_dias_libres(&tx, &data.dias_libres)?;
+    if !replace_all {
+        let dia_libre_ids: Vec<String> = data.dias_libres.iter().map(|d| d.id.clone()).collect();
+        db::delete_orphans(&tx, "dias_libres", "id", &dia_libre_ids)?;
+    }
+
+    repository::save_atenciones_mensuales(&tx, &data.atenciones_mensuales)?;
+    if !replace_all {
+        let atencion_mensual_ids: Vec<String> = data.atenciones_mensuales.iter().map(|a| a.id.clone()).collect();
+        db::delete_orphans(&tx, "atenciones_mensuales", "id", &atencion_mensual_ids)?;
+    }
+
+    repository::save_appointments(&tx, &data.appointments)?;
+    if !replace_all {
+        let appt_ids: Vec<String> = data.appointments.iter().map(|a| a.id.clone()).collect();
+        db::delete_orphans(&tx, "appointments", "id", &appt_ids)?;
+    }
+
+    repository::save_payments(&tx, &data.payments)?;
+    if !replace_all {
+        let payment_ids: Vec<String> = data.payments.iter().map(|p| p.id.clone()).collect();
+        db::delete_orphans(&tx, "payments", "id", &payment_ids)?;
+    }
+
+    repository::save_atenciones_sin_turno(&tx, &data.atenciones_sin_turno)?;
+    if !replace_all {
+        let sin_turno_ids: Vec<String> = data.atenciones_sin_turno.iter().map(|l| l.id.clone()).collect();
+        db::delete_orphans(&tx, "atenciones_sin_turno", "id", &sin_turno_ids)?;
+    }
+
+    repository::save_pagos_cancelados(&tx, &data.pagos_cancelados)?;
+    if !replace_all {
+        let pago_cancelado_ids: Vec<String> = data.pagos_cancelados.iter().map(|p| p.id.clone()).collect();
+        db::delete_orphans(&tx, "pagos_cancelados", "id", &pago_cancelado_ids)?;
+    }
+
+    repository::save_pagos_deudas_medicos(&tx, &data.pagos_deudas_medicos)?;
+    if !replace_all {
+        let deuda_pago_ids: Vec<String> = data
+            .pagos_deudas_medicos
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+        db::delete_orphans(&tx, "pagos_deudas_medicos", "id", &deuda_pago_ids)?;
+    }
+
+    // Para las listas custom, simplemente limpiamos y volvemos a insertar
+    if !replace_all { tx.execute("DELETE FROM especialidades_custom", [])?; }
+    repository::save_custom_list(&tx, "especialidades_custom", &data.especialidades_custom)?;
+
+    if !replace_all { tx.execute("DELETE FROM obras_sociales_custom", [])?; }
+    repository::save_custom_list(&tx, "obras_sociales_custom", &data.obras_sociales_custom)?;
+
+    if !replace_all { tx.execute("DELETE FROM localidades_custom", [])?; }
+    repository::save_custom_list(&tx, "localidades_custom", &data.localidades_custom)?;
+
+    if !replace_all { tx.execute("DELETE FROM motivos_consulta_custom", [])?; }
+    repository::save_custom_list(&tx, "motivos_consulta_custom", &data.motivos_consulta_custom)?;
+
+    repository::save_settings(&tx, &data.settings)?;
+
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn save_app_data(json_str: &str) -> Result<(), AppError> {
+    let data: AppData = serde_json::from_str(json_str)?;
+    // El frontend guarda el estado completo. Reemplazarlo en una transacción
+    // evita que una restauración reciente choque con filas de la base anterior.
+    replace_app_data_direct(&data)?;
+    Ok(())
+}
+
+fn bundled_resource_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(r) = app.path().resource_dir() {
+        roots.push(r);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            roots.push(dir.join("resources"));
+            roots.push(dir.to_path_buf());
+        }
+    }
+    roots
+}
+
+fn bundled_resource_file(app: &tauri::AppHandle, name: &str) -> Option<PathBuf> {
+    bundled_resource_roots(app)
+        .into_iter()
+        .map(|root| root.join(name))
+        .find(|path| path.is_file())
+}
+
+pub fn prepare_storage_on_startup(app: &tauri::AppHandle) {
+    let data_dir = settings::data_dir();
+    let _ = fs::create_dir_all(&data_dir);
+    let json_path = data_dir.join("sanatorio-datos.json");
+    let db_path = data_dir.join("sanatorio-datos.db");
+    
+    // Si no hay base de datos y no hay JSON, copiamos la base semilla si existe
+    if !db_path.is_file() && !json_path.is_file() {
+        if let Some(bundled) = bundled_resource_file(app, "sanatorio-datos.json") {
+            let _ = fs::copy(&bundled, &json_path);
+        }
+    }
+
+    // Copiar respaldos del instalador si es necesario
+    let backup_names = ["sanatorio-datos.respaldo-1.json", "sanatorio-datos.respaldo-2.json", "sanatorio-datos.respaldo-3.json"];
+    let backup_dirs = crate::modules::backups::service::backup_dirs_local_only();
+    for name in backup_names {
+        if let Some(bundled) = bundled_resource_file(app, name) {
+            for dir in &backup_dirs {
+                let dest = dir.join(name);
+                if !dest.is_file() {
+                    let _ = fs::copy(&bundled, &dest);
+                }
+            }
+        }
+    }
+
+    if let Err(e) = ensure_initialized() {
+        eprintln!("[Sanatorio] No se pudo inicializar SQLite: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_migration_and_roundtrip() {
+        let temp_dir = TempDir::new().unwrap();
+        let data_dir = temp_dir.path().to_path_buf();
+        
+        // Configurar la variable de entorno antes de inicializar settings
+        std::env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());
+
+        // Aseguramos que la ruta de base de datos apunte al directorio temporal
+        let json_path = data_dir.join("sanatorio-datos.json");
+        
+        // 1. Escribir JSON simulado de prueba
+        let test_json = r#"{
+            "patients": [
+                {
+                    "id": "pat-1",
+                    "nombre": "Juan",
+                    "apellido": "Perez",
+                    "dni": "12345678",
+                    "telefono": "555-1234",
+                    "email": "juan@test.com",
+                    "domicilio": "Calle Falsa 123",
+                    "localidad": "Posadas",
+                    "fechaNacimiento": "1990-01-01",
+                    "obraSocial": "OSDE",
+                    "notas": "Paciente de prueba",
+                    "activo": true
+                },
+                {
+                    "id": "pat-2",
+                    "nombre": "Maria",
+                    "apellido": "Gomez",
+                    "dni": "87654321",
+                    "telefono": "555-5678",
+                    "email": "maria@test.com",
+                    "domicilio": "Calle Falsa 456",
+                    "localidad": "Posadas",
+                    "fechaNacimiento": "1995-05-05",
+                    "obraSocial": "Sancor",
+                    "notas": "Paciente sin turnos",
+                    "activo": true
+                }
+            ],
+            "doctors": [
+                {
+                    "id": "doc-1",
+                    "nombre": "Dr. House",
+                    "apellido": "Gregory",
+                    "dni": "87654321",
+                    "matricula": "M-1234",
+                    "especialidad": "Diagnóstico",
+                    "obraSocial": "OSDE",
+                    "obrasSociales": ["OSDE", "Sancor"],
+                    "telefono": "555-4321",
+                    "localidad": "Posadas",
+                    "email": "house@test.com",
+                    "alias": "House",
+                    "porcentaje": 80.0,
+                    "duracionTurnoMinutos": 30,
+                    "tipoAgenda": "semanal",
+                    "activo": true
+                }
+            ],
+            "horarios": [
+                {
+                    "id": "hor-1",
+                    "doctorId": "doc-1",
+                    "diaSemana": 1,
+                    "horaInicio": "08:00",
+                    "horaFin": "12:00"
+                }
+            ],
+            "diasLibres": [
+                {
+                    "id": "dl-1",
+                    "doctorId": "doc-1",
+                    "diaSemana": 6
+                }
+            ],
+            "atencionesMensuales": [
+                {
+                    "id": "am-1",
+                    "doctorId": "doc-1",
+                    "fecha": "2026-06-20",
+                    "horaInicio": "14:00",
+                    "horaFin": "18:00"
+                }
+            ],
+            "appointments": [
+                {
+                    "id": "appt-1",
+                    "patientId": "pat-1",
+                    "doctorId": "doc-1",
+                    "fechaHora": "2026-06-15T09:00:00",
+                    "duracionMinutos": 30,
+                    "notas": "Consulta médica",
+                    "estado": "programado",
+                    "whatsappRecordatorioEnviadoEn": "2026-06-14T18:00:00"
+                }
+            ],
+            "payments": [
+                {
+                    "id": "pay-1",
+                    "patientId": "pat-1",
+                    "doctorId": "doc-1",
+                    "citaId": "appt-1",
+                    "monto": 1500.0,
+                    "fecha": "2026-06-15",
+                    "metodo": "efectivo",
+                    "notas": "Pago consulta",
+                    "porcentajeApplied": 80.0
+                }
+            ],
+            "atencionesSinTurno": [
+                {
+                    "id": "ast-1",
+                    "doctorId": "doc-1",
+                    "fecha": "2026-06-16",
+                    "filas": [
+                        {
+                            "patientId": "pat-1",
+                            "monto": 2000.0
+                        }
+                    ],
+                    "guardadoEn": "2026-06-16T19:00:00"
+                }
+            ],
+            "pagosCancelados": [
+                {
+                    "id": "pc-1",
+                    "motivo": "cancelacion_paciente",
+                    "canceladoEn": "2026-06-16T10:00:00",
+                    "payment": {
+                        "id": "pay-old",
+                        "patientId": "pat-1",
+                        "doctorId": "doc-1",
+                        "citaId": null,
+                        "monto": 1000.0,
+                        "fecha": "2026-06-14",
+                        "metodo": "tarjeta",
+                        "notas": "Cancelado"
+                    },
+                    "appointment": null,
+                    "notasOtros": ""
+                }
+            ],
+            "especialidadesCustom": ["Pediatría", "Cardiología"],
+            "obrasSocialesCustom": ["OSDE", "Sancor", "Swiss Medical"],
+            "localidadesCustom": ["Posadas", "Garupá"],
+            "motivosConsultaCustom": ["Control", "Urgencia"],
+            "settings": {
+                "email": "clinica@test.com",
+                "emailGerente": "gerente@test.com",
+                "telefonoGerente": "123456",
+                "clave": "secreto",
+                "telefono": "654321",
+                "cuit": "20-12345678-9"
+            }
+        }"#;
+
+        fs::write(&json_path, test_json.as_bytes()).unwrap();
+
+        // 2. Ejecutar inicialización / migración
+        ensure_initialized().unwrap();
+
+        // Verificar que el JSON original fue renombrado
+        let migrated_path = json_path.with_extension("json.migrado");
+        assert!(migrated_path.is_file());
+        assert!(!json_path.is_file());
+
+        // 3. Cargar datos desde SQLite
+        let loaded = load_app_data().unwrap();
+
+        // 4. Validar integridad de los datos
+        assert_eq!(loaded.patients.len(), 2);
+        assert_eq!(loaded.patients[0].nombre, "Juan");
+        assert_eq!(loaded.patients[1].nombre, "Maria");
+        assert_eq!(loaded.patients[0].activo, Some(true));
+
+        assert_eq!(loaded.doctors.len(), 1);
+        assert_eq!(loaded.doctors[0].nombre, "Dr. House");
+        assert_eq!(loaded.doctors[0].alias, Some("House".to_string()));
+        assert_eq!(loaded.doctors[0].obras_sociales.as_ref().unwrap()[0], "OSDE");
+
+        assert_eq!(loaded.horarios.len(), 1);
+        assert_eq!(loaded.horarios[0].hora_inicio, "08:00");
+
+        assert_eq!(loaded.dias_libres.len(), 1);
+        assert_eq!(loaded.dias_libres[0].dia_semana, 6);
+
+        assert_eq!(loaded.atenciones_mensuales.len(), 1);
+        assert_eq!(loaded.atenciones_mensuales[0].fecha, "2026-06-20");
+
+        assert_eq!(loaded.appointments.len(), 1);
+        assert_eq!(loaded.appointments[0].notas, "Consulta médica");
+
+        assert_eq!(loaded.payments.len(), 1);
+        assert_eq!(loaded.payments[0].monto, 1500.0);
+
+        assert_eq!(loaded.atenciones_sin_turno.len(), 1);
+        assert_eq!(loaded.atenciones_sin_turno[0].filas.len(), 1);
+        assert_eq!(loaded.atenciones_sin_turno[0].filas[0].monto, 2000.0);
+
+        assert_eq!(loaded.pagos_cancelados.len(), 1);
+        assert_eq!(loaded.pagos_cancelados[0].motivo, "cancelacion_paciente");
+
+        assert_eq!(loaded.especialidades_custom.len(), 2);
+        assert_eq!(loaded.especialidades_custom[0], "Pediatría");
+
+        assert_eq!(loaded.settings.email, "clinica@test.com");
+        assert_eq!(loaded.settings.cuit, "20-12345678-9");
+
+        // 5. Probar guardado round-trip y orphan cleanup
+        let mut modified_data = loaded.clone();
+        modified_data.patients.retain(|p| p.id != "pat-2"); // Eliminar solo el segundo paciente
+        save_app_data_direct(&modified_data).unwrap();
+
+        let reloaded = load_app_data().unwrap();
+        assert_eq!(reloaded.patients.len(), 1); // Queda 1 paciente (pat-1)
+        assert_eq!(reloaded.patients[0].id, "pat-1");
+        assert_eq!(reloaded.doctors.len(), 1);  // Los demás siguen estando
+    }
+}

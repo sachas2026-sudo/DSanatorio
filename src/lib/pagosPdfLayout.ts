@@ -1,30 +1,103 @@
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import type jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import type { Payment } from '../types'
 import { formatMonto } from './formatMonto'
 
 export const PAGOS_PDF_MARGIN = 12
 
+/** Misma agrupación que en tablas PDF: turno (cita) o paciente + fecha/hora. */
+export function pagoPdfGroupKey(p: Payment): string {
+  return (
+    p.citaId ??
+    `${p.patientId}__${format(parseISO(p.fecha), 'yyyy-MM-dd HH:mm')}`
+  )
+}
+
+/** Dos registros del mismo turno (pago partido) cuentan como un solo pago. */
+export function countDistinctPagos(payments: Payment[]): number {
+  if (payments.length === 0) return 0
+  const keys = new Set<string>()
+  for (const p of payments) {
+    keys.add(pagoPdfGroupKey(p))
+  }
+  return keys.size
+}
+
+/** ¿El pago entered por transferencia? (definición única del método) */
+export function esPagoTransferencia(metodo: string | undefined): boolean {
+  return (metodo ?? '').trim().toLowerCase() === 'transferencia'
+}
+
+/** Suma montos cuya forma de pago es Transferencia. */
+export function sumPagosTransferencia(payments: Payment[]): number {
+  return payments.reduce(
+    (s, p) => s + (esPagoTransferencia(p.metodo) ? p.monto : 0),
+    0,
+  )
+}
+
+/** Suma montos cuya forma de pago es Efectivo. */
+export function sumPagosEfectivo(payments: Payment[]): number {
+  return payments.reduce(
+    (s, p) => s + (p.metodo.trim().toLowerCase() === 'efectivo' ? p.monto : 0),
+    0,
+  )
+}
+
 const PDF_META_TITLE_LINE_H = 5.2
 const PDF_META_BODY_LINE_H = 4.2
 
-export function pdfGeneratedLabel(): string {
-  return `Generado: ${format(new Date(), 'd/MM/yyyy HH:mm', { locale: es })}`
+import { getCurrentUserDisplayName, getExportTurnoLabel, getUserDisplayNameForShift, resolveUserRealName } from './auth'
+
+export function pdfGeneratedLabel(userOverride?: string, turnoText?: string): string {
+  const rawUser = userOverride || getCurrentUserDisplayName()
+  const nowStr = format(new Date(), 'dd-MM-yyyy HH:mm', { locale: es })
+
+  let resolvedTurno = (turnoText || '').trim()
+  const isDiaCompleto =
+    !resolvedTurno ||
+    resolvedTurno.toLowerCase() === 'todos' ||
+    resolvedTurno.toLowerCase() === 'día completo' ||
+    resolvedTurno.toLowerCase() === 'dia completo' ||
+    resolvedTurno.toLowerCase() === 'dia_completo'
+
+  if (isDiaCompleto) {
+    const user = rawUser ? resolveUserRealName(rawUser) : 'Admi'
+    return `${user} - Generado: ${nowStr}`
+  }
+
+  const user = getUserDisplayNameForShift(resolvedTurno, rawUser)
+
+  let shiftLabel = resolvedTurno
+  if (
+    !shiftLabel.toLowerCase().startsWith('turno ') &&
+    !shiftLabel.toLowerCase().startsWith('día completo') &&
+    !shiftLabel.toLowerCase().startsWith('dia completo')
+  ) {
+    shiftLabel = `Turno ${shiftLabel}`
+  }
+
+  if (user) {
+    return `${user} - ${shiftLabel} - Generado: ${nowStr}`
+  }
+  return `${shiftLabel} - Generado: ${nowStr}`
 }
 
 /** Pie de página en todas las hojas (fecha/hora de generación). */
 export function stampPdfGeneratedFooterOnAllPages(
   doc: jsPDF,
-  options?: { bold?: boolean; label?: string },
+  options?: { bold?: boolean; label?: string; marginX?: number },
 ): void {
   const label = options?.label ?? pdfGeneratedLabel()
+  const marginX = options?.marginX ?? PAGOS_PDF_MARGIN
   const total = doc.getNumberOfPages()
   for (let page = 1; page <= total; page++) {
     doc.setPage(page)
     const pageW = doc.internal.pageSize.getWidth()
     const pageH = doc.internal.pageSize.getHeight()
-    const right = pageW - PAGOS_PDF_MARGIN
+    const right = pageW - marginX
     doc.setFont('helvetica', options?.bold ? 'bold' : 'normal')
     doc.setFontSize(8)
     doc.setTextColor(107, 124, 147)
@@ -355,24 +428,96 @@ export function computeDoctorPorcentajeSettlement(
   return { porcentaje: pct, totalPorcentaje, totalGeneral }
 }
 
+export type DoctorResumenSettlement = {
+  facturado: number
+  porcentaje: number
+  comision: number
+  transferencias: number
+  efectivoAEntregar: number
+}
+
+/** Importe en efectivo pendiente de entregar tras comisión y transferencias. */
+export function computeEfectivoAEntregar(
+  totalNeto: number,
+  transferencias: number,
+): number {
+  return Math.round((totalNeto - transferencias) * 100) / 100
+}
+
+/** Resumen por médico: facturado − comisión − transferencias. */
+export function computeDoctorResumenSettlement(
+  facturado: number,
+  transferencias: number,
+  porcentaje?: number | null,
+): DoctorResumenSettlement {
+  const s = computeDoctorPorcentajeSettlement(facturado, porcentaje)
+  const efectivoAEntregar = computeEfectivoAEntregar(
+    s.totalGeneral,
+    transferencias,
+  )
+  return {
+    facturado,
+    porcentaje: s.porcentaje,
+    comision: s.totalPorcentaje,
+    transferencias,
+    efectivoAEntregar,
+  }
+}
+
+/** % congelado en el pago; si falta, el del médico al calcular reportes. */
+export function resolvePaymentPorcentaje(
+  payment: Payment,
+  doctorPorcentaje?: number | null,
+): number | undefined {
+  if (
+    payment.porcentajeAplicado != null &&
+    Number.isFinite(payment.porcentajeAplicado)
+  ) {
+    return payment.porcentajeAplicado
+  }
+  if (doctorPorcentaje != null && Number.isFinite(doctorPorcentaje)) {
+    return doctorPorcentaje
+  }
+  return undefined
+}
+
+/** Suma «Efectivo a entregar» de cada médico en el período. */
+export function sumPagosEfectivoEntregarByDoctor(
+  payments: Payment[],
+  doctorPorcentaje?: (doctorId: string) => number | undefined,
+): number {
+  const byDoctor = new Map<string, Payment[]>()
+  for (const p of payments) {
+    const list = byDoctor.get(p.doctorId) ?? []
+    list.push(p)
+    byDoctor.set(p.doctorId, list)
+  }
+  let sum = 0
+  for (const [, list] of byDoctor) {
+    const facturado = list.reduce((s, p) => s + p.monto, 0)
+    let comision = 0
+    for (const p of list) {
+      comision += computeDoctorPorcentajeSettlement(
+        p.monto,
+        resolvePaymentPorcentaje(p, doctorPorcentaje?.(p.doctorId)),
+      ).totalPorcentaje
+    }
+    comision = Math.round(comision * 100) / 100
+    const transferencias = sumPagosTransferencia(list)
+    sum += computeEfectivoAEntregar(facturado - comision, transferencias)
+  }
+  return Math.round(sum * 100) / 100
+}
+
 /** Suma del «Total» neto de cada médico (facturado − Total %). */
 export function sumPagosNetTotalByDoctor(
   payments: Payment[],
   doctorPorcentaje?: (doctorId: string) => number | undefined,
 ): number {
-  const facturadoPorMedico = new Map<string, number>()
-  for (const p of payments) {
-    facturadoPorMedico.set(
-      p.doctorId,
-      (facturadoPorMedico.get(p.doctorId) ?? 0) + p.monto,
-    )
-  }
   let sum = 0
-  for (const [doctorId, facturado] of facturadoPorMedico) {
-    sum += computeDoctorPorcentajeSettlement(
-      facturado,
-      doctorPorcentaje?.(doctorId),
-    ).totalGeneral
+  for (const p of payments) {
+    const pct = resolvePaymentPorcentaje(p, doctorPorcentaje?.(p.doctorId))
+    sum += computeDoctorPorcentajeSettlement(p.monto, pct).totalGeneral
   }
   return Math.round(sum * 100) / 100
 }
@@ -493,9 +638,14 @@ export const PAGOS_DOCTOR_SUBTOTAL_BAR_H = 6.5
 const PAGOS_SUBTOTAL_LABEL_FS = 8
 const PAGOS_SUBTOTAL_VALUE_FS = 8.5
 const PAGOS_SUBTOTAL_TEXT_Y_OFFSET = 0.95
+const PAGOS_SUBTOTAL_FACTURADO_FILL: [number, number, number] = [238, 244, 255]
 
-/** Pie con % y Total: 4 filas iguales (misma altura que Total facturado). */
-export const PAGOS_DOCTOR_SUBTOTAL_WITH_PCT_H = PAGOS_DOCTOR_SUBTOTAL_BAR_H * 4
+/** Pie con % y Total: hasta 5 filas si hay deuda pendiente con Cuidar. */
+export const PAGOS_DOCTOR_SUBTOTAL_WITH_PCT_H = PAGOS_DOCTOR_SUBTOTAL_BAR_H * 5 + 5
+
+/** Bloque resumen bajo cada médico (4 filas). */
+export const PAGOS_DOCTOR_RESUMEN_ROW_H = 7
+export const PAGOS_DOCTOR_RESUMEN_BLOCK_H = PAGOS_DOCTOR_RESUMEN_ROW_H * 5 + 12
 
 export const PAGOS_DOCTOR_TITLE_BAR_H = 9
 export const PAGOS_DOCTOR_BLOCK_RADIUS = 1.5
@@ -629,7 +779,7 @@ export function strokePagosTableRoundFrame(
   doc.roundedRect(x, y, w, h, r, r, 'S')
 }
 
-const PAGOS_TABLE_HEAD_RGB: [number, number, number] = [47, 111, 219]
+const PAGOS_TABLE_HEAD_RGB: [number, number, number] = [122, 163, 176]
 const PAGOS_TABLE_HEAD_TEXT_RGB: [number, number, number] = [255, 255, 255]
 
 /** Cabecera azul con esquinas superiores redondeadas (ancho = tabla). */
@@ -710,6 +860,7 @@ function drawPagosSubtotalAmountRight(
   label: string,
   value: string,
   labelRightX: number,
+  options?: { boldLabelPart?: string },
 ): void {
   const right = left + width - 5
   doc.setFont('helvetica', 'bold')
@@ -718,13 +869,39 @@ function drawPagosSubtotalAmountRight(
   doc.text(value, right, y, { align: 'right' })
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(PAGOS_SUBTOTAL_LABEL_FS)
+  const boldPart = options?.boldLabelPart
+  const boldPartIndex = boldPart ? label.indexOf(boldPart) : -1
+  if (boldPartIndex >= 0 && boldPart) {
+    const prefix = label.slice(0, boldPartIndex)
+    const suffix = label.slice(boldPartIndex + boldPart.length)
+    const prefixWidth = doc.getTextWidth(prefix)
+    const suffixWidth = doc.getTextWidth(suffix)
+    doc.setFont('helvetica', 'bold')
+    const boldWidth = doc.getTextWidth(boldPart)
+    doc.setFont('helvetica', 'normal')
+    const labelStartX = labelRightX - prefixWidth - boldWidth - suffixWidth
+    doc.text(prefix, labelStartX, y)
+    doc.setFont('helvetica', 'bold')
+    doc.text(boldPart, labelStartX + prefixWidth, y)
+    doc.setFont('helvetica', 'normal')
+    doc.text(suffix, labelStartX + prefixWidth + boldWidth, y)
+    return
+  }
   doc.text(label, labelRightX, y, { align: 'right' })
 }
 
 export type PagosDoctorSubtotalOptions = {
   porcentaje?: number | null
+  /** Si hay varios % en el bloque (ej. "Var."). */
+  porcentajeLabel?: string
+  /** Totales ya sumados por pago (evita un solo % sobre el subtotal). */
+  totalPorcentaje?: number
+  totalGeneral?: number
   /** Líneas % / Total % / Total bajo Total facturado (mismo tamaño de texto). */
   showPorcentajeLines?: boolean
+  totalTransferencias?: number
+  /** Todo el bloque por transferencia => "Total % Cuidar" en negativo. */
+  todosTransferencia?: boolean
 }
 
 /** Pie por médico: N pagos · Total facturado (+ % y neto si showPorcentajeLines). */
@@ -762,35 +939,57 @@ export function drawPagosDoctorSubtotalBar(
     return y + h + 5
   }
 
-  const s = computeDoctorPorcentajeSettlement(amount, options?.porcentaje)
+  const s =
+    options?.totalPorcentaje != null && options?.totalGeneral != null
+      ? {
+          porcentaje: options.porcentaje ?? 0,
+          totalPorcentaje: options.totalPorcentaje,
+          totalGeneral: options.totalGeneral,
+        }
+      : computeDoctorPorcentajeSettlement(amount, options?.porcentaje)
+  const transferTotal = options?.totalTransferencias ?? 0
+  const signoCuidar = options?.todosTransferencia ? -1 : 1
+  const efectivoAEntregar = computeEfectivoAEntregar(
+    s.totalGeneral,
+    transferTotal,
+  )
+  const deudaConCuidar = Math.max(0, -efectivoAEntregar)
+  const efectivoAEntregarVisible = Math.max(0, efectivoAEntregar)
+  const porcentajeCuidarLabel =
+    options?.porcentajeLabel ??
+    (options?.porcentaje != null ? `${options.porcentaje}%` : `${s.porcentaje}%`)
   const rowH = PAGOS_DOCTOR_SUBTOTAL_BAR_H
   const topY = y
   const row1Y = topY + rowH
   const row2Y = topY + rowH * 2
   const row3Y = topY + rowH * 3
+  const totalRowY = deudaConCuidar > 0 ? topY + rowH * 4 : row3Y
 
   const subtotalTextY = (rowY: number) => rowY + rowH / 2 + PAGOS_SUBTOTAL_TEXT_Y_OFFSET
 
-  for (let i = 0; i < 3; i++) {
-    doc.setFillColor(255, 255, 255)
-    doc.rect(left, topY + i * rowH, width, rowH, 'F')
-  }
+  // Solo «Total facturado» se destaca; transferencias y porcentajes quedan sin relleno.
+  doc.setFillColor(...PAGOS_SUBTOTAL_FACTURADO_FILL)
+  doc.rect(left, topY, width, rowH, 'F')
 
   doc.setDrawColor(...PAGOS_BORDER_RGB)
   doc.setLineWidth(0.25)
-  doc.line(left, topY, left, row3Y)
-  doc.line(left + width, topY, left + width, row3Y)
+  doc.line(left, topY, left, totalRowY)
+  doc.line(left + width, topY, left + width, totalRowY)
   doc.line(left, row1Y, left + width, row1Y)
   doc.line(left, row2Y, left + width, row2Y)
   doc.line(left, row3Y, left + width, row3Y)
+  if (deudaConCuidar > 0) {
+    doc.line(left, totalRowY, left + width, totalRowY)
+  }
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(PAGOS_SUBTOTAL_VALUE_FS)
   const maxValueW = Math.max(
     doc.getTextWidth(money(amount)),
-    doc.getTextWidth(`${s.porcentaje}%`),
+    doc.getTextWidth(money(transferTotal)),
     doc.getTextWidth(money(s.totalPorcentaje)),
-    doc.getTextWidth(money(s.totalGeneral)),
+    doc.getTextWidth(money(deudaConCuidar)),
+    doc.getTextWidth(money(efectivoAEntregarVisible)),
   )
   const labelRightX = right - maxValueW - 4
 
@@ -809,8 +1008,8 @@ export function drawPagosDoctorSubtotalBar(
     left,
     width,
     subtotalTextY(row1Y),
-    '% Médico',
-    `${s.porcentaje}%`,
+    'Ya cobró por transferencia',
+    money(transferTotal),
     labelRightX,
   )
   drawPagosSubtotalAmountRight(
@@ -818,28 +1017,173 @@ export function drawPagosDoctorSubtotalBar(
     left,
     width,
     subtotalTextY(row2Y),
-    'Total %',
-    money(s.totalPorcentaje),
+    `Total ${porcentajeCuidarLabel} Cuidar`,
+    money(s.totalPorcentaje * signoCuidar),
     labelRightX,
+    { boldLabelPart: porcentajeCuidarLabel },
   )
 
-  fillPagosBarBottomRound(doc, left, row3Y, width, rowH, PAGOS_DOCTOR_BLOCK_RADIUS)
+  if (deudaConCuidar > 0) {
+    drawPagosSubtotalAmountRight(
+      doc,
+      left,
+      width,
+      subtotalTextY(row3Y),
+      'Comisión pendiente - Deuda del médico con Cuidar',
+      money(deudaConCuidar),
+      labelRightX,
+    )
+  }
+
+  fillPagosBarBottomRound(doc, left, totalRowY, width, rowH, PAGOS_DOCTOR_BLOCK_RADIUS)
   drawPagosSubtotalAmountRight(
     doc,
     left,
     width,
-    subtotalTextY(row3Y),
+    subtotalTextY(totalRowY),
     'Total',
-    money(s.totalGeneral),
+    money(efectivoAEntregarVisible),
     labelRightX,
   )
 
-  return row3Y + rowH + 5
+  if (deudaConCuidar > 0) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(138, 75, 8)
+    doc.text(
+      'Se cobrará la comisión en turnos posteriores o con pagos a acordar con Cuidar.',
+      left + 3,
+      totalRowY + rowH + 4,
+      { maxWidth: width - 6 },
+    )
+    return totalRowY + rowH + 10
+  }
+
+  return totalRowY + rowH + 5
+}
+
+const PAGOS_RESUMEN_TABLE_LINE: [number, number, number] = [225, 232, 242]
+const PAGOS_RESUMEN_EFECTIVO_FILL: [number, number, number] = [238, 244, 255]
+
+/** Filas de totales pegadas a la lista de pagos del médico. */
+export function drawPagosDoctorResumenTable(
+  doc: jsPDF,
+  y: number,
+  left: number,
+  width: number,
+  settlement: DoctorResumenSettlement,
+  todosTransferencia = false,
+): number {
+  const pageW = doc.internal.pageSize.getWidth()
+  const rightMargin = pageW - left - width
+  const deuda = Math.max(0, -settlement.efectivoAEntregar)
+  const efectivoAEntregar = Math.max(0, settlement.efectivoAEntregar)
+  // Con todo el bloque por transferencia, la comisión sale del lado del centro
+  // y no se le adeuda: va negativa.
+  const signoCuidar = todosTransferencia ? -1 : 1
+  const bodyRows = [
+    ['Total facturado', money(settlement.facturado)],
+    [`Comisión para Cuidar (${settlement.porcentaje}%)`, money(settlement.comision * signoCuidar)],
+    ['Ya cobró por transferencia', money(settlement.transferencias)],
+    ['Efectivo a entregar', money(efectivoAEntregar)],
+  ]
+  if (deuda > 0) {
+    bodyRows.push([
+      'Comisión pendiente - Deuda del médico con Cuidar',
+      money(deuda),
+    ])
+  }
+
+  autoTable(doc, {
+    startY: y,
+    body: bodyRows,
+    tableWidth: width,
+    margin: { left, right: rightMargin, top: 0, bottom: 0 },
+    styles: {
+      fontSize: 8.5,
+      cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 3 },
+      textColor: [26, 39, 68],
+      lineColor: PAGOS_RESUMEN_TABLE_LINE,
+      lineWidth: 0.1,
+      valign: 'middle',
+      minCellHeight: PAGOS_DOCTOR_RESUMEN_ROW_H,
+    },
+    columnStyles: {
+      1: { halign: 'right', fontStyle: 'bold' },
+    },
+    didParseCell: (data) => {
+      const lastRowIndex = deuda > 0 ? 4 : 3
+      if (data.section === 'body' && data.row.index === 0) {
+        data.cell.styles.fillColor = PAGOS_SUBTOTAL_FACTURADO_FILL
+      }
+      if (data.section === 'body' && data.row.index === lastRowIndex) {
+        data.cell.styles.fontStyle = 'bold'
+        data.cell.styles.fillColor = deuda > 0
+          ? [255, 245, 230]
+          : PAGOS_RESUMEN_EFECTIVO_FILL
+      }
+    },
+  })
+
+  const finalY =
+    (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable
+      ?.finalY ?? y + PAGOS_DOCTOR_RESUMEN_ROW_H * bodyRows.length
+  if (deuda > 0) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(138, 75, 8)
+    doc.text(
+      'Se cobrará la comisión en turnos posteriores o con pagos a acordar con Cuidar.',
+      left + 3,
+      finalY + 4,
+      { maxWidth: width - 6 },
+    )
+    return finalY + 10
+  }
+  return finalY + 5
 }
 
 export type PagosTotalBarLabels = {
   left?: string
+  /** Texto normal a continuación del título en negrita (misma línea). */
+  leftSuffix?: string
   center?: string
+  marginX?: number
+}
+
+/**
+ * Pastilla de totales de una sola línea: todo el texto en negrita, más grande
+ * que el cuerpo y alineado a la derecha.
+ *
+ * A diferencia de `drawPagosTotalGeneralBar`, la caja se ajusta al ancho del
+ * texto en vez de ocupar toda la página: con un único texto pegado al borde
+ * derecho de una barra de página completa quedaba media hoja en blanco.
+ */
+export function drawPagosTotalsPill(
+  doc: jsPDF,
+  y: number,
+  text: string,
+  options?: { marginX?: number; fontSize?: number },
+): number {
+  const marginX = options?.marginX ?? PAGOS_PDF_MARGIN
+  const fontSize = options?.fontSize ?? 11
+  const h = PAGOS_TOTAL_GENERAL_BAR_H
+  const r = PAGOS_DOCTOR_BLOCK_RADIUS
+  const padX = 5
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(fontSize)
+  const width = doc.getTextWidth(text) + padX * 2
+  const left = doc.internal.pageSize.getWidth() - marginX - width
+
+  doc.setFillColor(238, 244, 255)
+  doc.setDrawColor(210, 222, 238)
+  doc.setLineWidth(0.25)
+  doc.roundedRect(left, y, width, h, r, r, 'FD')
+
+  doc.setTextColor(26, 39, 68)
+  doc.text(text, left + width - padX, y + h / 2 + 0.95, { align: 'right' })
+  return y + h + 5
 }
 
 /** Barra final: etiqueta izq · centro · monto a la derecha. */
@@ -851,8 +1195,8 @@ export function drawPagosTotalGeneralBar(
   totalMonto: number,
   labels?: PagosTotalBarLabels,
 ): number {
-  const left = PAGOS_PDF_MARGIN
-  const width = pageW - 2 * PAGOS_PDF_MARGIN
+  const left = labels?.marginX ?? PAGOS_PDF_MARGIN
+  const width = pageW - 2 * left
   const h = PAGOS_TOTAL_GENERAL_BAR_H
 
   const r = PAGOS_DOCTOR_BLOCK_RADIUS
@@ -862,10 +1206,22 @@ export function drawPagosTotalGeneralBar(
   doc.roundedRect(left, y, width, h, r, r, 'FD')
 
   const textY = y + h / 2 + 0.95
+  const leftMain = labels?.left ?? 'Total general'
+  const xStart = left + 5
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
   doc.setTextColor(26, 39, 68)
-  doc.text(labels?.left ?? 'Total general', left + 5, textY)
+  doc.text(leftMain, xStart, textY)
+  if (labels?.leftSuffix) {
+    const suffixGapMm = 8
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.text(
+      labels.leftSuffix,
+      xStart + doc.getTextWidth(leftMain) + suffixGapMm,
+      textY,
+    )
+  }
 
   const pagosLabel =
     labels?.center ??
@@ -981,7 +1337,7 @@ export function buildPagosSummaryMetrics(
   return {
     medicos: doctorCount,
     totalFacturado: payments.reduce((s, p) => s + p.monto, 0),
-    totalPagos: payments.length,
+    totalPagos: countDistinctPagos(payments),
     pendiente: 0,
   }
 }
@@ -996,5 +1352,5 @@ export function formatPagosPdfDateTime(
   if (scope === 'dia') {
     return format(parseISO(iso), 'HH:mm', { locale: es })
   }
-  return format(parseISO(iso), 'd MMM yyyy HH:mm', { locale: es })
+  return format(parseISO(iso), 'd MMM yyyy', { locale: es })
 }

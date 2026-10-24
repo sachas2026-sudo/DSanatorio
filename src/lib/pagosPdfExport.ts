@@ -6,7 +6,8 @@ import {
   formatPdfResumenTitle,
   type AllDoctorsPdfScope,
 } from './doctorPaymentsPdf'
-import type { Payment } from '../types'
+import { countDistinctPagos } from './pagosPdfLayout'
+import type { Appointment, Payment } from '../types'
 import type jsPDF from 'jspdf'
 
 export type PagosPeriodoPdfExport = {
@@ -23,6 +24,7 @@ export function buildPagosPeriodoPdfExport(params: {
   patientLabel: (patientId: string) => string
   obraSocialLabel: (patientId: string) => string
   doctorLabel: (doctorId: string) => string
+  appointmentById?: (id: string) => Appointment | undefined
 }): PagosPeriodoPdfExport {
   const {
     periodo,
@@ -32,6 +34,7 @@ export function buildPagosPeriodoPdfExport(params: {
     patientLabel,
     obraSocialLabel,
     doctorLabel,
+    appointmentById,
   } = params
 
   if (periodo === 'dia') {
@@ -41,10 +44,12 @@ export function buildPagosPeriodoPdfExport(params: {
       doctorLabel,
       obraSocialLabel,
       'HH:mm',
+      appointmentById,
     )
     const built = buildDayPaymentsPdf({
       dayLabel: periodLabel,
       rows,
+      totalPagos: countDistinctPagos(payments),
       fileStamp,
       headerTitle: `Pagos del día - ${periodLabel}`,
       dateColumnHeader: 'Hora',
@@ -63,7 +68,7 @@ export function buildPagosPeriodoPdfExport(params: {
     periodo === 'mes'
       ? {
           headerTitle: `Pagos del mes - ${periodLabel}`,
-          dateFormat: 'd MMM yyyy HH:mm',
+          dateFormat: 'd MMM yyyy',
           dateColumnHeader: 'Fecha',
           emptyMessage: 'No hay pagos registrados en este mes.',
           totalLabel: 'Total del mes',
@@ -73,7 +78,7 @@ export function buildPagosPeriodoPdfExport(params: {
         }
       : {
           headerTitle: `Pagos del año - ${periodLabel}`,
-          dateFormat: 'd MMM yyyy HH:mm',
+          dateFormat: 'd MMM yyyy',
           dateColumnHeader: 'Fecha',
           emptyMessage: 'No hay pagos registrados en este año.',
           totalLabel: 'Total del año',
@@ -90,6 +95,7 @@ export function buildPagosPeriodoPdfExport(params: {
     doctorLabel,
     scope: periodo,
     fileStamp,
+    appointmentById,
     ...scopeOpts,
   })
 

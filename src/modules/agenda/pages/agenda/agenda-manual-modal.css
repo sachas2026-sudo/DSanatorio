@@ -1,0 +1,101 @@
+.agenda-manual-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(26, 39, 68, 0.45);
+  backdrop-filter: blur(3px);
+}
+
+.agenda-manual-sheet {
+  width: min(540px, 100%);
+  max-height: min(90vh, 720px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #dde4f0;
+  box-shadow: 0 24px 60px rgba(20, 40, 80, 0.22);
+  overflow: hidden;
+}
+
+.agenda-manual-sheet__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef4fc 100%);
+  border-bottom: 1px solid #dde4f0;
+}
+
+.agenda-manual-sheet__title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1a2744;
+}
+
+.agenda-manual-sheet__sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+  color: #6b7c93;
+}
+
+.agenda-manual-sheet__close {
+  border: 1px solid #dde4f0;
+  background: #fff;
+  color: #6b7c93;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 7px;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.agenda-manual-sheet__close:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.agenda-manual-sheet__body {
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+.agenda-manual-sheet__error {
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 0.84rem;
+}
+
+.agenda-manual-sheet__hint {
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.agenda-manual-sheet__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  padding: 0.85rem 1.25rem;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+}

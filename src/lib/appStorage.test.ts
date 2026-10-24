@@ -15,6 +15,7 @@ import {
   loadStorageRaw,
   saveStorageRaw,
   serializeAppData,
+  serializeAppDataForBackup,
 } from './appStorage'
 
 const sampleData: AppData = {
@@ -50,6 +51,19 @@ describe('appStorage (navegador)', () => {
     localStorage.clear()
   })
 
+  it('serializeAppDataForBackup no incluye claves en settings', () => {
+    const withSecrets = {
+      ...sampleData,
+      settings: {
+        ...sampleData.settings,
+        clave: 'smtp-secret',
+      },
+    }
+    const json = serializeAppDataForBackup(withSecrets)
+    const parsed = JSON.parse(json) as AppData
+    expect(parsed.settings.clave).toBe('')
+  })
+
   it('serializeAppData produce JSON estable sin clave SMTP', () => {
     const withClave = {
       ...sampleData,
@@ -66,6 +80,24 @@ describe('appStorage (navegador)', () => {
     await saveStorageRaw(json)
     expect(localStorage.getItem(STORAGE_KEY)).toBe(json)
     await expect(loadStorageRaw()).resolves.toBe(json)
+  })
+
+  it('preserva configuraciones de permisos de usuarios en serialize y load', async () => {
+    const dataWithPermisos: AppData = {
+      ...sampleData,
+      settings: {
+        ...sampleData.settings,
+        secretariaPuedeModificarMesActual: true,
+        secretariaPuedeModificarTurnosOtrosUsuarios: true,
+      },
+    }
+    const json = serializeAppData(dataWithPermisos)
+    await saveStorageRaw(json)
+    const loaded = await loadStorageRaw()
+    expect(loaded).toBeTruthy()
+    const parsed = JSON.parse(loaded!) as AppData
+    expect(parsed.settings.secretariaPuedeModificarMesActual).toBe(true)
+    expect(parsed.settings.secretariaPuedeModificarTurnosOtrosUsuarios).toBe(true)
   })
 
   it('loadStorageRaw devuelve null si no hay datos', async () => {

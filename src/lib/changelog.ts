@@ -7,16 +7,16 @@ export type ChangelogEntry = {
 /** Novedades recientes (más reciente primero). */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '1.1.7',
+    version: '1.1.0',
     date: 'May 2026',
     highlights: [
-      'Estabilidad: tests automatizados, respaldos diarios y validación al importar.',
-      'Seguridad: contraseñas hasheadas y clave SMTP fuera del JSON.',
-      'Pagos: dos formas de pago por turno (split pay).',
-      'Roles: exportaciones sensibles y liquidación solo para administración.',
-      'Agenda: columnas de médicos con ancho fijo y scroll horizontal.',
-      'Producto: versión en barra lateral, atajos Alt+número y modal de ayuda (F1).',
-      'Refactor: libs agendaDisplay/paymentInput/appStateLoad; pestañas config agenda; CSS pagos cancelados.',
+      'Calidad: CI (lint, tests, build), tests Rust de respaldos, versión unificada.',
+      'Respaldos: rotación, diarios 60 días, companion (usuarios y claves), restauración en Configuración.',
+      'Instalación en C:\\Sanatorio (app, datos y respaldos).',
+      'Seguridad: contraseñas hasheadas; clave SMTP en archivo aparte del JSON.',
+      'Pagos: dos formas de pago por turno (split pay); roles Admi / Secretaría.',
+      'Agenda: columnas de médicos, PDF turnos, correo; pacientes/médicos suspendidos.',
+      'Producto: versión en barra lateral, atajos Alt+número y ayuda F1.',
     ],
   },
 ]

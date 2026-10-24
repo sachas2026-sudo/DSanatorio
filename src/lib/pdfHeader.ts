@@ -25,7 +25,7 @@ const PDF_HEADER_PLAIN_PAD_TOP = 4
 export const PDF_HEADER_AGENDA_MARGIN = 7
 
 /** Tamaño del título en la barra azul */
-export const PDF_HEADER_FONT_SIZE = 11.5
+export const PDF_HEADER_FONT_SIZE = 18
 
 /** Primera línea de contenido debajo del encabezado (mínimo; usar retorno de drawPdfHeader si es mayor). */
 export const PDF_BODY_START_Y = 30
@@ -60,12 +60,16 @@ export function formatPdfBrandTitle(subtitle?: string): string {
 }
 
 export type PdfHeaderDrawOptions = {
+  /** Título completo personalizado, sin el prefijo automático de gestión. */
+  titleOverride?: string
   /** Segunda línea bajo el título (ej. médico en agenda). */
   secondLine?: string
   /** `plain`: banner con logo (default). `blue`: barra azul legacy. */
   variant?: 'blue' | 'plain'
   /** Margen lateral del banner en mm (default: PAGOS_PDF_MARGIN). */
   marginX?: number
+  /** Tamaño del texto central del banner, en puntos. */
+  fontSize?: number
 }
 
 function drawPlainStyledHeader(
@@ -76,12 +80,13 @@ function drawPlainStyledHeader(
   boxH: number,
   title: string,
   secondLine?: string,
+  fontSize: number = PDF_HEADER_FONT_SIZE,
 ): void {
   const png = renderPlainHeaderFromBanner(
     boxW,
     boxH,
     title,
-    PDF_HEADER_FONT_SIZE,
+    fontSize,
     secondLine,
   )
 
@@ -91,7 +96,7 @@ function drawPlainStyledHeader(
   }
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(PDF_HEADER_FONT_SIZE)
+  doc.setFontSize(fontSize)
   doc.setTextColor(26, 39, 68)
   doc.text(title, boxX + boxW / 2, boxY + boxH / 2 + 1, {
     align: 'center',
@@ -111,7 +116,9 @@ export function drawPdfHeader(
   const variant = opts.variant ?? 'plain'
   const second = opts.secondLine?.trim()
 
-  const fullTitle = formatPdfBrandTitle(subtitle)
+  const fullTitle = opts.titleOverride?.trim()
+    ? opts.titleOverride.trim()
+    : formatPdfBrandTitle(subtitle)
   const logo = getPdfLogo()
   const plainMarginX = opts.marginX ?? PAGOS_PDF_MARGIN
   const logoMargin = PDF_HEADER_LOGO_MARGIN
@@ -132,6 +139,7 @@ export function drawPdfHeader(
       headerHeight,
       fullTitle,
       second,
+      opts.fontSize ?? PDF_HEADER_FONT_SIZE,
     )
 
     return headerHeight + contentTop

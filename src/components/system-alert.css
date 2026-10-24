@@ -35,3 +35,42 @@
 .system-alert__close:hover {
   opacity: 1;
 }
+
+.system-alert--daily-backup {
+  border-color: #f0c674;
+  background: #fff8e6;
+  color: #7a4f01;
+}
+
+.system-alert--daily-backup .system-alert__close {
+  color: #7a4f01;
+}
+
+.system-alert__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.system-alert__action {
+  border: 1px solid #e6c36a;
+  background: #fff;
+  color: #7a4f01;
+  border-radius: 6px;
+  padding: 0.35rem 0.65rem;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.system-alert__action:hover:not(:disabled) {
+  background: #fff3d0;
+}
+
+.system-alert__action:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}

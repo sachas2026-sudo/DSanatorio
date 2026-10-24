@@ -12,6 +12,7 @@ export default defineConfig([
     'node_modules',
     'src-tauri/target',
     'src-tauri/gen',
+    '_zip-staging/**',
     '**/*.local',
   ]),
   {
@@ -24,6 +25,9 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     rules: {
       '@typescript-eslint/no-unused-vars': [

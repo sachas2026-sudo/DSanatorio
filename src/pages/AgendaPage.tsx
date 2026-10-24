@@ -1,23 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  addMonths,
+  addDays,
   addWeeks,
   format,
   isSameDay,
   parseISO,
+  startOfDay,
   startOfWeek,
 } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
   IconActionButton,
   IconCancelDay,
+  IconDots,
   IconEdit,
+  IconPlus,
   IconRestoreDay,
-  IconTrash,
   IconWhatsApp,
 } from '../components/icons'
 import { AgendaMedicosEspecialidadesModal } from '../components/AgendaMedicosEspecialidadesModal'
+import { ReprogramarTurnoWhatsAppModal } from './agenda/ReprogramarTurnoWhatsAppModal'
 import { EliminarPagoModal } from '../components/EliminarPagoModal'
+import { MotivosConsultaModal } from '../components/MotivosConsultaModal'
 import { PdfPreviewModal } from '../components/PdfPreviewModal'
 import { formatMonto } from '../lib/formatMonto'
 import { formatAppError, logAppError } from '../lib/persistAlert'
@@ -27,6 +31,7 @@ import { preloadPdfLogo } from '../lib/pdfLogo'
 import { useAuth } from '../context/AuthContext'
 import {
   canSendClinicalEmailExport,
+  canViewDoctorPorcentaje,
   EXPORT_DENIED_MESSAGE,
 } from '../lib/exportPermissions'
 import { useAppState } from '../context/AppStateContext'
@@ -56,7 +61,13 @@ import {
   buildAgendaTurnosPdf,
   collectAgendaTurnosPdfDays,
 } from '../lib/agendaTurnosPdf'
+import {
+  agendaWhatsAppPacientesPdfPreviewTitle,
+  buildAgendaWhatsAppPacientesPdf,
+  collectAgendaWhatsAppPacientesDays,
+} from '../lib/agendaWhatsAppPacientesPdf'
 import { pdfBlobUrl, pdfToBase64, savePdfFile } from '../lib/doctorPaymentsPdf'
+import { buildAgendaMedicoLibresPdf } from '../lib/agendaMedicoPdf'
 import type jsPDF from 'jspdf'
 import {
   validateAppointmentSlot,
@@ -64,17 +75,20 @@ import {
   isAgendaWorkingDay,
 } from '../lib/agendaRules'
 import { groupDiasLibresByDoctor } from '../lib/diasLibres'
-import { citasEnFranja, medicoGroupsEnFranja, mergeMedicoGroupsDia, splitCitasMananaTarde } from '../lib/dayTurnos'
+import {
+  medicoGroupsCitasDelDia,
+  splitCitasMananaTarde,
+} from '../lib/dayTurnos'
 import {
   buildMedicosEspecialidadesRows,
-  DURACION_TURNO_OPCIONES,
+  URGENCIA_DURACION_DEFAULT,
+  URGENCIA_DURACION_OPCIONES,
   doctorDuracionTurno,
   formatAgendaRanges,
   isDoctorAgendaMensual,
 } from '../lib/doctorAgenda'
 import {
   combineDateAndTimeLocal,
-  DEFAULT_AGENDA_RANGES,
   generateSlotsForDay,
   turnosLibresMedicoDia,
   type TurnosLibresMedicoDia,
@@ -83,6 +97,11 @@ import {
   isDoctorAvailableOnDate,
   planDoctorDay,
 } from '../lib/weekSlots'
+import { isMedicoActivo, medicosActivos, pacientesActivos } from '../lib/activo'
+import {
+  patientMatchesPickerQuery,
+  patientPickerLineLegacy,
+} from '../lib/dniLabels'
 import type { Appointment, AppointmentEstado, Doctor } from '../types'
 import { createId } from '../lib/id'
 import {
@@ -92,6 +111,11 @@ import {
   formatDayCitaEstado,
   splitMedicoPillLabel,
 } from '../lib/agendaDisplay'
+import {
+  MOTIVO_CONSULTA_DEFAULT,
+  motivoConsultaFromNotas,
+  notasFromMotivoConsulta,
+} from '../lib/motivoConsulta'
 import {
   formatMontoFieldInput,
   parseMontoInput,
@@ -103,26 +127,42 @@ import {
   AgendaLibresTab,
   AgendaMensualTab,
 } from './agenda/AgendaConfigTabs'
-import { AgendaExportBar } from './agenda/AgendaExportBar'
+import { AgendaPageHeader, type AgendaTab } from './agenda/AgendaPageHeader'
+import {
+  AgendaTurnosDayNavNext,
+  AgendaTurnosDayNavPrev,
+  AgendaTurnosWeekNav,
+} from './agenda/AgendaTurnosWeekNav'
+import { AgendaWeekCalendar } from './agenda/AgendaWeekCalendar'
+import { AgendaMedicoModal } from './agenda/AgendaMedicoModal'
+import { AtencionSinTurnoModal } from './agenda/AtencionSinTurnoModal'
+import { QuickPacienteModal } from './agenda/QuickPacienteModal'
 import {
   buildMedicoAgendaMessage,
-  buildTurnoReminderMessage,
+  buildTurnoReminderMessageFromCita,
+  buildTurnoReprogramacionMessage,
   buildWhatsAppSendUrl,
+  fechaCalendarioTurnoAgenda,
+  markWhatsAppRecordatorioEnviado,
+  openWhatsAppSecuencial,
   openWhatsAppUrl,
 } from '../lib/whatsapp'
 import './pages.css'
 
-type Tab = 'turnos' | 'horarios' | 'franja' | 'mensual' | 'libres'
+type Tab = AgendaTab
 
 export function AgendaPage() {
   const { role } = useAuth()
+  const puedeVerPorcentaje = canViewDoctorPorcentaje(role)
   const puedeEnviarCorreo = canSendClinicalEmailExport(role)
   const {
     data,
+    upsertPatient,
     upsertAppointment,
-    archiveCitaEliminada,
+    archiveCitaCancelada,
     upsertHorario,
     deleteHorario,
+    deleteHorariosForDoctor,
     upsertDiaLibre,
     deleteDiaLibre,
     upsertAtencionMensual,
@@ -130,15 +170,46 @@ export function AgendaPage() {
     upsertDoctor,
     upsertPayment,
     deletePayment,
+    saveAtencionSinTurnoListado,
+    deleteAtencionSinTurnoListado,
     patientById,
     doctorById,
+    localidadesOpciones,
+    motivosConsultaOpciones,
+    addMotivoConsultaCustom,
+    removeMotivoConsultaCustom,
+    renameMotivoConsultaCustom,
   } = useAppState()
   const { confirm } = useConfirm()
 
+  const pacientesOperativos = useMemo(
+    () => pacientesActivos(data.patients),
+    [data.patients],
+  )
+  const medicosOperativos = useMemo(
+    () =>
+      [...medicosActivos(data.doctors)].sort((a, b) =>
+        `${a.apellido} ${a.nombre}`.localeCompare(`${b.apellido} ${b.nombre}`, 'es', {
+          sensitivity: 'base',
+        }),
+      ),
+    [data.doctors],
+  )
+
   const [tab, setTab] = useState<Tab>('turnos')
+  const [agendaMedicoOpen, setAgendaMedicoOpen] = useState(false)
+  const [atencionSinTurnoOpen, setAtencionSinTurnoOpen] = useState(false)
+  const [agendaMedicoDoctorId, setAgendaMedicoDoctorId] = useState('')
+  const [closeAgendaMedicoAfterBooking, setCloseAgendaMedicoAfterBooking] =
+    useState(false)
   const [medicosEspModalOpen, setMedicosEspModalOpen] = useState(false)
+  const [reprogramarWa, setReprogramarWa] = useState<{
+    doctorId: string
+    doctorName: string
+    citas: Appointment[]
+  } | null>(null)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
-  const [citaToDelete, setCitaToDelete] = useState<Appointment | null>(null)
+  const [citaToCancel, setCitaToCancel] = useState<Appointment | null>(null)
 
   const [agendaPdfPreview, setAgendaPdfPreview] = useState<{
     url: string
@@ -182,7 +253,7 @@ export function AgendaPage() {
     franja: 'manana' | 'tarde'
   } | null>(null)
   const [agendaExportScope, setAgendaExportScope] =
-    useState<AgendaPdfScope>('week')
+    useState<AgendaPdfScope>('day')
   const [agendaExportDoctorId, setAgendaExportDoctorId] = useState('')
 
   const [bookingOpen, setBookingOpen] = useState(false)
@@ -191,10 +262,43 @@ export function AgendaPage() {
   const [bookingDoctorId, setBookingDoctorId] = useState('')
   const [bookingPatientId, setBookingPatientId] = useState('')
   const [bookingPatientQuery, setBookingPatientQuery] = useState('')
+  const [bookingPatientObraSocial, setBookingPatientObraSocial] = useState('')
+  const [bookingIsParticular, setBookingIsParticular] = useState(false)
   const [bookingPatientPickerOpen, setBookingPatientPickerOpen] = useState(false)
+
+  const obrasSocialesDisponibles = useMemo(() => {
+    const s = new Set<string>()
+    for (const p of data.patients) {
+      if (p.obraSocial && p.obraSocial.trim()) {
+        s.add(p.obraSocial.trim())
+      }
+    }
+    return Array.from(s).sort()
+  }, [data.patients])
+
+  const bookingSelectedPatient = useMemo(() => {
+    if (bookingPatientId) {
+      return patientById(bookingPatientId)
+    }
+    const q = bookingPatientQuery.trim()
+    if (!q) return null
+    const matches = pacientesOperativos.filter((p) =>
+      patientMatchesPickerQuery(p, q),
+    )
+    return matches.length === 1 ? matches[0] : null
+  }, [bookingPatientId, bookingPatientQuery, patientById, pacientesOperativos])
+  const [quickPacienteOpen, setQuickPacienteOpen] = useState(false)
+  const [quickPacienteInitialDni, setQuickPacienteInitialDni] = useState<string>('')
   const [bookingDuracion, setBookingDuracion] = useState(30)
   const [bookingEstado, setBookingEstado] = useState<AppointmentEstado>('programado')
-  const [bookingNotas, setBookingNotas] = useState('')
+  const [bookingMotivoConsulta, setBookingMotivoConsulta] = useState<string>(
+    MOTIVO_CONSULTA_DEFAULT,
+  )
+  const [bookingMotivoOtro, setBookingMotivoOtro] = useState('')
+  const [motivosConsultaModalOpen, setMotivosConsultaModalOpen] = useState(false)
+  const motivosConsultaOnAddedRef = useRef<((nombre: string) => void) | null>(
+    null,
+  )
   const [bookingMonto, setBookingMonto] = useState('')
   const [bookingMetodo, setBookingMetodo] = useState('Efectivo')
   const [bookingMonto2, setBookingMonto2] = useState('')
@@ -205,34 +309,45 @@ export function AgendaPage() {
   const [bookingFueraGrilla, setBookingFueraGrilla] = useState(false)
   const [bookingManualHm, setBookingManualHm] = useState('')
   const [bookingFormError, setBookingFormError] = useState<string | null>(null)
+  const [citaActionsOpenId, setCitaActionsOpenId] = useState<string | null>(null)
+  const citaNameClickTimerRef = useRef<number | null>(null)
+  const [medicoMenuOpenKey, setMedicoMenuOpenKey] = useState<string | null>(null)
 
-  const URGENCIA_DURACION_DEFAULT = 15
+  useEffect(() => {
+    if (!medicoMenuOpenKey) return
+    function handleClickOutside() {
+      setMedicoMenuOpenKey(null)
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMedicoMenuOpenKey(null)
+    }
+    window.addEventListener('click', handleClickOutside)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('click', handleClickOutside)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [medicoMenuOpenKey])
 
   const bookingTotalMonto = useMemo(() => {
     return parseMontoInput(bookingMonto) + parseMontoInput(bookingMonto2)
   }, [bookingMonto, bookingMonto2])
 
+  const bookingMetodosIguales = useMemo(
+    () => bookingMetodo === bookingMetodo2,
+    [bookingMetodo, bookingMetodo2],
+  )
+
   const resolveBookingPatientId = useCallback((): string | null => {
     if (bookingPatientId) return bookingPatientId
-    const q = bookingPatientQuery.trim().toLowerCase()
+    const q = bookingPatientQuery.trim()
     if (!q) return null
-    const label = (p: (typeof data.patients)[0]) =>
-      `${p.dni ? `${p.dni} · ` : ''}${p.apellido}, ${p.nombre}`.toLowerCase()
-    const exact = data.patients.filter(
-      (p) =>
-        (p.dni ?? '').toLowerCase() === q ||
-        `${p.apellido}, ${p.nombre}`.toLowerCase() === q ||
-        label(p) === q,
+    const matches = pacientesOperativos.filter((p) =>
+      patientMatchesPickerQuery(p, q),
     )
-    if (exact.length === 1) return exact[0]!.id
-    const partial = data.patients.filter(
-      (p) =>
-        (p.dni ?? '').toLowerCase().includes(q) ||
-        (p.apellido ?? '').toLowerCase().includes(q),
-    )
-    if (partial.length === 1) return partial[0]!.id
+    if (matches.length === 1) return matches[0]!.id
     return null
-  }, [bookingPatientId, bookingPatientQuery, data.patients])
+  }, [bookingPatientId, bookingPatientQuery, pacientesOperativos])
 
   const [citaEditing, setCitaEditing] = useState<string | null>(null)
   const [citaForm, setCitaForm] = useState({
@@ -241,7 +356,8 @@ export function AgendaPage() {
     fechaHoraLocal: '',
     duracionMinutos: 30,
     estado: 'programado' as AppointmentEstado,
-    notas: '',
+    motivoConsulta: MOTIVO_CONSULTA_DEFAULT as string,
+    motivoOtro: '',
   })
 
   const [horForm, setHorForm] = useState({
@@ -391,11 +507,8 @@ export function AgendaPage() {
   )
 
   const agendaExportDoctors = useMemo(
-    () =>
-      [...data.doctors].sort((a, b) =>
-        a.apellido.localeCompare(b.apellido, 'es', { sensitivity: 'base' }),
-      ),
-    [data.doctors],
+    () => medicosOperativos,
+    [medicosOperativos],
   )
 
   const agendaExportDoctorSuffix = useMemo(() => {
@@ -708,6 +821,7 @@ export function AgendaPage() {
         doctorFilterId: agendaExportDoctorId || undefined,
         doctorLabel,
         patientLabel: pdfPatientLabel,
+        obraSocialLabel: pdfObraSocialLabel,
         estadoFor: (c) => {
           const t = parseISO(c.fechaHora)
           const isPagado =
@@ -724,6 +838,8 @@ export function AgendaPage() {
         days,
         fileStamp,
         singleDoctorLabel: agendaPdfSingleDoctorLabel,
+        fixedMedicoColumnSlots:
+          role === 'secretaria' && !agendaExportDoctorId ? 5 : undefined,
       })
       showAgendaPdfPreview(
         built,
@@ -734,6 +850,45 @@ export function AgendaPage() {
       console.error(err)
       void confirm({
         message: 'No se pudo generar el PDF de turnos. Probá de nuevo.',
+      })
+    }
+  }
+
+  async function handleAgendaWhatsAppPacientesPdfPreview() {
+    const resolved = resolveAgendaExport()
+    if (!resolved.ok) {
+      void confirm({ message: resolved.message })
+      return
+    }
+    const { periodLabel, fileStamp, scope } = resolved.data
+    try {
+      await Promise.all([preloadPdfLogo(), preloadPdfHeaderBanner()])
+      const days = collectAgendaWhatsAppPacientesDays({
+        scope,
+        data,
+        weekCursor,
+        selectedDay: selectedWeekDay,
+        weekDays,
+        doctorFilterId: agendaExportDoctorId || undefined,
+        patientLabel: pdfPatientLabel,
+        doctorLabel,
+      })
+      const built = buildAgendaWhatsAppPacientesPdf({
+        scope,
+        periodLabel,
+        days,
+        fileStamp,
+        singleDoctorLabel: agendaPdfSingleDoctorLabel,
+      })
+      showAgendaPdfPreview(
+        built,
+        agendaWhatsAppPacientesPdfPreviewTitle(scope, periodLabel),
+        { showFilename: false },
+      )
+    } catch (err) {
+      console.error(err)
+      void confirm({
+        message: 'No se pudo generar el PDF de WhatsApp pacientes. Probá de nuevo.',
       })
     }
   }
@@ -752,32 +907,15 @@ export function AgendaPage() {
     }
   }
 
-  const citasPorMedicoManana = useMemo(() => {
-    if (!selectedWeekDay) return []
-    return medicoGroupsEnFranja({
-      citasFranja: citasEnFranja(citasDelDia, DEFAULT_AGENDA_RANGES[0]!),
-      selectedDay: selectedWeekDay,
-      franja: DEFAULT_AGENDA_RANGES[0]!,
-      data,
-      doctorLabel,
-    })
-  }, [selectedWeekDay, citasDelDia, data, doctorLabel])
-
-  const citasPorMedicoTarde = useMemo(() => {
-    if (!selectedWeekDay) return []
-    return medicoGroupsEnFranja({
-      citasFranja: citasEnFranja(citasDelDia, DEFAULT_AGENDA_RANGES[1]!),
-      selectedDay: selectedWeekDay,
-      franja: DEFAULT_AGENDA_RANGES[1]!,
-      data,
-      doctorLabel,
-    })
-  }, [selectedWeekDay, citasDelDia, data, doctorLabel])
-
   const citasPorMedicoDia = useMemo(() => {
     if (!selectedWeekDay) return []
-    return mergeMedicoGroupsDia(citasPorMedicoManana, citasPorMedicoTarde)
-  }, [selectedWeekDay, citasPorMedicoManana, citasPorMedicoTarde])
+    return medicoGroupsCitasDelDia({
+      citas: citasDelDia,
+      selectedDay: selectedWeekDay,
+      data,
+      doctorLabel,
+    })
+  }, [selectedWeekDay, citasDelDia, data, doctorLabel])
 
   const turnosActivosPorMedicoDia = useMemo(() => {
     const counts = new Map<string, number>()
@@ -793,12 +931,12 @@ export function AgendaPage() {
   const turnosLibresPorMedicoDia = useMemo(() => {
     const map = new Map<string, TurnosLibresMedicoDia>()
     if (!selectedWeekDay) return map
-    for (const d of data.doctors) {
+    for (const d of medicosOperativos) {
       const info = turnosLibresMedicoDia(d.id, selectedWeekDay, data)
       if (info) map.set(d.id, info)
     }
     return map
-  }, [selectedWeekDay, data])
+  }, [selectedWeekDay, data, medicosOperativos])
 
   const turnosCanceladosPorMedicoDia = useMemo(() => {
     const counts = new Map<string, number>()
@@ -817,33 +955,21 @@ export function AgendaPage() {
   }, [bookingFueraGrilla, bookingManualHm, bookingSlotHm])
 
   const bookingManualSlotCheck = useMemo(() => {
-    if (!bookingFueraGrilla || !bookingDate || !bookingDoctorId) return null
+    if (!bookingFueraGrilla) return null
     const hm = normalizeHmInput(bookingManualHm)
     if (!hm) {
       if (bookingManualHm.trim()) {
-        return { ok: false as const, message: 'Hora inválida. Usá formato HH:MM (ej. 09:15).' }
+        return {
+          ok: false as const,
+          message: 'Hora inválida. Usá formato HH:MM (ej. 09:15).',
+        }
       }
       return null
     }
-    const fechaHora = new Date(
-      combineDateAndTimeLocal(bookingDate, hm),
-    ).toISOString()
-    return validateAppointmentSlot({
-      fechaHora,
-      doctorId: bookingDoctorId,
-      data,
-      excludeAppointmentId: bookingEditingId ?? undefined,
-      duracionMinutos: bookingDuracion,
-    })
-  }, [
-    bookingFueraGrilla,
-    bookingManualHm,
-    bookingDate,
-    bookingDoctorId,
-    bookingDuracion,
-    data,
-    bookingEditingId,
-  ])
+    // En urgencia (fuera de grilla) permitimos horario aunque esté fuera de rango
+    // o se solape; la advertencia de solape se maneja al confirmar.
+    return { ok: true as const }
+  }, [bookingFueraGrilla, bookingManualHm])
 
   const bookingSlots = useMemo(() => {
     if (!bookingOpen || !bookingDate || !bookingDoctorId) return []
@@ -881,10 +1007,13 @@ export function AgendaPage() {
   }, [bookingDate, bookingDoctorId, data])
 
   const bookingScheduleHint = useMemo(() => {
-    if (!bookingDoctorId || !bookingDate) return null
+    if (!bookingDate) return null
+    if (!bookingDoctorId) {
+      return 'Seleccioná un médico para ver su horario'
+    }
     const doc = doctorById(bookingDoctorId)
     const plan = planDoctorDay(bookingDoctorId, bookingDate, data)
-    const mins = doctorDuracionTurno(doc)
+    const mins = bookingDuracion || (doc ? doctorDuracionTurno(doc) : 30)
     if (plan.kind !== 'slots' || plan.ranges.length === 0) {
       if (isDoctorAgendaMensual(doc)) {
         return 'Sin atención configurada este día. Revisá la pestaña Atención mensual.'
@@ -892,15 +1021,22 @@ export function AgendaPage() {
       return 'Sin franja horaria este día.'
     }
     return `Turnos cada ${mins} min · Atiende ${formatAgendaRanges(plan.ranges)}`
-  }, [bookingDoctorId, bookingDate, data, doctorById])
+  }, [bookingDoctorId, bookingDate, bookingDuracion, data, doctorById])
 
   const bookingDoctors = useMemo(() => {
-    if (!bookingDate) return data.doctors
-    return data.doctors.filter((d) => {
-      if (bookingEditingId && d.id === bookingDoctorId) return true
-      return isDoctorAvailableOnDate(d.id, bookingDate, data)
-    })
-  }, [bookingDate, data, bookingEditingId, bookingDoctorId])
+    const list = !bookingDate
+      ? medicosOperativos
+      : data.doctors.filter((d) => {
+          if (!isMedicoActivo(d) && d.id !== bookingDoctorId) return false
+          if (bookingEditingId && d.id === bookingDoctorId) return true
+          return isDoctorAvailableOnDate(d.id, bookingDate, data)
+        })
+    return [...list].sort((a, b) =>
+      `${a.apellido} ${a.nombre}`.localeCompare(`${b.apellido} ${b.nombre}`, 'es', {
+        sensitivity: 'base',
+      }),
+    )
+  }, [bookingDate, data, bookingEditingId, bookingDoctorId, medicosOperativos])
 
   useEffect(() => {
     if (!bookingDoctorId) return
@@ -958,10 +1094,37 @@ export function AgendaPage() {
     return weekDays.findIndex((d) => isSameDay(d, selectedWeekDay))
   }, [selectedWeekDay, weekDays])
 
+  function goToToday() {
+    let target = startOfDay(new Date())
+    if (target.getDay() === 0) target = addDays(target, 1)
+    setWeekCursor(startOfWeek(target, { weekStartsOn: 1 }))
+    setSelectedWeekDay(target)
+  }
+
   function goAdjacentDay(delta: -1 | 1) {
     if (selectedDayIndex < 0) return
-    const next = weekDays[selectedDayIndex + delta]
-    if (next) setSelectedWeekDay(next)
+    if (delta === 1) {
+      const nextInWeek = weekDays[selectedDayIndex + 1]
+      if (nextInWeek) {
+        setSelectedWeekDay(nextInWeek)
+        return
+      }
+      const nextWeek = addWeeks(weekCursor, 1)
+      setWeekCursor(nextWeek)
+      const first = eachAgendaWeekDay(nextWeek)[0]
+      if (first) setSelectedWeekDay(first)
+      return
+    }
+    const prevInWeek = weekDays[selectedDayIndex - 1]
+    if (prevInWeek) {
+      setSelectedWeekDay(prevInWeek)
+      return
+    }
+    const prevWeek = addWeeks(weekCursor, -1)
+    setWeekCursor(prevWeek)
+    const days = eachAgendaWeekDay(prevWeek)
+    const last = days[days.length - 1]
+    if (last) setSelectedWeekDay(last)
   }
 
   function toggleLibresHoras(doctorId: string, franja: 'manana' | 'tarde') {
@@ -980,8 +1143,17 @@ export function AgendaPage() {
     return { day, hm }
   }
 
+  function resetBookingMotivo() {
+    setBookingMotivoConsulta(MOTIVO_CONSULTA_DEFAULT)
+    setBookingMotivoOtro('')
+  }
+
   function buildBookingNotas(): string {
-    let n = bookingNotas.trim()
+    let n = notasFromMotivoConsulta(
+      bookingMotivoConsulta,
+      bookingMotivoOtro,
+      data.motivosConsultaCustom,
+    )
     if (bookingFueraGrilla) {
       if (!/urgencia/i.test(n)) {
         n = n ? `Urgencia — ${n}` : 'Urgencia'
@@ -1054,15 +1226,17 @@ export function AgendaPage() {
     setBookingDate(day)
     setBookingPatientId('')
     setBookingPatientQuery('')
+    setBookingPatientObraSocial('')
+    setBookingIsParticular(false)
     setBookingPatientPickerOpen(false)
     setBookingSlotHm(null)
     setBookingFueraGrilla(false)
     setBookingManualHm('')
-    setBookingNotas('')
+    resetBookingMotivo()
     resetBookingPayment()
     setBookingEstado('programado')
     setBookingDuracion(30)
-    const disponibles = data.doctors.filter((d) =>
+    const disponibles = medicosOperativos.filter((d) =>
       isDoctorAvailableOnDate(d.id, day, data),
     )
     if (disponibles.length === 1) {
@@ -1070,6 +1244,56 @@ export function AgendaPage() {
     } else {
       setBookingDoctorId('')
     }
+    setBookingOpen(true)
+  }
+
+  function openBookingAtSlot(doctorId: string, hm: string) {
+    if (!selectedWeekDay || !puedeAgenda) return
+    setMsg(null)
+    setBookingFormError(null)
+    setBookingEditingId(null)
+    setCitaEditing(null)
+    setBookingDate(selectedWeekDay)
+    setBookingDoctorId(doctorId)
+    setBookingPatientId('')
+    setBookingPatientQuery('')
+    setBookingPatientObraSocial('')
+    setBookingIsParticular(false)
+    setBookingPatientPickerOpen(false)
+    setBookingSlotHm(hm)
+    setBookingFueraGrilla(false)
+    setBookingManualHm('')
+    resetBookingMotivo()
+    resetBookingPayment()
+    setBookingEstado('programado')
+    const doc = doctorById(doctorId)
+    setBookingDuracion(doc ? doctorDuracionTurno(doc) : 30)
+    setBookingOpen(true)
+  }
+
+  function openBookingAtSlotOnDay(doctorId: string, day: Date, hm: string) {
+    if (!puedeAgenda) return
+    setSelectedWeekDay(day)
+    setWeekCursor(startOfWeek(day, { weekStartsOn: 1 }))
+    setMsg(null)
+    setBookingFormError(null)
+    setBookingEditingId(null)
+    setCitaEditing(null)
+    setBookingDate(day)
+    setBookingDoctorId(doctorId)
+    setBookingPatientId('')
+    setBookingPatientQuery('')
+    setBookingPatientObraSocial('')
+    setBookingIsParticular(false)
+    setBookingPatientPickerOpen(false)
+    setBookingSlotHm(hm)
+    setBookingFueraGrilla(false)
+    setBookingManualHm('')
+    resetBookingMotivo()
+    resetBookingPayment()
+    setBookingEstado('programado')
+    const doc = doctorById(doctorId)
+    setBookingDuracion(doc ? doctorDuracionTurno(doc) : 30)
     setBookingOpen(true)
   }
 
@@ -1085,7 +1309,11 @@ export function AgendaPage() {
     setBookingDoctorId(c.doctorId)
     setBookingPatientId(c.patientId)
     const p = patientById(c.patientId)
-    setBookingPatientQuery(p ? `${p.dni ? `${p.dni} · ` : ''}${p.apellido}, ${p.nombre}` : '')
+    setBookingPatientQuery(
+      p ? patientPickerLineLegacy(p.dni, p.apellido, p.nombre) : '',
+    )
+    setBookingPatientObraSocial(p?.obraSocial ?? '')
+    setBookingIsParticular(c.obraSocialOverride?.toLowerCase() === 'particular')
     setBookingPatientPickerOpen(false)
     setBookingDuracion(c.duracionMinutos)
     setBookingEstado(c.estado)
@@ -1109,14 +1337,28 @@ export function AgendaPage() {
       setBookingSlotHm(hm)
       setBookingManualHm('')
     }
-    setBookingNotas(
-      c.notas
-        .replace(/^Urgencia\s*[—–-]\s*/i, '')
-        .replace(/^Urgencia$/i, '')
-        .trim(),
+    const notasSinUrgencia = c.notas
+      .replace(/^Urgencia\s*[—–-]\s*/i, '')
+      .replace(/^Urgencia$/i, '')
+      .trim()
+    const parsedMotivo = motivoConsultaFromNotas(
+      notasSinUrgencia,
+      data.motivosConsultaCustom,
     )
+    setBookingMotivoConsulta(parsedMotivo.motivo)
+    setBookingMotivoOtro(parsedMotivo.otroDetalle)
     loadBookingPayment(c.id)
     setBookingOpen(true)
+  }
+
+  function openMotivosConsultaModal(onAdded: (nombre: string) => void) {
+    motivosConsultaOnAddedRef.current = onAdded
+    setMotivosConsultaModalOpen(true)
+  }
+
+  function closeMotivosConsultaModal() {
+    setMotivosConsultaModalOpen(false)
+    motivosConsultaOnAddedRef.current = null
   }
 
   function closeBooking() {
@@ -1128,6 +1370,7 @@ export function AgendaPage() {
     setBookingEditingId(null)
     setBookingPatientId('')
     setBookingPatientQuery('')
+    setBookingIsParticular(false)
     setBookingFormError(null)
     resetBookingPayment()
     setBookingPatientPickerOpen(false)
@@ -1141,7 +1384,8 @@ export function AgendaPage() {
       fechaHoraLocal: '',
       duracionMinutos: 30,
       estado: 'programado',
-      notas: '',
+      motivoConsulta: MOTIVO_CONSULTA_DEFAULT as string,
+      motivoOtro: '',
     })
   }
 
@@ -1176,21 +1420,33 @@ export function AgendaPage() {
       fechaHora,
       duracionMinutos: citaForm.duracionMinutos,
       estado: citaForm.estado,
-      notas: citaForm.notas,
+      notas: notasFromMotivoConsulta(
+        citaForm.motivoConsulta,
+        citaForm.motivoOtro,
+        data.motivosConsultaCustom,
+      ),
     })
     setMsg({ type: 'ok', text: 'Turno guardado.' })
     resetCita()
   }
 
-  function submitBooking(e: React.FormEvent) {
+  async function submitBooking(e: React.FormEvent) {
     e.preventDefault()
     setBookingFormError(null)
     const patientId = resolveBookingPatientId()
     const hm = bookingResolvedHm()
     if (!bookingDate || !bookingDoctorId || !patientId || !hm) {
+      if (!patientId) {
+        const raw = bookingPatientQuery.trim()
+        setQuickPacienteInitialDni(raw && /^\d{6,}$/.test(raw) ? raw : '')
+        if (raw) {
+          setQuickPacienteOpen(true)
+          return
+        }
+      }
       setBookingFormError(
         !patientId
-          ? 'Elegí un paciente de la lista (buscá por DNI o apellido y seleccioná).'
+          ? 'Ingresá un paciente (DNI o apellido) o crealo con “Nuevo paciente”.'
           : bookingFueraGrilla
             ? 'Elegí médico, paciente e ingresá una hora válida (HH:MM).'
             : 'Elegí médico, paciente y un horario disponible.',
@@ -1203,18 +1459,45 @@ export function AgendaPage() {
     }
     const fechaHoraLocal = combineDateAndTimeLocal(bookingDate, hm)
     const fechaHora = new Date(fechaHoraLocal).toISOString()
-    const check = validateAppointmentSlot({
-      fechaHora,
-      doctorId: bookingDoctorId,
-      data,
-      excludeAppointmentId: bookingEditingId ?? undefined,
-      duracionMinutos: bookingDuracion,
-    })
-    if (!check.ok) {
-      setBookingFormError(check.message)
-      return
+    if (!bookingFueraGrilla) {
+      const check = validateAppointmentSlot({
+        fechaHora,
+        doctorId: bookingDoctorId,
+        data,
+        excludeAppointmentId: bookingEditingId ?? undefined,
+        duracionMinutos: bookingDuracion,
+      })
+      if (!check.ok) {
+        setBookingFormError(check.message)
+        return
+      }
+    } else {
+      // Urgencia / fuera de grilla:
+      // - No validamos contra horarios del médico (puede ser fuera de rango).
+      // - Permitimos solape, pero avisamos antes de guardar.
+      const start = parseISO(fechaHora)
+      const end = new Date(start.getTime() + bookingDuracion * 60_000)
+      const overlap = data.appointments.some((c) => {
+        if (c.id === (bookingEditingId ?? undefined)) return false
+        if (c.doctorId !== bookingDoctorId) return false
+        if (c.estado === 'cancelado') return false
+        const cs = parseISO(c.fechaHora)
+        const ce = new Date(cs.getTime() + c.duracionMinutos * 60_000)
+        return start < ce && end > cs
+      })
+      if (overlap) {
+        const ok = await confirm({
+          title: 'Turno superpuesto (Urgencia)',
+          message:
+            'Ya existe otro turno que se superpone con este médico.\n\n¿Querés guardar igual este turno de urgencia?',
+          confirmLabel: 'Guardar igual',
+          cancelLabel: 'Volver',
+        })
+        if (!ok) return
+      }
     }
     const appointmentId = bookingEditingId ?? createId()
+    const obraSocialOverride = bookingIsParticular ? 'Particular' : undefined
     upsertAppointment({
       id: appointmentId,
       patientId,
@@ -1223,6 +1506,7 @@ export function AgendaPage() {
       duracionMinutos: bookingDuracion,
       estado: bookingEstado,
       notas: buildBookingNotas(),
+      obraSocialOverride,
     })
 
     const monto = parseMontoInput(bookingMonto)
@@ -1236,6 +1520,7 @@ export function AgendaPage() {
         fecha: fechaHora,
         metodo: bookingMetodo,
         notas: '',
+        obraSocialOverride,
       })
     } else if (bookingPaymentId) {
       deletePayment(bookingPaymentId)
@@ -1252,6 +1537,7 @@ export function AgendaPage() {
         fecha: fechaHora,
         metodo: bookingMetodo2,
         notas: '',
+        obraSocialOverride,
       })
     } else if (bookingPaymentId2) {
       deletePayment(bookingPaymentId2)
@@ -1262,6 +1548,11 @@ export function AgendaPage() {
       : 'Turno creado desde la agenda semanal.'
     closeBooking()
     setMsg({ type: 'ok', text: okText })
+    if (closeAgendaMedicoAfterBooking) {
+      setAgendaMedicoOpen(false)
+      setCloseAgendaMedicoAfterBooking(false)
+      setTab('turnos')
+    }
   }
 
   function submitHor(e: React.FormEvent) {
@@ -1275,6 +1566,19 @@ export function AgendaPage() {
       horaFin: horForm.horaFin,
     })
     setMsg({ type: 'ok', text: 'Franja horaria agregada.' })
+  }
+
+  async function clearDoctorHorarios(doctorId: string) {
+    const doc = doctorById(doctorId)
+    if (!doc) return
+    const ok = await confirm({
+      title: 'Quitar franjas',
+      message: `¿Quitar todas las franjas de ${doc.apellido}, ${doc.nombre}? Al agendar turnos usará el horario general del sanatorio.`,
+      confirmLabel: 'Quitar todas',
+    })
+    if (!ok) return
+    deleteHorariosForDoctor(doctorId)
+    setMsg({ type: 'ok', text: 'Franjas quitadas.' })
   }
 
   function submitFranja(e: React.FormEvent) {
@@ -1353,7 +1657,7 @@ export function AgendaPage() {
   }
 
   const puedeAgenda =
-    data.patients.length > 0 && data.doctors.length > 0
+    pacientesOperativos.length > 0 && medicosOperativos.length > 0
 
   function countTurnosDia(day: Date) {
     return data.appointments.filter((c) => {
@@ -1370,19 +1674,14 @@ export function AgendaPage() {
 
   const medicosDiaSeleccionado = useMemo(() => {
     if (!selectedWeekDay) return []
-    return doctorsAvailableOnDate(selectedWeekDay, data)
+    return doctorsAvailableOnDate(selectedWeekDay, data).filter(isMedicoActivo)
   }, [
     selectedWeekDay,
-    data.doctors,
-    data.horarios,
-    data.diasLibres,
-    data.atencionesMensuales,
+    data,
+    medicosOperativos,
   ])
 
-  const medicosEspecialidadesRows = useMemo(
-    () => buildMedicosEspecialidadesRows(data),
-    [data],
-  )
+  const medicosEspecialidadesRows = buildMedicosEspecialidadesRows(data)
 
   function turnosLineasAgenda(citas: Appointment[]) {
     return citas
@@ -1500,15 +1799,13 @@ export function AgendaPage() {
       ? format(selectedWeekDay, "EEEE d 'de' MMMM", { locale: es })
       : 'hoy'
     const delMedico = citasDelDia.filter((c) => c.doctorId === doctorId)
+    const { manana: citasWaManana, tarde: citasWaTarde } =
+      splitCitasMananaTarde(delMedico)
     const mensaje = buildMedicoAgendaMessage({
       medicoLabel,
       fechaLabel,
-      manana: turnosLineasAgenda(
-        citasEnFranja(delMedico, DEFAULT_AGENDA_RANGES[0]!),
-      ),
-      tarde: turnosLineasAgenda(
-        citasEnFranja(delMedico, DEFAULT_AGENDA_RANGES[1]!),
-      ),
+      manana: turnosLineasAgenda(citasWaManana),
+      tarde: turnosLineasAgenda(citasWaTarde),
     })
     if (!buildWhatsAppSendUrl(tel, mensaje)) {
       void confirm({
@@ -1523,47 +1820,290 @@ export function AgendaPage() {
       console.error(err)
       void confirm({
         message:
-          'No se pudo abrir WhatsApp. Comprobá que tengas WhatsApp o un navegador predeterminado.',
+          'No se pudo abrir WhatsApp. Comprobá que tengas la aplicación de WhatsApp instalada.',
       })
     }
   }
 
-  async function openWhatsAppTurno(c: Appointment) {
+  function prepareTurnoWhatsApp(
+    c: Appointment,
+  ):
+    | { ok: true; tel: string; mensaje: string; nombre: string }
+    | { ok: false; message: string; nombre: string } {
     const patient = patientById(c.patientId)
+    const nombre = patient ? `${patient.apellido}, ${patient.nombre}` : '—'
     const tel = patient?.telefono?.trim() ?? ''
     if (!tel) {
-      void confirm({
+      return {
+        ok: false,
+        nombre,
         message:
           'El paciente no tiene teléfono cargado. Agregalo en Pacientes para enviar WhatsApp.',
+      }
+    }
+    const doctor = doctorById(c.doctorId)
+    const mensaje = buildTurnoReminderMessageFromCita({
+      fechaHoraIso: c.fechaHora,
+      especialidad: doctor?.especialidad,
+      medicoApellido: doctor?.apellido,
+      medicoNombre: doctor?.nombre,
+    })
+    if (!buildWhatsAppSendUrl(tel, mensaje)) {
+      return {
+        ok: false,
+        nombre,
+        message:
+          'El teléfono del paciente no es válido. Usá formato con código de área (ej. 11 4000-0000).',
+      }
+    }
+    return { ok: true, tel, mensaje, nombre }
+  }
+
+  function prepareTurnoReprogramacionWhatsApp(
+    c: Appointment,
+    reprogramacion: { fechaNueva: Date; horaNueva: string },
+  ):
+    | { ok: true; tel: string; mensaje: string; nombre: string }
+    | { ok: false; message: string; nombre: string } {
+    const patient = patientById(c.patientId)
+    const nombre = patient ? `${patient.apellido}, ${patient.nombre}` : '—'
+    const tel = patient?.telefono?.trim() ?? ''
+    if (!tel) {
+      return {
+        ok: false,
+        nombre,
+        message:
+          'El paciente no tiene teléfono cargado. Agregalo en Pacientes para enviar WhatsApp.',
+      }
+    }
+    const doctor = doctorById(c.doctorId)
+    const origen = fechaCalendarioTurnoAgenda(c.fechaHora)
+    const mensaje = buildTurnoReprogramacionMessage({
+      fechaTurnoOriginal: origen,
+      fechaTurnoNueva: reprogramacion.fechaNueva,
+      horaNueva: reprogramacion.horaNueva,
+      medicoApellido: doctor?.apellido ?? '—',
+      medicoNombre: doctor?.nombre ?? '',
+    })
+    if (!buildWhatsAppSendUrl(tel, mensaje)) {
+      return {
+        ok: false,
+        nombre,
+        message:
+          'El teléfono del paciente no es válido. Usá formato con código de área (ej. 11 4000-0000).',
+      }
+    }
+    return { ok: true, tel, mensaje, nombre }
+  }
+
+  function openReprogramarWhatsAppModal(
+    doctorId: string,
+    doctorName: string,
+    citas: Appointment[],
+  ) {
+    const canceladas = citas.filter((c) => c.estado === 'cancelado')
+    if (canceladas.length === 0) {
+      void confirm({
+        message:
+          'No hay turnos cancelados en este listado para avisar reprogramación.',
       })
       return
     }
-    const doctor = doctorById(c.doctorId)
-    const mensaje = buildTurnoReminderMessage({
-      medicoLabel: doctor
-        ? `${doctor.apellido}, ${doctor.nombre}`
-        : '—',
-      fechaLabel: format(parseISO(c.fechaHora), "EEEE d 'de' MMMM", {
-        locale: es,
-      }),
-      hora: format(parseISO(c.fechaHora), 'HH:mm', { locale: es }),
-    })
-    if (!buildWhatsAppSendUrl(tel, mensaje)) {
+    setReprogramarWa({ doctorId, doctorName, citas: canceladas })
+  }
+
+  async function confirmReprogramarWhatsApp(
+    fechaNuevaIso: string,
+    horaNueva: string,
+  ) {
+    if (!reprogramarWa) return
+    const { doctorId, doctorName, citas } = reprogramarWa
+    setReprogramarWa(null)
+
+    const [y, m, d] = fechaNuevaIso.split('-').map(Number)
+    const fechaNueva = new Date(y!, m! - 1, d!, 12, 0, 0)
+    const reprogramacion = { fechaNueva, horaNueva }
+
+    const listos: {
+      cita: Appointment
+      tel: string
+      mensaje: string
+      nombre: string
+    }[] = []
+    const sinTelefono: string[] = []
+    const telInvalido: string[] = []
+
+    for (const c of citas) {
+      const prep = prepareTurnoReprogramacionWhatsApp(c, reprogramacion)
+      if (prep.ok) {
+        listos.push({
+          cita: c,
+          tel: prep.tel,
+          mensaje: prep.mensaje,
+          nombre: prep.nombre,
+        })
+      } else if (prep.message.includes('no tiene teléfono')) {
+        sinTelefono.push(prep.nombre)
+      } else {
+        telInvalido.push(prep.nombre)
+      }
+    }
+
+    if (listos.length === 0) {
       void confirm({
         message:
-          'El teléfono del paciente no es válido. Usá formato con código de área (ej. 11 4000-0000).',
+          'Ningún paciente de la lista tiene teléfono válido para WhatsApp.\n\nRevisá los teléfonos en Pacientes.',
       })
+      return
+    }
+
+    const doctor = doctorById(doctorId)
+    const medicoLabel = doctor ? `${doctor.apellido}, ${doctor.nombre}` : 'médico'
+    let confirmMsg = `Se abrirá WhatsApp de a un paciente (${listos.length} en total) con el aviso de reprogramación de ${medicoLabel}.\n\nDespués de cada mensaje, la app preguntará si querés continuar con el siguiente.`
+    if (sinTelefono.length > 0) {
+      confirmMsg += `\n\nSin teléfono (${sinTelefono.length}): ${sinTelefono.slice(0, 4).join('; ')}${sinTelefono.length > 4 ? '…' : ''}`
+    }
+    if (telInvalido.length > 0) {
+      confirmMsg += `\n\nTeléfono inválido (${telInvalido.length}): ${telInvalido.slice(0, 4).join('; ')}${telInvalido.length > 4 ? '…' : ''}`
+    }
+
+    const ok = await confirm({
+      title: 'WhatsApp reprogramación',
+      message: confirmMsg,
+      confirmLabel: 'Abrir WhatsApp',
+    })
+    if (!ok) return
+
+    const sent = await openWhatsAppSecuencial({
+      items: listos,
+      confirm,
+      onItemError: (item, err) => {
+        console.error(err)
+        void confirm({
+          message: `No se pudo abrir WhatsApp para ${item.nombre}.`,
+        })
+      },
+    })
+
+    if (sent > 0) {
+      setMsg({
+        type: 'ok',
+        text: `WhatsApp de reprogramación abierto para ${doctorName} (${sent} paciente${sent === 1 ? '' : 's'}).`,
+      })
+    }
+  }
+
+  function openReprogramarWhatsAppMedico(
+    doctorId: string,
+    doctorName: string,
+    citas: Appointment[],
+  ) {
+    openReprogramarWhatsAppModal(doctorId, doctorName, citas)
+  }
+
+  async function openWhatsAppTurno(c: Appointment) {
+    if (c.estado === 'cancelado') {
+      const doctor = doctorById(c.doctorId)
+      const doctorName = doctor
+        ? `${doctor.apellido}, ${doctor.nombre}`
+        : 'médico'
+      openReprogramarWhatsAppModal(c.doctorId, doctorName, [c])
+      return
+    }
+    const prep = prepareTurnoWhatsApp(c)
+    if (!prep.ok) {
+      void confirm({ message: prep.message })
       return
     }
     try {
-      await openWhatsAppUrl(tel, mensaje)
+      await openWhatsAppUrl(prep.tel, prep.mensaje)
+      upsertAppointment(markWhatsAppRecordatorioEnviado(c))
     } catch (err) {
       console.error(err)
       void confirm({
         message:
-          'No se pudo abrir WhatsApp. Comprobá que tengas WhatsApp o un navegador predeterminado.',
+          err instanceof Error
+            ? err.message
+            : 'No se pudo abrir WhatsApp. Comprobá que tengas la aplicación de WhatsApp instalada.',
       })
     }
+  }
+
+  async function openWhatsAppPacientesMedico(
+    doctorId: string,
+    citas: Appointment[],
+  ) {
+    const activas = citas.filter((c) => c.estado !== 'cancelado')
+    if (activas.length === 0) {
+      void confirm({
+        message: 'No hay turnos activos en este listado para enviar recordatorio.',
+      })
+      return
+    }
+
+    const listos: {
+      cita: Appointment
+      tel: string
+      mensaje: string
+      nombre: string
+    }[] = []
+    const sinTelefono: string[] = []
+    const telInvalido: string[] = []
+
+    for (const c of activas) {
+      const prep = prepareTurnoWhatsApp(c)
+      if (prep.ok) {
+        listos.push({
+          cita: c,
+          tel: prep.tel,
+          mensaje: prep.mensaje,
+          nombre: prep.nombre,
+        })
+      } else if (prep.message.includes('no tiene teléfono')) {
+        sinTelefono.push(prep.nombre)
+      } else {
+        telInvalido.push(prep.nombre)
+      }
+    }
+
+    if (listos.length === 0) {
+      void confirm({
+        message:
+          'Ningún paciente de la lista tiene teléfono válido para WhatsApp.\n\nRevisá los teléfonos en Pacientes.',
+      })
+      return
+    }
+
+    const doctor = doctorById(doctorId)
+    const medicoLabel = doctor ? `${doctor.apellido}, ${doctor.nombre}` : 'médico'
+    let confirmMsg = `Se abrirá WhatsApp de a un paciente (${listos.length} en total) con el recordatorio de turno de ${medicoLabel}.\n\nDespués de cada mensaje, la app preguntará si querés continuar con el siguiente.`
+    if (sinTelefono.length > 0) {
+      confirmMsg += `\n\nSin teléfono (${sinTelefono.length}): ${sinTelefono.slice(0, 4).join('; ')}${sinTelefono.length > 4 ? '…' : ''}`
+    }
+    if (telInvalido.length > 0) {
+      confirmMsg += `\n\nTeléfono inválido (${telInvalido.length}): ${telInvalido.slice(0, 4).join('; ')}${telInvalido.length > 4 ? '…' : ''}`
+    }
+
+    const ok = await confirm({
+      title: 'WhatsApp a pacientes',
+      message: confirmMsg,
+      confirmLabel: 'Abrir WhatsApp',
+    })
+    if (!ok) return
+
+    await openWhatsAppSecuencial({
+      items: listos,
+      confirm,
+      onItemSent: (i) => {
+        upsertAppointment(markWhatsAppRecordatorioEnviado(listos[i]!.cita))
+      },
+      onItemError: (item, err) => {
+        console.error(err)
+        void confirm({
+          message: `No se pudo abrir WhatsApp para ${item.nombre}.`,
+        })
+      },
+    })
   }
 
   const pagadoCitaIds = useMemo(() => {
@@ -1586,52 +2126,116 @@ export function AgendaPage() {
     )
   }, [data.payments])
 
-  function renderDayCitaRow(c: Appointment, secondary: string, compactEstado = false) {
+  function isCitaPagada(c: Appointment): boolean {
     const t = parseISO(c.fechaHora)
-    const isPagado =
+    return (
       pagadoCitaIds.has(c.id) ||
-      pagadoDayKeys.has(`${c.patientId}__${c.doctorId}__${format(t, 'yyyy-MM-dd')}`)
+      pagadoDayKeys.has(
+        `${c.patientId}__${c.doctorId}__${format(t, 'yyyy-MM-dd')}`,
+      )
+    )
+  }
+
+  async function handleCancelCita(c: Appointment) {
+    if (c.estado === 'cancelado') return
+    if (!isCitaPagada(c)) {
+      const pac = patientById(c.patientId)
+      const doc = doctorById(c.doctorId)
+      const hora = format(parseISO(c.fechaHora), 'HH:mm', { locale: es })
+      const ok = await confirm({
+        message: `¿Cancelar el turno de ${hora}${pac ? ` — ${pac.apellido}, ${pac.nombre}` : ''}${doc ? ` (${doc.apellido})` : ''}?\n\nNo aparecerá en los PDF de la agenda.`,
+        confirmLabel: 'Cancelar turno',
+        cancelLabel: 'Volver',
+      })
+      if (!ok) return
+      upsertAppointment({ ...c, estado: 'cancelado' })
+      if (bookingEditingId === c.id) closeBooking()
+      if (citaActionsOpenId === c.id) setCitaActionsOpenId(null)
+      return
+    }
+    setCitaToCancel(c)
+  }
+
+  function handleCitaNameClick(c: Appointment) {
+    if (citaNameClickTimerRef.current !== null) {
+      window.clearTimeout(citaNameClickTimerRef.current)
+    }
+    citaNameClickTimerRef.current = window.setTimeout(() => {
+      citaNameClickTimerRef.current = null
+      setCitaActionsOpenId((prev) => (prev === c.id ? null : c.id))
+    }, 250)
+  }
+
+  function handleCitaNameDoubleClick(c: Appointment) {
+    if (citaNameClickTimerRef.current !== null) {
+      window.clearTimeout(citaNameClickTimerRef.current)
+      citaNameClickTimerRef.current = null
+    }
+    openBookingForEdit(c)
+  }
+
+  function renderDayCitaRow(c: Appointment, secondary: string, compactEstado = false) {
+    const isPagado = isCitaPagada(c)
     const estadoLabel = formatDayCitaEstado(c, isPagado, compactEstado)
     const estadoTitle = compactEstado
       ? dayCitaEstadoParts(c, isPagado).join(' - ')
       : undefined
+    const actionsOpen = citaActionsOpenId === c.id
     return (
       <li
         key={c.id}
-        className={`day-cita${bookingOpen && bookingEditingId === c.id ? ' day-cita--active' : ''}`}
-        onClick={() => openBookingForEdit(c)}
+        tabIndex={0}
+        className={`day-cita${bookingOpen && bookingEditingId === c.id ? ' day-cita--active' : ''}${actionsOpen ? ' day-cita--actions-open' : ''}`}
       >
         <div className="day-cita__main">
-          <span className="day-cita__time">
-            {format(parseISO(c.fechaHora), 'HH:mm', { locale: es })}
-          </span>
-          <span className="day-cita__who">{secondary}</span>
-          <span className="day-cita__estado" title={estadoTitle}>
-            {estadoLabel}
-          </span>
+          <div className="day-cita__primary">
+            <span className="day-cita__time">
+              {format(parseISO(c.fechaHora), 'HH:mm', { locale: es })}
+            </span>
+            <span className="day-cita__sep">-</span>
+            <span
+              className="day-cita__who day-cita__who--tap"
+              title="Click: mostrar u ocultar acciones · Doble click: editar"
+              onClick={() => handleCitaNameClick(c)}
+              onDoubleClick={() => handleCitaNameDoubleClick(c)}
+            >
+              {secondary}
+            </span>
+          </div>
+          {estadoLabel ? (
+            <span className="day-cita__estado" title={estadoTitle}>
+              {estadoLabel}
+            </span>
+          ) : null}
         </div>
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           <IconActionButton
-            variant="whatsapp"
-            label="Enviar mensaje por WhatsApp"
+            variant={c.estado === 'cancelado' ? 'whatsapp-bulk' : 'whatsapp'}
+            label={
+              c.estado === 'cancelado'
+                ? `WhatsApp reprogramación — ${secondary}`
+                : `WhatsApp ${secondary}`
+            }
             onClick={() => void openWhatsAppTurno(c)}
           >
             <IconWhatsApp />
           </IconActionButton>
           <IconActionButton
             variant="edit"
-            label="Editar turno"
+            label={`Editar turno — ${secondary}`}
             onClick={() => openBookingForEdit(c)}
           >
             <IconEdit />
           </IconActionButton>
-          <IconActionButton
-            variant="delete"
-            label="Eliminar turno"
-            onClick={() => setCitaToDelete(c)}
-          >
-            <IconTrash />
-          </IconActionButton>
+          {c.estado !== 'cancelado' && (
+            <IconActionButton
+              variant="cancel"
+              label={`Cancelar turno — ${secondary}`}
+              onClick={() => void handleCancelCita(c)}
+            >
+              <IconCancelDay />
+            </IconActionButton>
+          )}
         </div>
       </li>
     )
@@ -1663,11 +2267,20 @@ export function AgendaPage() {
       <div className="day-pill__group-actions">
         <IconActionButton
           variant="whatsapp"
-          label={`WhatsApp — ${g.label}`}
+          label={`WhatsApp al médico — ${g.label}`}
           onClick={() => void openWhatsAppMedico(g.key)}
         >
           <IconWhatsApp />
         </IconActionButton>
+        {g.citas.some((c) => c.estado !== 'cancelado') && (
+          <IconActionButton
+            variant="whatsapp-bulk"
+            label={`WhatsApp recordatorio a todos los pacientes — ${g.label}`}
+            onClick={() => void openWhatsAppPacientesMedico(g.key, g.citas)}
+          >
+            <IconWhatsApp />
+          </IconActionButton>
+        )}
         {(turnosActivosPorMedicoDia.get(g.key) ?? 0) > 0 && (
           <IconActionButton
             variant="cancel"
@@ -1675,6 +2288,17 @@ export function AgendaPage() {
             onClick={() => void cancelDoctorDayTurns(g.key, g.label)}
           >
             <IconCancelDay />
+          </IconActionButton>
+        )}
+        {(turnosCanceladosPorMedicoDia.get(g.key) ?? 0) > 0 && (
+          <IconActionButton
+            variant="whatsapp-bulk"
+            label={`WhatsApp reprogramación a pacientes — ${g.label}`}
+            onClick={() =>
+              openReprogramarWhatsAppMedico(g.key, g.label, g.citas)
+            }
+          >
+            <IconWhatsApp />
           </IconActionButton>
         )}
         {(turnosCanceladosPorMedicoDia.get(g.key) ?? 0) > 0 && (
@@ -1696,7 +2320,6 @@ export function AgendaPage() {
               <div className="day-pill__doctor-text">
                 <span className="day-pill__doctor">
                   {medicoName}
-                  {medicoEsp ? ' -' : ''}
                 </span>
                 {medicoEsp && (
                   <span className="day-pill__doctor-esp">{medicoEsp}</span>
@@ -1730,10 +2353,28 @@ export function AgendaPage() {
             )}
           </div>
           {libresHorasVisibles && (
-            <div className="day-pill__libres-horas-panel" role="status">
-              {libresHorasVisibles.length > 0
-                ? libresHorasVisibles.join(' · ')
-                : 'Sin horarios libres en esta franja.'}
+            <div
+              className="day-pill__libres-horas-panel"
+              role="group"
+              aria-label="Horarios libres; clic para agendar"
+            >
+              {libresHorasVisibles.length > 0 ? (
+                <div className="day-pill__libres-horas-list">
+                  {libresHorasVisibles.map((hm) => (
+                    <button
+                      key={hm}
+                      type="button"
+                      className="day-pill__libres-hora-btn"
+                      title={`Agendar turno a las ${hm}`}
+                      onClick={() => openBookingAtSlot(g.key, hm)}
+                    >
+                      {hm}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                'Sin horarios libres en esta franja.'
+              )}
             </div>
           )}
           {g.citas.length > 0 ? (
@@ -1764,72 +2405,119 @@ export function AgendaPage() {
     <div
       className={`page page--agenda${role === 'admin' ? ' page--agenda-admi' : ' page--agenda-secretaria'}`}
     >
-      <header className="page-header page-header--agenda">
-        <div className="tabs tabs--agenda">
-          <h1 className="tabs--agenda__title">Agenda</h1>
-        <button
-          type="button"
-          className={`tab tab--agenda-celeste${tab === 'turnos' ? ' tab--on' : ''}`}
-          onClick={() => setTab('turnos')}
-        >
-          Turnos
-        </button>
-        <div className="tabs--agenda__right">
-          <div className="tabs--agenda__secondary">
-            <button
-              type="button"
-              className={`tab tab--agenda-verde${tab === 'horarios' ? ' tab--on' : ''}`}
-              onClick={() => setTab('horarios')}
-            >
-              Horarios por médico
-            </button>
-            <button
-              type="button"
-              className={`tab tab--agenda-lila${tab === 'franja' ? ' tab--on' : ''}`}
-              onClick={() => setTab('franja')}
-            >
-              Franja del turno
-            </button>
-            <button
-              type="button"
-              className={`tab tab--agenda-naranja${tab === 'mensual' ? ' tab--on' : ''}`}
-              onClick={() => setTab('mensual')}
-            >
-              Atención mensual
-            </button>
-            <button
-              type="button"
-              className={`tab tab--agenda-menta${tab === 'libres' ? ' tab--on' : ''}`}
-              onClick={() => setTab('libres')}
-            >
-              Días libres
-            </button>
-            <button
-              type="button"
-              className="tab tab--agenda-violeta"
-              onClick={() => setMedicosEspModalOpen(true)}
-            >
-              Especialidades
-            </button>
-          </div>
-          <AgendaExportBar
-            doctors={agendaExportDoctors}
-            exportDoctorId={agendaExportDoctorId}
-            onExportDoctorIdChange={setAgendaExportDoctorId}
-            exportScope={agendaExportScope}
-            onExportScopeChange={setAgendaExportScope}
-            onTurnosPdf={() => void handleAgendaTurnosPdfPreview()}
-            onPreviewPdf={handleAgendaPdfPreview}
-            puedeEnviarCorreo={puedeEnviarCorreo}
-            enviandoCorreo={enviandoCorreo}
-            onEnviarCorreo={() => void handleEnviarCorreoAgenda()}
-          />
-        </div>
-        </div>
-      </header>
+      <AgendaPageHeader
+        tab={tab}
+        onTabChange={setTab}
+        onOpenAgendaMedico={() => {
+          setAgendaMedicoOpen(true)
+        }}
+        onOpenAtencionSinTurno={() => setAtencionSinTurnoOpen(true)}
+        onOpenEspecialidades={() => setMedicosEspModalOpen(true)}
+        agendaExportDoctors={agendaExportDoctors}
+        agendaExportDoctorId={agendaExportDoctorId}
+        onExportDoctorIdChange={setAgendaExportDoctorId}
+        agendaExportScope={agendaExportScope}
+        onExportScopeChange={setAgendaExportScope}
+        onTurnosPdf={() => void handleAgendaTurnosPdfPreview()}
+        onWhatsAppPacientesPdf={() => void handleAgendaWhatsAppPacientesPdfPreview()}
+        onPreviewPdf={handleAgendaPdfPreview}
+        puedeEnviarCorreo={puedeEnviarCorreo}
+        enviandoCorreo={enviandoCorreo}
+        onEnviarCorreo={() => void handleEnviarCorreoAgenda()}
+      />
 
-      {msg && (
-        <div className={`msg ${msg.type === 'err' ? 'msg-error' : 'msg-ok'}`}>
+      {atencionSinTurnoOpen && (
+        <AtencionSinTurnoModal
+          doctors={medicosOperativos}
+          patients={pacientesOperativos}
+          patientById={patientById}
+          listados={data.atencionesSinTurno}
+          puedeVerPorcentaje={puedeVerPorcentaje}
+          onClose={() => setAtencionSinTurnoOpen(false)}
+          onSave={({ doctorId, entries, fecha }) => {
+            saveAtencionSinTurnoListado({
+              doctorId,
+              fecha,
+              filas: entries.map((e) => ({
+                patientId: e.patientId,
+                monto: e.monto,
+              })),
+            })
+            setMsg({
+              type: 'ok',
+              text:
+                entries.length === 1
+                  ? 'Listado sin turno guardado.'
+                  : `Guardados ${entries.length} registros sin turno.`,
+            })
+          }}
+          onDelete={({ doctorId, fecha }) => {
+            deleteAtencionSinTurnoListado({ doctorId, fecha })
+            setMsg({
+              type: 'ok',
+              text: 'Listado de atención sin turno eliminado.',
+            })
+          }}
+          onSaveError={(message) => {
+            void confirm({ message })
+          }}
+          onPdfPreview={(payload) => {
+            agendaPdfDocRef.current = payload.doc
+            if (agendaPdfPreview?.url) URL.revokeObjectURL(agendaPdfPreview.url)
+            setAgendaPdfPreview({
+              url: payload.url,
+              filename: payload.filename,
+              title: payload.title,
+            })
+          }}
+          onPdfError={(message) => {
+            void confirm({ message })
+          }}
+        />
+      )}
+
+      {agendaMedicoOpen && (
+        <AgendaMedicoModal
+          data={data}
+          doctors={medicosOperativos}
+          doctorId={agendaMedicoDoctorId}
+          onDoctorIdChange={setAgendaMedicoDoctorId}
+          weekDays={weekDays}
+          weekLabel={weekLabel ?? ''}
+          onPrevWeek={() => setWeekCursor((d) => addWeeks(d, -1))}
+          onNextWeek={() => setWeekCursor((d) => addWeeks(d, 1))}
+          onPdf={async () => {
+            const doc = doctorById(agendaMedicoDoctorId)
+            if (!doc) return
+            try {
+              await Promise.all([preloadPdfLogo(), preloadPdfHeaderBanner()])
+              const built = buildAgendaMedicoLibresPdf({
+                data,
+                doctor: doc,
+                weekDays,
+                weekLabel: weekLabel ?? '',
+              })
+              showAgendaPdfPreview(built, built.title, { showFilename: false })
+            } catch (err) {
+              console.error(err)
+              void confirm({
+                message: 'No se pudo generar el PDF. Probá de nuevo.',
+              })
+            }
+          }}
+          onPickSlot={(doctorId, day, hm) => {
+            setCloseAgendaMedicoAfterBooking(true)
+            openBookingAtSlotOnDay(doctorId, day, hm)
+          }}
+          onClose={() => {
+            setAgendaMedicoOpen(false)
+            setCloseAgendaMedicoAfterBooking(false)
+          }}
+        />
+      )}
+
+      {msg?.type === 'err' && (
+        <div className="msg msg-error">
           {msg.text}
         </div>
       )}
@@ -1837,148 +2525,45 @@ export function AgendaPage() {
       {tab === 'turnos' && (
         <div className="agenda-turnos-layout">
           <section className="panel panel--day-list panel--day-list-scroll panel--day-list-unified">
-            <div className="day-list-week-inset">
-              <div className="week-toolbar">
-                <div className="week-toolbar__title-row">
-                  <h2 className="week-toolbar__range">SEMANA {weekLabel}</h2>
-                </div>
-                <div className="week-nav" aria-label="Cambiar semana">
-                  <button
-                    type="button"
-                    className="week-nav__arrow week-nav__btn--celeste"
-                    aria-label="Semana anterior"
-                    onClick={() => setWeekCursor((d) => addWeeks(d, -1))}
-                  >
-                    ‹
-                  </button>
-                  <button
-                    type="button"
-                    className="week-nav__arrow week-nav__btn--lila"
-                    aria-label="Semana siguiente"
-                    onClick={() => setWeekCursor((d) => addWeeks(d, 1))}
-                  >
-                    ›
-                  </button>
-                  <button
-                    type="button"
-                    className="week-nav__pill week-nav__btn--verde"
-                    onClick={() =>
-                      setWeekCursor(startOfWeek(new Date(), { weekStartsOn: 1 }))
-                    }
-                  >
-                    Hoy
-                  </button>
-                  <button
-                    type="button"
-                    className="week-nav__pill week-nav__btn--celeste"
-                    onClick={() => setWeekCursor((d) => addWeeks(d, 1))}
-                  >
-                    Semana siguiente
-                  </button>
-                  <button
-                    type="button"
-                    className="week-nav__pill week-nav__btn--naranja"
-                    onClick={() =>
-                      setWeekCursor((d) =>
-                        startOfWeek(addMonths(d, 1), { weekStartsOn: 1 }),
-                      )
-                    }
-                  >
-                    Mes Siguiente
-                  </button>
-                </div>
-              </div>
-              <div className="week-strip" role="list">
-                {weekDays.map((day) => {
-                  const today = isSameDay(day, new Date())
-                  const selected =
-                    selectedWeekDay !== null && isSameDay(day, selectedWeekDay)
-                  const n = countTurnosDia(day)
-                  return (
-                    <div
-                      key={day.toISOString()}
-                      role="listitem"
-                      className={`week-day${day.getDay() === 6 ? ' week-day--sabado' : ''}${today ? ' week-day--today' : ''}${selected ? ' week-day--selected' : ''}`}
-                      title="Clic para marcar · doble clic para reservar"
-                      onClick={() => setSelectedWeekDay(day)}
-                      onDoubleClick={() => openBooking(day)}
-                    >
-                      <div className="week-day__dow">
-                        {format(day, 'EEE', { locale: es })}
-                      </div>
-                      <div className="week-day__num">{format(day, 'd')}</div>
-                      <div className="week-day__meta">
-                        {format(day, 'MMM', { locale: es })}
-                      </div>
-                      {n > 0 && (
-                        <div>
-                          <span className="week-day__badge">
-                            {n} turno{n === 1 ? '' : 's'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-              {selectedWeekDay && (
-                <div
-                  className="week-medics-row"
-                  aria-label={`Médicos que atienden el ${format(selectedWeekDay, "EEEE d 'de' MMMM", { locale: es })}`}
-                >
-                  {medicosDiaSeleccionado.length > 0 ? (
-                    medicosDiaSeleccionado.map((doc, i) => (
-                      <span key={doc.id} className="week-medics-row__item">
-                        {i > 0 && (
-                          <span className="week-medics-row__sep" aria-hidden>
-                            ·
-                          </span>
-                        )}
-                        {medicoAgendaWeekLine(doc)}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="week-medics-row__empty">
-                      Ningún médico atiende ese día
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
+            <AgendaWeekCalendar
+              weekDays={weekDays}
+              selectedWeekDay={selectedWeekDay}
+              onSelectDay={setSelectedWeekDay}
+              onOpenBooking={openBooking}
+              countTurnosDia={countTurnosDia}
+              medicosDiaSeleccionado={medicosDiaSeleccionado}
+              medicoAgendaWeekLine={medicoAgendaWeekLine}
+            />
             <div className="day-list__head">
-              <h2 className="day-list__title">
-                {selectedWeekDay
-                  ? format(selectedWeekDay, "EEEE d 'de' MMMM", {
-                      locale: es,
-                    }).toLocaleUpperCase('es')
-                  : 'SELECCIONÁ UN DÍA'}
-              </h2>
-              {selectedWeekDay && (
-                <div className="day-list__day-nav week-nav" aria-label="Cambiar día">
-                  <button
-                    type="button"
-                    className="week-nav__arrow"
-                    aria-label="Día anterior"
-                    disabled={selectedDayIndex <= 0}
-                    onClick={() => goAdjacentDay(-1)}
-                  >
-                    ‹
-                  </button>
-                  <button
-                    type="button"
-                    className="week-nav__arrow"
-                    aria-label="Día siguiente"
-                    disabled={
-                      selectedDayIndex < 0 ||
-                      selectedDayIndex >= weekDays.length - 1
-                    }
-                    onClick={() => goAdjacentDay(1)}
-                  >
-                    ›
-                  </button>
+              <div className="day-list__toolbar-pill">
+                <div className="day-list__title-row">
+                  <AgendaTurnosWeekNav
+                    setWeekCursor={setWeekCursor}
+                    onGoToday={goToToday}
+                  />
+                  <div className="day-list__title-center">
+                    {selectedWeekDay && (
+                      <AgendaTurnosDayNavPrev goAdjacentDay={goAdjacentDay} />
+                    )}
+                    <h2 className="day-list__title">
+                      {selectedWeekDay
+                        ? format(selectedWeekDay, "EEEE d 'de' MMMM", {
+                            locale: es,
+                          }).toLocaleUpperCase('es')
+                        : 'SELECCIONÁ UN DÍA'}
+                    </h2>
+                    {selectedWeekDay && (
+                      <AgendaTurnosDayNavNext goAdjacentDay={goAdjacentDay} />
+                    )}
+                  </div>
                 </div>
-              )}
-              <details className="details-advanced details-advanced--pill">
+                <div className="day-list__toolbar-actions">
+                  {weekLabel ? (
+                    <p className="day-list__week-range week-toolbar__range">
+                      SEMANA {weekLabel}
+                    </p>
+                  ) : null}
+                  <details className="details-advanced details-advanced--pill">
                 <summary>Agenda Manual</summary>
                 <div className="details-advanced__panel">
                   {!puedeAgenda ? (
@@ -1999,7 +2584,7 @@ export function AgendaPage() {
                             required
                           >
                             <option value="">Elegir…</option>
-                            {data.patients.map((p) => (
+                            {pacientesOperativos.map((p) => (
                               <option key={p.id} value={p.id}>
                                 {p.apellido}, {p.nombre}
                               </option>
@@ -2025,7 +2610,7 @@ export function AgendaPage() {
                             required
                           >
                             <option value="">Elegir…</option>
-                            {data.doctors.map((d) => (
+                            {medicosOperativos.map((d) => (
                               <option key={d.id} value={d.id}>
                                 {d.apellido}, {d.nombre}
                               </option>
@@ -2078,17 +2663,57 @@ export function AgendaPage() {
                             ))}
                           </select>
                         </div>
-                        <div className="field" style={{ gridColumn: '1 / -1' }}>
-                          <label htmlFor="c-historia-clinica">Historia Clínica</label>
-                          <textarea
-                            id="c-historia-clinica"
-                            rows={2}
-                            placeholder="Motivo de consulta o por qué se atendió al paciente"
-                            value={citaForm.notas}
-                            onChange={(e) =>
-                              setCitaForm((f) => ({ ...f, notas: e.target.value }))
-                            }
-                          />
+                        <div className="field field--pill" style={{ gridColumn: '1 / -1' }}>
+                          <label htmlFor="c-historia-clinica">Motivo de la Consulta</label>
+                          <div className="motivo-consulta-row">
+                            <div className="pill-select motivo-consulta-row__select">
+                              <select
+                                id="c-historia-clinica"
+                                value={citaForm.motivoConsulta}
+                                onChange={(e) =>
+                                  setCitaForm((f) => ({
+                                    ...f,
+                                    motivoConsulta: e.target.value,
+                                  }))
+                                }
+                              >
+                                {motivosConsultaOpciones.map((m) => (
+                                  <option key={m} value={m}>
+                                    {m}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <IconActionButton
+                              variant="add"
+                              label="Agregar motivo de consulta"
+                              onClick={() =>
+                                openMotivosConsultaModal((nombre) =>
+                                  setCitaForm((f) => ({
+                                    ...f,
+                                    motivoConsulta: nombre,
+                                  })),
+                                )
+                              }
+                            >
+                              <IconPlus />
+                            </IconActionButton>
+                          </div>
+                          {citaForm.motivoConsulta === 'Otro' && (
+                            <input
+                              id="c-historia-clinica-otro"
+                              type="text"
+                              className="motivo-consulta-otro"
+                              placeholder="Especificar motivo"
+                              value={citaForm.motivoOtro}
+                              onChange={(e) =>
+                                setCitaForm((f) => ({
+                                  ...f,
+                                  motivoOtro: e.target.value,
+                                }))
+                              }
+                            />
+                          )}
                         </div>
                       </div>
                       <p className="empty-hint" style={{ marginTop: 0 }}>
@@ -2100,16 +2725,20 @@ export function AgendaPage() {
                         <button type="submit" className="btn btn-primary">
                           {citaEditing ? 'Guardar turno' : 'Crear turno'}
                         </button>
-                        {citaEditing && (
-                          <button type="button" className="btn btn-ghost" onClick={resetCita}>
-                            Cancelar
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={resetCita}
+                        >
+                          Cancelar
+                        </button>
                       </div>
                     </form>
                   )}
                 </div>
               </details>
+                </div>
+              </div>
             </div>
             <div className="day-list__scroll day-list__scroll--horizontal">
               {!selectedWeekDay ? (
@@ -2139,91 +2768,210 @@ export function AgendaPage() {
                 if (ev.target === ev.currentTarget) closeBooking()
               }}
             >
+          {quickPacienteOpen && (
+            <QuickPacienteModal
+              initial={{ dni: quickPacienteInitialDni }}
+              existingPatients={data.patients}
+              localidadesOpciones={localidadesOpciones}
+              onSave={(pac) => {
+                const id = createId()
+                upsertPatient({
+                  id,
+                  apellido: pac.apellido,
+                  nombre: pac.nombre,
+                  dni: pac.dni,
+                  telefono: pac.telefono,
+                  email: pac.email,
+                  domicilio: '',
+                  localidad: pac.localidad,
+                  fechaNacimiento: '',
+                  obraSocial: pac.obraSocial,
+                  notas: '',
+                  activo: true,
+                })
+                setBookingPatientId(id)
+                setBookingPatientQuery(
+                  patientPickerLineLegacy(pac.dni, pac.apellido, pac.nombre) ||
+                    `${pac.apellido}, ${pac.nombre}`,
+                )
+                setBookingPatientPickerOpen(false)
+                setQuickPacienteOpen(false)
+                setQuickPacienteInitialDni('')
+              }}
+              onClose={() => {
+                setQuickPacienteOpen(false)
+              }}
+            />
+          )}
               <div className="booking-sheet" onMouseDown={(e) => e.stopPropagation()}>
-                <div className="booking-brand" id="booking-title">
-                  <div className="booking-logo">C</div>
-                  <div className="booking-brand__body">
-                    <strong>{APP_DISPLAY_NAME}</strong>
-                    <div className="booking-brand__row">
-                      <span className="booking-brand__subtitle">
+                <div className="booking-modal-header" id="booking-title">
+                  <div className="booking-modal-header__brand">
+                    <div className="booking-modal-header__logo">C</div>
+                    <div className="booking-modal-header__titles">
+                      <div className="booking-modal-header__title">{APP_DISPLAY_NAME}</div>
+                      <div className="booking-modal-header__subtitle">
                         {bookingEditingId ? 'Modificar turno' : 'Nuevo turno'}
-                      </span>
-                      <span className="booking-brand__date">
-                        {format(bookingDate, "EEEE d 'de' MMMM", { locale: es })}
-                      </span>
+                      </div>
                     </div>
                   </div>
+                  {bookingDate && (
+                    <div className="booking-modal-header__date">
+                      {format(bookingDate, "EEEE d 'de' MMMM", { locale: es })
+                        .split(' ')
+                        .map((w) =>
+                          w.toLowerCase() === 'de' ? 'de' : w.charAt(0).toUpperCase() + w.slice(1),
+                        )
+                        .join(' ')}
+                    </div>
+                  )}
                 </div>
 
                 {!puedeAgenda ? (
-                  <p className="empty-hint">
+                  <p className="empty-hint" style={{ padding: '24px' }}>
                     Cargá pacientes y médicos para poder reservar desde acá.
                   </p>
                 ) : (
-                  <form onSubmit={submitBooking} noValidate>
-                    <div className="form-grid form-grid--booking-fields">
-                      <div className="field field--booking-doc">
-                        <label htmlFor="bk-doc">Médico</label>
-                        <select
-                          id="bk-doc"
-                          value={bookingDoctorId}
-                          onChange={(e) => {
-                            const id = e.target.value
-                            setBookingDoctorId(id)
-                            setBookingSlotHm(null)
-                            setBookingManualHm('')
-                            const doc = doctorById(id)
-                            if (doc && !bookingFueraGrilla) {
-                              setBookingDuracion(doctorDuracionTurno(doc))
-                            }
-                          }}
-                          required
-                          disabled={bookingDoctors.length === 0}
-                        >
-                          <option value="">
-                            {bookingDoctors.length === 0
-                              ? 'Sin médicos ese día'
-                              : 'Elegir…'}
-                          </option>
-                          {bookingDoctors.map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.apellido}, {d.nombre}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field field--booking-pac">
-                        <label htmlFor="bk-pac">Paciente</label>
-                        <div className="booking-patient-picker">
-                          <input
-                            id="bk-pac"
-                            value={bookingPatientQuery}
-                            onChange={(e) => {
-                              const q = e.target.value
-                              setBookingPatientQuery(q)
-                              setBookingPatientPickerOpen(true)
-                              if (bookingPatientId) setBookingPatientId('')
-                            }}
-                            onFocus={() => setBookingPatientPickerOpen(true)}
-                            onBlur={() => {
-                              window.setTimeout(() => setBookingPatientPickerOpen(false), 120)
-                            }}
-                            placeholder="Buscar por DNI o apellido…"
-                          />
-                          {bookingPatientPickerOpen && (
-                            <div className="booking-patient-picker__menu">
-                              {(bookingPatientQuery.trim()
-                                ? data.patients.filter((p) => {
-                                    const q = bookingPatientQuery.trim().toLowerCase()
-                                    return (
-                                      (p.dni ?? '').toLowerCase().includes(q) ||
-                                      (p.apellido ?? '').toLowerCase().includes(q)
+                  <form className="booking-modal-form" onSubmit={submitBooking} noValidate>
+                    <div className="booking-modal-body">
+                      {/* Columna Izquierda */}
+                      <div className="booking-modal-col--left">
+                        {/* 1. Selector Médico y aviso de agenda */}
+                        <div className="booking-modal-row--medico">
+                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
+                            <label htmlFor="bk-doc">Médico</label>
+                            <select
+                              id="bk-doc"
+                              value={bookingDoctorId}
+                              onChange={(e) => {
+                                const id = e.target.value
+                                setBookingDoctorId(id)
+                                setBookingSlotHm(null)
+                                setBookingManualHm('')
+                                const doc = doctorById(id)
+                                if (doc && !bookingFueraGrilla) {
+                                  setBookingDuracion(doctorDuracionTurno(doc))
+                                }
+                              }}
+                              required
+                              disabled={bookingDoctors.length === 0}
+                            >
+                              <option value="">
+                                {bookingDoctors.length === 0
+                                  ? 'Sin médicos ese día'
+                                  : 'Elegir…'}
+                              </option>
+                              {bookingDoctors.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.apellido}, {d.nombre}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {bookingScheduleHint ? (
+                            <div className="booking-schedule-badge">
+                              {bookingScheduleHint}
+                            </div>
+                          ) : (
+                            <div style={{ flex: 1, minWidth: 0 }} />
+                          )}
+                        </div>
+
+                        {bookingDoctors.length === 0 && (
+                          <p className="empty-hint" style={{ margin: 0 }}>
+                            Ningún médico atiende ese día en las franjas horarias (o está marcado como día libre).
+                          </p>
+                        )}
+
+                        {/* 2. Campo Paciente a todo el ancho */}
+                        <div className="booking-field">
+                          <label htmlFor="bk-pac">Paciente</label>
+                          <div className="booking-patient-picker">
+                            <input
+                              id="bk-pac"
+                              name="sanatorio-agenda-paciente"
+                              autoComplete="off"
+                              value={bookingPatientQuery}
+                              onChange={(e) => {
+                                const q = e.target.value
+                                setBookingPatientQuery(q)
+                                setBookingPatientPickerOpen(true)
+                                if (bookingPatientId) setBookingPatientId('')
+                                const trimmed = q.trim()
+                                if (!trimmed) return
+                                const matches = pacientesOperativos.filter((p) =>
+                                  patientMatchesPickerQuery(p, trimmed),
+                                )
+                                const unique = matches.length === 1 ? matches[0]! : null
+                                const isNumeric = /^\d+$/.test(trimmed)
+                                const shouldAutoPick =
+                                  Boolean(unique) &&
+                                  (isNumeric ? trimmed.length >= 2 : trimmed.length >= 4)
+                                if (unique && shouldAutoPick) {
+                                  setBookingPatientId(unique.id)
+                                }
+                              }}
+                              onFocus={() => setBookingPatientPickerOpen(true)}
+                              onKeyDown={(e) => {
+                                if (e.key !== 'Enter') return
+                                e.preventDefault()
+                                e.stopPropagation()
+                                const q = bookingPatientQuery.trim()
+                                if (!q) return
+                                const matches = pacientesOperativos.filter((p) =>
+                                  patientMatchesPickerQuery(p, q),
+                                )
+                                const pick = matches[0]
+                                if (!pick) {
+                                  if (/^\d+$/.test(q)) {
+                                    setQuickPacienteInitialDni(q)
+                                    setQuickPacienteOpen(true)
+                                  }
+                                  return
+                                }
+                                setBookingPatientId(pick.id)
+                                setBookingPatientQuery(
+                                  patientPickerLineLegacy(
+                                    pick.dni,
+                                    pick.apellido,
+                                    pick.nombre,
+                                  ),
+                                )
+                                setBookingPatientPickerOpen(false)
+                              }}
+                              onBlur={() => {
+                                window.setTimeout(() => {
+                                  setBookingPatientPickerOpen(false)
+                                  const q = bookingPatientQuery.trim()
+                                  if (!q) return
+                                  const matches = pacientesOperativos.filter((p) =>
+                                    patientMatchesPickerQuery(p, q),
+                                  )
+                                  if (matches.length === 1) {
+                                    const p = matches[0]!
+                                    setBookingPatientId(p.id)
+                                    setBookingPatientQuery(
+                                      patientPickerLineLegacy(
+                                        p.dni,
+                                        p.apellido,
+                                        p.nombre,
+                                      ),
                                     )
-                                  })
-                                : data.patients
-                              )
-                                .slice(0, 12)
-                                .map((p) => (
+                                  }
+                                }, 120)
+                              }}
+                              placeholder="Buscar por DNI o apellido…"
+                            />
+                            {bookingPatientPickerOpen && (
+                              <div className="booking-patient-picker__menu">
+                                {(bookingPatientQuery.trim()
+                                  ? pacientesOperativos.filter((p) =>
+                                      patientMatchesPickerQuery(
+                                        p,
+                                        bookingPatientQuery.trim(),
+                                      ),
+                                    )
+                                  : pacientesOperativos
+                                ).map((p) => (
                                   <button
                                     type="button"
                                     key={p.id}
@@ -2232,38 +2980,83 @@ export function AgendaPage() {
                                     onClick={() => {
                                       setBookingPatientId(p.id)
                                       setBookingPatientQuery(
-                                        `${p.dni ? `${p.dni} · ` : ''}${p.apellido}, ${p.nombre}`,
+                                        patientPickerLineLegacy(
+                                          p.dni,
+                                          p.apellido,
+                                          p.nombre,
+                                        ),
                                       )
                                       setBookingPatientPickerOpen(false)
                                     }}
                                   >
-                                    <span className="booking-patient-picker__opt-dni">
-                                      {p.dni || '—'}
-                                    </span>
-                                    <span className="booking-patient-picker__opt-name">
-                                      {p.apellido}, {p.nombre}
+                                    <span className="booking-patient-picker__opt-line">
+                                      {patientPickerLineLegacy(
+                                        p.dni,
+                                        p.apellido,
+                                        p.nombre,
+                                      ) || `${p.apellido}, ${p.nombre}`}
                                     </span>
                                   </button>
                                 ))}
-                            </div>
-                          )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      {bookingScheduleHint && (
-                        <p className="booking-schedule-hint field--booking-schedule">
-                          {bookingScheduleHint}
-                        </p>
-                      )}
-                      {bookingDoctors.length === 0 && (
-                        <p className="empty-hint form-grid--booking-fields__hint">
-                          Ningún médico atiende ese día en las franjas horarias (o
-                          está marcado como día libre).
-                        </p>
-                      )}
-                      <div className="booking-pay form-grid--booking-fields__full">
-                        <p className="booking-pay__label">Pago (opcional)</p>
-                        <div className="booking-pay__grid">
-                          <div className="field">
+
+                        {/* 3. Fila: Obra Social, Particular?, + Nuevo paciente */}
+                        <div className="booking-modal-row--obra">
+                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
+                            <label htmlFor="bk-obra">Obra Social</label>
+                            <input
+                              id="bk-obra"
+                              type="text"
+                              readOnly
+                              value={
+                                bookingIsParticular
+                                  ? 'Particular'
+                                  : (bookingSelectedPatient?.obraSocial || bookingPatientObraSocial || '')
+                              }
+                              placeholder="Obra social del paciente…"
+                            />
+                          </div>
+                          <label className="booking-particular-box">
+                            <input
+                              type="checkbox"
+                              id="bk-particular"
+                              checked={bookingIsParticular}
+                              onChange={(e) => setBookingIsParticular(e.target.checked)}
+                            />
+                            <span>Particular?</span>
+                          </label>
+                          <button
+                            type="button"
+                            className="booking-btn-new-patient"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              const raw = bookingPatientQuery.trim()
+                              setQuickPacienteInitialDni(
+                                raw && /^\d{6,}$/.test(raw) ? raw : '',
+                              )
+                              setQuickPacienteOpen(true)
+                            }}
+                          >
+                            + Nuevo paciente
+                          </button>
+                        </div>
+                        <datalist id="booking-os-list">
+                          {obrasSocialesDisponibles.map((os) => (
+                            <option key={os} value={os} />
+                          ))}
+                        </datalist>
+
+                        {/* 4. Línea divisoria */}
+                        <hr className="booking-modal-divider" />
+                        {/* 5. Título PAGO (OPCIONAL) */}
+                        <div className="booking-section-title">PAGO (OPCIONAL)</div>
+
+                        {/* 6. Grilla de 3 columnas */}
+                        <div className="booking-payment-grid">
+                          <div className="booking-field">
                             <label htmlFor="bk-monto">Monto</label>
                             <input
                               id="bk-monto"
@@ -2275,41 +3068,38 @@ export function AgendaPage() {
                               }
                             />
                           </div>
-                          <div className="field field--pill">
+                          <div className="booking-field">
                             <label htmlFor="bk-met">Método</label>
-                            <div className="pill-select">
-                              <select
-                                id="bk-met"
-                                value={bookingMetodo}
-                                onChange={(e) => setBookingMetodo(e.target.value)}
-                              >
-                                {PAYMENT_METODOS.map((m) => (
-                                  <option key={m} value={m}>
-                                    {m}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                            <select
+                              id="bk-met"
+                              value={bookingMetodo}
+                              onChange={(e) => setBookingMetodo(e.target.value)}
+                            >
+                              {PAYMENT_METODOS.map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          <div className="field field--pill">
+                          <div className="booking-field">
                             <label htmlFor="bk-est">Estado</label>
-                            <div className="pill-select">
-                              <select
-                                id="bk-est"
-                                value={bookingEstado}
-                                onChange={(e) =>
-                                  setBookingEstado(e.target.value as AppointmentEstado)
-                                }
-                              >
-                                {AGENDA_ESTADOS.map((x) => (
-                                  <option key={x.value} value={x.value}>
-                                    {x.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                            <select
+                              id="bk-est"
+                              value={bookingEstado}
+                              onChange={(e) =>
+                                setBookingEstado(e.target.value as AppointmentEstado)
+                              }
+                            >
+                              {AGENDA_ESTADOS.map((x) => (
+                                <option key={x.value} value={x.value}>
+                                  {x.label}
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          <div className="field">
+
+                          <div className="booking-field">
                             <label htmlFor="bk-monto-2">Monto (2)</label>
                             <input
                               id="bk-monto-2"
@@ -2321,164 +3111,215 @@ export function AgendaPage() {
                               }
                             />
                           </div>
-                          <div className="field field--pill">
+                          <div className="booking-field">
                             <label htmlFor="bk-met-2">Método (2)</label>
-                            <div className="pill-select">
+                            <select
+                              id="bk-met-2"
+                              value={bookingMetodo2}
+                              onChange={(e) => setBookingMetodo2(e.target.value)}
+                            >
+                              {PAYMENT_METODOS.map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="booking-field">
+                            <label htmlFor="bk-total-monto">Total Monto</label>
+                            <output
+                              id="bk-total-monto"
+                              className="booking-total-monto-box"
+                              aria-live="polite"
+                            >
+                              {formatMonto(bookingTotalMonto)}
+                            </output>
+                          </div>
+                        </div>
+
+                        {/* 7. Aviso métodos iguales */}
+                        {bookingMetodosIguales && (
+                          <p className="booking-methods-warning" role="status">
+                            Método y Método (2) son iguales. Elegí formas de pago distintas para cada monto.
+                          </p>
+                        )}
+
+                        {/* 8. Fila Motivo de la consulta */}
+                        <div className="booking-field">
+                          <label htmlFor="bk-historia-clinica">Motivo de la consulta</label>
+                          <div className="booking-modal-row--motivo">
+                            <div style={{ flex: 1, minWidth: 0 }}>
                               <select
-                                id="bk-met-2"
-                                value={bookingMetodo2}
-                                onChange={(e) => setBookingMetodo2(e.target.value)}
+                                id="bk-historia-clinica"
+                                value={bookingMotivoConsulta}
+                                onChange={(e) =>
+                                  setBookingMotivoConsulta(e.target.value)
+                                }
                               >
-                                {PAYMENT_METODOS.map((m) => (
+                                {motivosConsultaOpciones.map((m) => (
                                   <option key={m} value={m}>
                                     {m}
                                   </option>
                                 ))}
                               </select>
                             </div>
+                            <button
+                              type="button"
+                              className="booking-btn-add-motivo"
+                              aria-label="Agregar motivo"
+                              onClick={() =>
+                                openMotivosConsultaModal(setBookingMotivoConsulta)
+                              }
+                            >
+                              <IconPlus />
+                            </button>
                           </div>
-                          <div className="field field--pill field--booking-total">
-                            <label htmlFor="bk-total-monto">Total Monto</label>
-                            <div className="pill-select">
-                              <output
-                                id="bk-total-monto"
-                                className="booking-pay__total-value"
-                                aria-live="polite"
-                              >
-                                {formatMonto(bookingTotalMonto)}
-                              </output>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="booking-historia-row form-grid--booking-fields__full">
-                        <div className="field field--booking-historia">
-                          <label htmlFor="bk-historia-clinica">Historia Clínica</label>
-                          <textarea
-                            id="bk-historia-clinica"
-                            rows={2}
-                            placeholder="Motivo de consulta o por qué se atendió al paciente"
-                            value={bookingNotas}
-                            onChange={(e) => setBookingNotas(e.target.value)}
-                          />
-                        </div>
-                        <div className="field field--booking-urgencia-inline">
-                          <span className="booking-urgencia-inline__label">Urgencia</span>
-                          <label className="booking-urgencia__check booking-urgencia__check--pill">
+                          {bookingMotivoConsulta === 'Otro' && (
                             <input
-                              type="checkbox"
-                              checked={bookingFueraGrilla}
-                              onChange={(e) => setBookingUrgencia(e.target.checked)}
+                              id="bk-historia-clinica-otro"
+                              type="text"
+                              className="booking-input-motivo-otro"
+                              placeholder="Especificar motivo"
+                              value={bookingMotivoOtro}
+                              onChange={(e) => setBookingMotivoOtro(e.target.value)}
                             />
-                            <span>Urgencia / fuera de grilla (hora manual)</span>
-                          </label>
+                          )}
                         </div>
+                        {bookingFormError && (
+                          <p className="msg msg-error booking-form-error" role="alert" style={{ margin: 0 }}>
+                            {bookingFormError}
+                          </p>
+                        )}
                       </div>
-                      {bookingFueraGrilla && (
-                        <div className="booking-urgencia__fields form-grid--booking-fields__full">
-                          <div className="field">
-                            <label htmlFor="bk-hora-manual">Hora</label>
+
+                      {/* Columna Derecha */}
+                      <div className="booking-modal-col--right">
+                        {/* 1. Título HORARIO */}
+                        <div className="booking-section-title">HORARIO</div>
+
+                        {/* 2. Fila Hora y Duración */}
+                        <div className="booking-modal-row--hora">
+                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
+                            <label htmlFor="bk-hora">Hora</label>
                             <input
-                              id="bk-hora-manual"
+                              id="bk-hora"
                               type="time"
-                              value={bookingManualHm}
-                              onChange={(e) => setBookingManualHm(e.target.value)}
+                              value={bookingFueraGrilla ? bookingManualHm : (bookingSlotHm ?? '')}
+                              onChange={(e) => {
+                                if (bookingFueraGrilla) {
+                                  setBookingManualHm(e.target.value)
+                                }
+                              }}
+                              readOnly={!bookingFueraGrilla}
                               required
                             />
                           </div>
-                          <div className="field field--pill">
-                            <label htmlFor="bk-dur-urg">Duración (min)</label>
-                            <div className="pill-select">
-                              <select
-                                id="bk-dur-urg"
-                                value={bookingDuracion}
-                                onChange={(e) =>
-                                  setBookingDuracion(Number(e.target.value))
-                                }
-                              >
-                                {DURACION_TURNO_OPCIONES.map((m) => (
-                                  <option key={m} value={m}>
-                                    {m} min
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
+                            <label htmlFor="bk-duracion">Duración (min)</label>
+                            <select
+                              id="bk-duracion"
+                              value={bookingDuracion}
+                              onChange={(e) =>
+                                setBookingDuracion(Number(e.target.value))
+                              }
+                            >
+                              {URGENCIA_DURACION_OPCIONES.map((m) => (
+                                <option key={m} value={m}>
+                                  {m} min
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          {bookingManualSlotCheck && !bookingManualSlotCheck.ok && (
-                            <p className="booking-urgencia__hint booking-urgencia__hint--err">
-                              {bookingManualSlotCheck.message}
-                            </p>
-                          )}
-                          {bookingManualSlotCheck?.ok && normalizeHmInput(bookingManualHm) && (
-                            <p className="booking-urgencia__hint booking-urgencia__hint--ok">
-                              Horario disponible para este médico.
-                            </p>
-                          )}
                         </div>
-                      )}
+
+                        {/* 3. Casilla urgencia */}
+                        <label className="booking-urgencia-box">
+                          <input
+                            type="checkbox"
+                            id="bk-urgencia"
+                            checked={bookingFueraGrilla}
+                            onChange={(e) => setBookingUrgencia(e.target.checked)}
+                          />
+                          <span>Urgencia / fuera de grilla (hora manual)</span>
+                        </label>
+
+                        {/* 4. Mensaje de disponibilidad */}
+                        {bookingManualSlotCheck && !bookingManualSlotCheck.ok ? (
+                          <p className="booking-slot-availability booking-slot-availability--err">
+                            {bookingManualSlotCheck.message}
+                          </p>
+                        ) : (bookingFueraGrilla
+                            ? (bookingManualSlotCheck?.ok && normalizeHmInput(bookingManualHm))
+                            : bookingSlotHm) ? (
+                          <p className="booking-slot-availability booking-slot-availability--ok">
+                            Horario disponible para este médico.
+                          </p>
+                        ) : null}
+
+                        {/* 5. Franjas y grilla de horarios de referencia */}
+                        {bookingDoctorId && bookingDayPlan?.kind === 'no-day' && (
+                          <p className="msg msg-error" style={{ margin: 0 }}>
+                            Este médico no tiene franja ese día de la semana. Ajustá
+                            horarios o elegí otro día.
+                          </p>
+                        )}
+
+                        {bookingDoctorId && bookingDayPlan?.kind !== 'no-day' && (
+                          <>
+                            <span className="booking-slots-label">
+                              Horarios de referencia (tocá para copiar la hora)
+                            </span>
+                            {bookingSlots.length === 0 ? (
+                              <p className="empty-hint" style={{ padding: '0.5rem 0' }}>
+                                No hay cupos de {bookingDuracion} min en las franjas de ese
+                                día (o ya están ocupados).
+                              </p>
+                            ) : (
+                              <div className="booking-slots-grid-4">
+                                {bookingSlots.map((s) => (
+                                  <button
+                                    key={s.hm}
+                                    type="button"
+                                    disabled={!bookingFueraGrilla && !s.available}
+                                    title={s.available ? 'Disponible' : s.reason}
+                                    className={`booking-slot-chip${
+                                      (bookingFueraGrilla
+                                        ? normalizeHmInput(bookingManualHm) === s.hm
+                                        : bookingSlotHm === s.hm)
+                                        ? ' booking-slot-chip--picked'
+                                        : ''
+                                    }`}
+                                    onClick={() => {
+                                      if (bookingFueraGrilla) {
+                                        setBookingManualHm(s.hm)
+                                        return
+                                      }
+                                      if (!s.available) return
+                                      setBookingSlotHm(s.hm)
+                                    }}
+                                  >
+                                    {s.hm}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
 
-                    {bookingDoctorId && bookingDayPlan?.kind === 'no-day' && (
-                      <p className="msg msg-error" style={{ marginTop: '0.75rem' }}>
-                        Este médico no tiene franja ese día de la semana. Ajustá
-                        horarios o elegí otro día.
-                      </p>
-                    )}
-
-                    {bookingDoctorId && bookingDayPlan?.kind !== 'no-day' && (
-                      <>
-                        <div className="slot-section-title">
-                          {bookingFueraGrilla
-                            ? 'Horarios de referencia (tocá para copiar la hora)'
-                            : 'Horarios sugeridos'}
-                        </div>
-                        {bookingSlots.length === 0 ? (
-                          <p className="empty-hint" style={{ padding: '0.5rem 0' }}>
-                            No hay cupos de {bookingDuracion} min en las franjas de ese
-                            día (o ya están ocupados).
-                          </p>
-                        ) : (
-                          <div className="slot-grid">
-                            {bookingSlots.map((s) => (
-                              <button
-                                key={s.hm}
-                                type="button"
-                                disabled={!bookingFueraGrilla && !s.available}
-                                title={s.available ? 'Disponible' : s.reason}
-                                className={`slot-btn${
-                                  (bookingFueraGrilla
-                                    ? normalizeHmInput(bookingManualHm) === s.hm
-                                    : bookingSlotHm === s.hm)
-                                    ? ' slot-btn--picked'
-                                    : ''
-                                }`}
-                                onClick={() => {
-                                  if (bookingFueraGrilla) {
-                                    setBookingManualHm(s.hm)
-                                    return
-                                  }
-                                  if (!s.available) return
-                                  setBookingSlotHm(s.hm)
-                                }}
-                              >
-                                {s.hm}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-
-                    {bookingFormError && (
-                      <p className="msg msg-error booking-form-error" role="alert">
-                        {bookingFormError}
-                      </p>
-                    )}
-
-                    <div className="booking-actions">
+                    {/* Pie fijo */}
+                    <div className="booking-modal-footer">
+                      <button
+                        type="button"
+                        className="booking-footer-btn booking-footer-btn--secondary"
+                        onClick={closeBooking}
+                      >
+                        Cancelar
+                      </button>
                       <button
                         type="submit"
-                        className="btn btn-pdf booking-actions__btn"
+                        className="booking-footer-btn booking-footer-btn--primary"
                         disabled={
                           !bookingResolvedHm() ||
                           (bookingFueraGrilla &&
@@ -2490,14 +3331,7 @@ export function AgendaPage() {
                       </button>
                       <button
                         type="button"
-                        className="btn btn-pdf booking-actions__btn"
-                        onClick={closeBooking}
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-pdf booking-actions__btn"
+                        className="booking-footer-btn booking-footer-btn--secondary"
                         onClick={closeBooking}
                       >
                         Salir
@@ -2541,6 +3375,8 @@ export function AgendaPage() {
           setHorForm={setHorForm}
           onSubmit={submitHor}
           onDelete={deleteHorario}
+          onClearDoctorHorarios={clearDoctorHorarios}
+          onOpenMensual={() => setTab('mensual')}
         />
       )}
 
@@ -2556,11 +3392,38 @@ export function AgendaPage() {
         />
       )}
 
+      {reprogramarWa && (
+        <ReprogramarTurnoWhatsAppModal
+          doctorName={reprogramarWa.doctorName}
+          turnoCount={reprogramarWa.citas.length}
+          horaSugerida={format(
+            parseISO(reprogramarWa.citas[0]!.fechaHora),
+            'HH:mm',
+            { locale: es },
+          )}
+          onClose={() => setReprogramarWa(null)}
+          onConfirm={(fechaNueva, horaNueva) =>
+            void confirmReprogramarWhatsApp(fechaNueva, horaNueva)
+          }
+        />
+      )}
+
       {medicosEspModalOpen && (
         <AgendaMedicosEspecialidadesModal
           rows={medicosEspecialidadesRows}
           data={data}
           onClose={() => setMedicosEspModalOpen(false)}
+        />
+      )}
+
+      {motivosConsultaModalOpen && (
+        <MotivosConsultaModal
+          custom={data.motivosConsultaCustom}
+          onClose={closeMotivosConsultaModal}
+          onAdd={addMotivoConsultaCustom}
+          onRemove={removeMotivoConsultaCustom}
+          onRename={renameMotivoConsultaCustom}
+          onAdded={(nombre) => motivosConsultaOnAddedRef.current?.(nombre)}
         />
       )}
 
@@ -2578,21 +3441,21 @@ export function AgendaPage() {
         />
       )}
 
-      {citaToDelete && (() => {
-        const pac = patientById(citaToDelete.patientId)
-        const doc = doctorById(citaToDelete.doctorId)
+      {citaToCancel && (() => {
+        const pac = patientById(citaToCancel.patientId)
+        const doc = doctorById(citaToCancel.doctorId)
         const pagosVinculados = data.payments.filter(
-          (p) => p.citaId === citaToDelete.id,
+          (p) => p.citaId === citaToCancel.id,
         )
         const montoTotal = pagosVinculados.reduce((s, p) => s + p.monto, 0)
         return (
           <EliminarPagoModal
             title={
               pagosVinculados.length > 0 && montoTotal > 0
-                ? 'Eliminar pago'
-                : 'Eliminar turno'
+                ? 'Cancelar pago'
+                : 'Cancelar turno'
             }
-            fechaIso={citaToDelete.fechaHora}
+            fechaIso={citaToCancel.fechaHora}
             montoTotal={montoTotal > 0 ? montoTotal : null}
             pacienteLabel={
               pac ? `${pac.apellido}, ${pac.nombre}` : '—'
@@ -2600,11 +3463,11 @@ export function AgendaPage() {
             medicoLabel={
               doc ? `${doc.apellido}, ${doc.nombre}` : '—'
             }
-            onClose={() => setCitaToDelete(null)}
+            onClose={() => setCitaToCancel(null)}
             onConfirm={(motivo, notasOtros) => {
-              archiveCitaEliminada(citaToDelete.id, motivo, notasOtros)
-              if (bookingEditingId === citaToDelete.id) closeBooking()
-              setCitaToDelete(null)
+              archiveCitaCancelada(citaToCancel.id, motivo, notasOtros)
+              if (bookingEditingId === citaToCancel.id) closeBooking()
+              setCitaToCancel(null)
             }}
           />
         )

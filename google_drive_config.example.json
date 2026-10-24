@@ -1,0 +1,7 @@
+{
+  "client_id": "TU_GOOGLE_DRIVE_CLIENT_ID_AQUI",
+  "client_secret": "TU_GOOGLE_DRIVE_CLIENT_SECRET_AQUI",
+  "refresh_token": "TU_GOOGLE_DRIVE_REFRESH_TOKEN_AQUI",
+  "folder_id": "TU_GOOGLE_DRIVE_FOLDER_ID_AQUI",
+  "backup_folder_id": "TU_GOOGLE_DRIVE_BACKUP_FOLDER_ID_AQUI"
+}

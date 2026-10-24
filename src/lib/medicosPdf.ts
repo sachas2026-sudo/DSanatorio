@@ -1,6 +1,7 @@
 import { format } from 'date-fns'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { DNI_MED_LABEL } from './dniLabels'
 import { drawPdfHeader, pdfBodyStartYAfterHeader, PDF_BODY_EXTRA_DOWN_PLAIN } from './pdfHeader'
 import {
   drawPdfPeriodMetaBlock,
@@ -12,7 +13,7 @@ import {
 import type { Doctor } from '../types'
 
 const TABLE_HEAD_STYLES = {
-  fillColor: [47, 111, 219] as [number, number, number],
+  fillColor: [122, 163, 176] as [number, number, number],
   textColor: [255, 255, 255] as [number, number, number],
   fontStyle: 'bold' as const,
   fontSize: 8,
@@ -24,7 +25,7 @@ const TABLE_HEAD_STYLES = {
 
 const TABLE_BODY_STYLES = {
   fontSize: 7.5,
-  cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+  cellPadding: { top: 2.5, bottom: 0, left: 3, right: 3 },
   valign: 'middle' as const,
   overflow: 'linebreak' as const,
   textColor: [61, 74, 92] as [number, number, number],
@@ -98,8 +99,9 @@ function medicosTableColWidths(
   includePorcentaje: boolean,
 ): number[] {
   const pct = includePorcentaje
-    ? [5, 20, 12, 15, 16, 16, 16]
-    : [6, 24, 14, 18, 18, 20]
+    // Mantiene más espacio para el nombre y DNI; % queda angosta.
+    ? [6, 19, 11, 10, 19, 13, 14, 8]
+    : [7, 24, 12, 12, 12, 16, 17]
   const raw = pct.map((p) => (p / 100) * tableW)
   const sum = raw.reduce((a, b) => a + b, 0)
   const diff = tableW - sum
@@ -145,6 +147,7 @@ export function buildMedicosPdf(
       ? [
           '#',
           'Apellido y nombre',
+          DNI_MED_LABEL,
           'Matrícula',
           'Especialidad',
           'Teléfono',
@@ -154,6 +157,7 @@ export function buildMedicosPdf(
       : [
           '#',
           'Apellido y nombre',
+          DNI_MED_LABEL,
           'Matrícula',
           'Especialidad',
           'Teléfono',
@@ -181,11 +185,21 @@ export function buildMedicosPdf(
       startY: tableStartY,
       head: [headers],
       body: sorted.map((d, index) => {
+        const os = (d.obrasSociales?.length
+          ? d.obrasSociales
+          : d.obraSocial
+            ? [d.obraSocial]
+            : []
+        )
+          .map((x) => x.trim())
+          .filter(Boolean)
+        const osLabel = os.length > 0 ? `OS: ${os.slice(0, 3).join(', ')}${os.length > 3 ? '…' : ''}` : ''
         const row = [
           String(index + 1),
           `${d.apellido || '—'}, ${d.nombre || '—'}`,
+          d.dni?.trim() || '—',
           d.matricula || '—',
-          d.especialidad || '—',
+          `${d.especialidad || '—'}${osLabel ? `\n${osLabel}` : ''}`,
           d.telefono || '—',
           d.email || '—',
         ]
@@ -199,7 +213,7 @@ export function buildMedicosPdf(
       alternateRowStyles: { fillColor: [248, 251, 255] },
       columnStyles,
       tableWidth,
-      margin: { left: tableLeft, right: PAGOS_PDF_MARGIN },
+      margin: { left: tableLeft, right: PAGOS_PDF_MARGIN, bottom: 0 },
       showHead: 'everyPage',
     })
 
@@ -212,7 +226,7 @@ export function buildMedicosPdf(
       finalY - cursorY,
       PAGOS_DOCTOR_BLOCK_RADIUS,
     )
-    drawMedicosTotalBar(doc, finalY + 6, pageW, sorted.length)
+    drawMedicosTotalBar(doc, finalY, pageW, sorted.length)
   }
 
   const stamp = format(new Date(), 'yyyy-MM-dd')

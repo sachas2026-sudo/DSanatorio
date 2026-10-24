@@ -79,6 +79,9 @@ fn attachment_mime_type(filename: &str, explicit: Option<&String>) -> String {
     if lower.ends_with(".json") {
         return "application/json".to_string();
     }
+    if lower.ends_with(".zip") {
+        return "application/zip".to_string();
+    }
     "application/pdf".to_string()
 }
 

@@ -1,10 +1,10 @@
-import { parseAppDataJson } from './parseAppData'
+import { parseAppDataJson, parseAppDataRecordWithReport, hasIntegrityIssues, formatIntegrityAlert } from './parseAppData'
 import {
   loadStorageRaw,
   saveStorageRaw,
   serializeAppData,
 } from './appStorage'
-import { generateDemoDoctors, generateDemoPatients } from './seedData'
+import { migratePaymentsPorcentajeAplicado } from './paymentPorcentaje'
 import { migrateSmtpSecretFromSettings } from './smtpSecret'
 import type { AppData } from '../types'
 
@@ -18,10 +18,13 @@ export const EMPTY_APP_DATA: AppData = {
   atencionesMensuales: [],
   appointments: [],
   payments: [],
-  pagosCancelados: [],
+  atencionesSinTurno: [],
+    pagosCancelados: [],
+    pagosDeudasMedicos: [],
   especialidadesCustom: [],
   obrasSocialesCustom: [],
   localidadesCustom: [],
+  motivosConsultaCustom: [],
   settings: {
     email: '',
     emailGerente: '',
@@ -30,25 +33,18 @@ export const EMPTY_APP_DATA: AppData = {
     telefono: '',
     cuit: '',
   },
-}
-
-export function withDemoData(data: AppData): AppData {
-  const needsPatients = data.patients.length === 0
-  const needsDoctors = data.doctors.length === 0
-  if (!needsPatients && !needsDoctors) return data
-  return {
-    ...data,
-    patients: needsPatients ? generateDemoPatients() : data.patients,
-    doctors: needsDoctors ? generateDemoDoctors() : data.doctors,
-  }
+  planesAfiliados: [],
+  afiliados: [],
+  cuotasAfiliados: [],
+  distribucionOSPercentajes: [],
 }
 
 export function parseStoredData(raw: string): AppData {
-  return withDemoData(parseAppDataJson(raw))
+  return parseAppDataJson(raw)
 }
 
 export type StorageLoadResult =
-  | { kind: 'ok'; data: AppData }
+  | { kind: 'ok'; data: AppData; integrityAlert?: string }
   | { kind: 'empty' }
   | { kind: 'corrupt'; message: string }
 
@@ -72,8 +68,12 @@ export async function loadFromStorage(): Promise<StorageLoadResult> {
     if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     if (!raw?.trim()) return { kind: 'empty' }
     try {
-      const data = parseStoredData(raw)
-      return { kind: 'ok', data }
+      const parsed = JSON.parse(raw) as unknown
+      const { data, report } = parseAppDataRecordWithReport(parsed)
+      const integrityAlert = hasIntegrityIssues(report)
+        ? formatIntegrityAlert(report)
+        : undefined
+      return { kind: 'ok', data, integrityAlert }
     } catch (err) {
       const detail =
         err instanceof Error ? err.message : 'Error al interpretar el archivo.'
@@ -91,8 +91,17 @@ export async function loadFromStorage(): Promise<StorageLoadResult> {
 
 export async function enrichLoadedData(data: AppData): Promise<AppData> {
   const clave = await migrateSmtpSecretFromSettings(data.settings)
+  const migrated = migratePaymentsPorcentajeAplicado(data)
   return {
     ...data,
+    payments: migrated.payments,
+    pagosCancelados: migrated.pagosCancelados,
+    pagosDeudasMedicos: data.pagosDeudasMedicos ?? [],
+    atencionesSinTurno: data.atencionesSinTurno ?? [],
+    planesAfiliados: data.planesAfiliados ?? [],
+    afiliados: data.afiliados ?? [],
+    cuotasAfiliados: data.cuotasAfiliados ?? [],
+    distribucionOSPercentajes: data.distribucionOSPercentajes ?? [],
     settings: { ...data.settings, clave },
   }
 }

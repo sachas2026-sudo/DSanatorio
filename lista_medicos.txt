@@ -1,0 +1,55 @@
+Lista de Médicos - Agenda
+
+1. CABALLERO, YOLANDA - Cardiología
+   Obras sociales: ASIS SALUD · MELD SALUD · IPS
+
+2. CORREA, ALFARO MARTIN - Cardiología
+
+3. OSORIO, ERICA - Cardiología
+
+4. GOMEZ, FERNANDO - Clínica médica
+
+5. SENESTRARI, MARIA FERNANDA - Clínica médica
+
+6. VELAZQUEZ, ROBERTO - Clínica médica
+
+7. ALFONSO, CARMEN - Endocrinología
+
+8. PAREDES, SEBASTIAN - Fonoaudiólogo
+
+9. IMBACH, GUILLERMO - Gastroenterología
+   Tipo: Particular
+
+10. CASTAÑARES, VALERIA - Ginecología
+
+11. MENDEZ, PAOLA - Nutricionista
+    Tipo: Particular
+
+12. BOGADO, CELESTE ELIZABETH - Odontologia
+    Obras sociales: IPS
+
+13. VIDONDO, MATIAS - Otorrinolaringología
+
+14. DIBIASI, MIGUEL ANGEL C. - Pediatría
+
+15. BULOS, CLAUDIO - Traumatología
+    Tipo: Particular
+
+16. MUYAL, JOEL ERNESTO - Traumatología
+    Tipo: Particular
+
+---
+Total: 16 médicos
+
+Especialidades:
+- Cardiología: 3
+- Clínica médica: 3
+- Endocrinología: 1
+- Fonoaudiólogo: 1
+- Gastroenterología: 1
+- Ginecología: 1
+- Nutricionista: 1
+- Odontologia: 1
+- Otorrinolaringología: 1
+- Pediatría: 1
+- Traumatología: 2

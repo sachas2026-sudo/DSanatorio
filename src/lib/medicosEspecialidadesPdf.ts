@@ -4,7 +4,8 @@ import autoTable from 'jspdf-autotable'
 import type { MedicoEspecialidadListRow } from './doctorAgenda'
 import {
   buildDoctorAgendaIndex,
-  doctorDiasAtencionLabel,
+  doctorDiasAtencionLabelForPdf,
+  doctorHorarioAtencionLabelForPdf,
 } from './doctorAgenda'
 import { drawPdfHeader, pdfBodyStartYAfterHeader, PDF_BODY_EXTRA_DOWN_PLAIN } from './pdfHeader'
 import type { AppData } from '../types'
@@ -16,7 +17,7 @@ import {
 } from './pagosPdfLayout'
 
 const TABLE_HEAD_STYLES = {
-  fillColor: [47, 111, 219] as [number, number, number],
+  fillColor: [122, 163, 176] as [number, number, number],
   textColor: [255, 255, 255] as [number, number, number],
   fontStyle: 'bold' as const,
   fontSize: 8,
@@ -36,6 +37,8 @@ const TABLE_BODY_STYLES = {
   lineWidth: 0.15,
 }
 
+const TABLE_BODY_FONT_MAIN_COLS = 8.5
+
 function tableFinalY(doc: jsPDF, fallback: number): number {
   return (
     (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable
@@ -44,7 +47,8 @@ function tableFinalY(doc: jsPDF, fallback: number): number {
 }
 
 function especialidadesTableColWidths(tableW: number): number[] {
-  const pct = [23, 17, 26, 22, 12]
+  // 6 columnas: Médico, Especialidad, OS, Día, Horario, Duración
+  const pct = [18, 16, 14, 12, 32, 8]
   const raw = pct.map((p) => (p / 100) * tableW)
   const sum = raw.reduce((a, b) => a + b, 0)
   const diff = tableW - sum
@@ -103,7 +107,8 @@ function rowsForEspecialidadesPdf(
     if (!doctor) return r
     return {
       ...r,
-      dias: doctorDiasAtencionLabel(doctor, data, index),
+      dias: doctorDiasAtencionLabelForPdf(doctor, data, index),
+      horario: doctorHorarioAtencionLabelForPdf(doctor, data, index),
     }
   })
 }
@@ -137,6 +142,7 @@ export function buildMedicosEspecialidadesPdf(
     const headers = [
       'Médico',
       'Especialidad',
+      'Obras sociales',
       'Día que atiende',
       'Horario',
       'Duración',
@@ -150,6 +156,7 @@ export function buildMedicosEspecialidadesPdf(
         halign?: 'left' | 'center' | 'right'
         valign?: 'middle'
         fontStyle?: 'bold'
+        fontSize?: number
         textColor?: [number, number, number]
       }
     > = {}
@@ -160,7 +167,8 @@ export function buildMedicosEspecialidadesPdf(
         ...(i === 0
           ? { fontStyle: 'bold', textColor: [26, 74, 138] }
           : {}),
-        ...(i === 4 ? { halign: 'center' } : {}),
+        ...(i === 5 ? { halign: 'center' } : {}),
+        fontSize: i === 4 ? 8 : TABLE_BODY_FONT_MAIN_COLS,
       }
     })
 
@@ -170,6 +178,7 @@ export function buildMedicosEspecialidadesPdf(
       body: exportRows.map((r) => [
         r.medico || '—',
         r.especialidad || '—',
+        r.obrasSociales || '—',
         r.dias || '—',
         r.horario || '—',
         r.duracion || '—',

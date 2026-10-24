@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Centro Médico — Panel gerente</title>
+    <link rel="stylesheet" href="/styles.css?v=14" />
+  </head>
+  <body>
+    <div id="app" class="shell">
+      <section id="login-view" class="card">
+        <h1>Panel gerente</h1>
+        <p class="lead">Solo lectura · turnos de hoy y total con descuentos del mes (sin DNI).</p>
+        <form id="login-form">
+          <label for="password">Contraseña</label>
+          <input id="password" type="password" autocomplete="current-password" required />
+          <button type="submit" class="btn btn-primary">Ingresar</button>
+          <p id="login-error" class="error" hidden></p>
+        </form>
+      </section>
+
+      <section id="dashboard-view" class="dashboard" hidden>
+        <header class="dash-head">
+          <div class="dash-head-brand">
+            <h1>Centro Médico</h1>
+            <img src="/Logo.jpeg" alt="" class="dash-logo" width="56" height="56" />
+          </div>
+          <p id="updated-at" class="muted dash-head-meta"></p>
+          <div class="dash-head-actions">
+            <button type="button" id="refresh-btn" class="btn btn-celestito">Actualizar</button>
+            <button type="button" id="logout-btn" class="btn btn-celestito">Salir</button>
+          </div>
+        </header>
+
+        <div class="grid grid--stats">
+          <article class="card card--stat">
+            <p class="stat-pill__row stat-pill__row--head">
+              <span class="stat-pill__title">Pagos del mes</span>
+              <span class="stat-pill__sep" aria-hidden="true">-</span>
+              <span id="mes-label" class="stat-pill__period muted"></span>
+            </p>
+            <p class="stat-pill__row stat-pill__row--detail">
+              <span class="stat-pill__caption stat-pill__caption--inline">Total Facturado</span>
+              <span id="mes-total-facturado" class="stat-pill__amount stat-pill__amount--bruto"></span>
+            </p>
+            <p class="stat-pill__row stat-pill__row--detail">
+              <span class="stat-pill__caption stat-pill__caption--inline">Total con descuentos</span>
+              <span id="mes-total" class="stat-pill__amount stat-pill__amount--neto"></span>
+              <span class="stat-pill__sep" aria-hidden="true">-</span>
+              <span id="mes-count" class="stat-pill__count muted"></span>
+            </p>
+          </article>
+          <article class="card card--stat">
+            <p class="stat-pill__row stat-pill__row--head">
+              <span class="stat-pill__title">Pagos del Día</span>
+              <span class="stat-pill__sep" aria-hidden="true">-</span>
+              <span id="dia-label" class="stat-pill__period muted"></span>
+            </p>
+            <p class="stat-pill__row stat-pill__row--detail">
+              <span class="stat-pill__caption stat-pill__caption--inline">Total Facturado</span>
+              <span id="dia-total-facturado" class="stat-pill__amount stat-pill__amount--bruto"></span>
+            </p>
+            <p class="stat-pill__row stat-pill__row--detail">
+              <span class="stat-pill__caption stat-pill__caption--inline">Total con descuentos</span>
+              <span id="dia-total-neto" class="stat-pill__amount stat-pill__amount--neto"></span>
+              <span class="stat-pill__sep" aria-hidden="true">-</span>
+              <span id="dia-count" class="stat-pill__count muted"></span>
+            </p>
+          </article>
+        </div>
+
+        <article class="card card--chart">
+          <h2 id="chart-title">Pagos del mes por día</h2>
+          <div class="bar-chart" id="pagos-bar-chart" aria-hidden="true"></div>
+          <p id="chart-empty" class="muted" hidden>Sin cobranzas registradas este mes.</p>
+        </article>
+
+        <article class="card">
+          <h2 id="turnos-title">Turnos de hoy</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Hora</th>
+                  <th>Paciente</th>
+                  <th>Médico</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="turnos-body"></tbody>
+            </table>
+          </div>
+          <p id="turnos-empty" class="muted" hidden>Sin turnos para hoy.</p>
+        </article>
+      </section>
+    </div>
+    <script src="/app.js?v=14" type="module"></script>
+  </body>
+</html>

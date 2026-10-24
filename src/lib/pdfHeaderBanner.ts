@@ -1,3 +1,4 @@
+/// <reference path=\
 import bannerAssetUrl from '../../public/pdf-header-plain.png?url'
 
 const PX_PER_MM = 4

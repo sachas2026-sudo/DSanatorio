@@ -1,0 +1,18 @@
+﻿Centro Medico v15.0.0 â€” actualizacion de codigo (conserva datos en la PC)
+=========================================
+
+ANTES DE INSTALAR:
+1. Cierre la app Centro Medico si esta abierta.
+2. Ejecute este .exe con clic derecho -> Ejecutar como administrador.
+3. No desinstale antes: el asistente actualiza C:\Sanatorio\app\.
+
+DATOS EN LA PC (no se reemplazan si ya existen):
+- C:\Sanatorio\datos\sanatorio-datos.db   base principal (SQLite)
+- C:\Sanatorio\datos\sanatorio-datos.json  (solo si no hay base previa)
+- C:\Sanatorio\respaldo\  copias de seguridad
+
+PROGRAMA:
+- C:\Sanatorio\app\
+
+Archivo: Centro-Medico-v15.0.0-actualizacion-codigo.exe
+Fecha: 2026-10-22 10:20

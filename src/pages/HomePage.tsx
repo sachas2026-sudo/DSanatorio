@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 
 import { Link } from 'react-router-dom'
 
-import { format, isWithinInterval, parseISO } from 'date-fns'
+import { format, isSameDay, isWithinInterval, parseISO } from 'date-fns'
 
 import { es } from 'date-fns/locale'
 
@@ -22,6 +22,7 @@ import {
 
 import { AgendaMedicosEspecialidadesModal } from '../components/AgendaMedicosEspecialidadesModal'
 import { useAppState } from '../context/AppStateContext'
+import { medicosActivos, pacientesActivos } from '../lib/activo'
 import { buildMedicosEspecialidadesRows } from '../lib/doctorAgenda'
 import { useAuth } from '../context/AuthContext'
 
@@ -112,16 +113,26 @@ export function HomePage() {
 
   )
 
+  const turnosHoyCounts = useMemo(() => {
+    let programado = 0
+    let atendido = 0
+    let cancelado = 0
+    for (const c of data.appointments) {
+      if (!isSameDay(parseISO(c.fechaHora), hoy)) continue
+      if (c.estado === 'programado') programado++
+      else if (c.estado === 'atendido') atendido++
+      else cancelado++
+    }
+    return { programado, atendido, cancelado }
+  }, [data.appointments, hoy])
+
 
 
   const tituloDia = format(hoy, "EEEE d 'de' MMMM", { locale: es })
 
 
 
-  const medicosEspecialidadesRows = useMemo(
-    () => buildMedicosEspecialidadesRows(data),
-    [data],
-  )
+  const medicosEspecialidadesRows = buildMedicosEspecialidadesRows(data)
 
   const espGrupos = useMemo(
 
@@ -244,7 +255,7 @@ export function HomePage() {
 
             <span className="tile-k">Pacientes</span>
 
-            <span className="tile-v">{data.patients.length} registrados</span>
+            <span className="tile-v">{pacientesActivos(data.patients).length} activos</span>
 
           </div>
 
@@ -262,7 +273,7 @@ export function HomePage() {
 
             <span className="tile-k">Médicos</span>
 
-            <span className="tile-v">{data.doctors.length} registrados</span>
+            <span className="tile-v">{medicosActivos(data.doctors).length} activos</span>
 
           </div>
 
@@ -326,11 +337,12 @@ export function HomePage() {
 
 
 
-      <section className="panel panel--home-stats">
+      <div className="home-top-row">
+        <section className="panel panel--home-stats">
 
-        <h2 className="home-section-title">Resumen</h2>
+          <h2 className="home-section-title">Resumen</h2>
 
-        <div className="home-stats-grid">
+          <div className="home-stats-grid">
 
           {puedePagos && (
             <>
@@ -340,34 +352,6 @@ export function HomePage() {
               </div>
             </>
           )}
-
-          <div className="home-stat-card home-stat-card--turnos">
-
-            <span className="home-stat-card__k">Turnos del mes</span>
-
-            <div className="home-stat-card__chips home-stat-card__chips--turnos">
-
-              <span className="home-stat-chip" title="Programados">
-
-                {stats.turnosMes.programado} prog.
-
-              </span>
-
-              <span className="home-stat-chip" title="Atendidos">
-
-                {stats.turnosMes.atendido} atend.
-
-              </span>
-
-              <span className="home-stat-chip" title="Cancelados">
-
-                {stats.turnosMes.cancelado} canc.
-
-              </span>
-
-            </div>
-
-          </div>
 
           {stats.topObrasSociales.length > 0 && (
 
@@ -401,8 +385,7 @@ export function HomePage() {
           </p>
         )}
 
-      </section>
-      <div className="home-alerts-row">
+        </section>
         <section className="panel panel--home-alerts">
 
         <h2 className="home-section-title">Avisos</h2>
@@ -426,7 +409,7 @@ export function HomePage() {
 
               ) : (
 
-                <ul className="home-alert-list">
+                <ul className="home-alert-list home-alert-list--inline">
 
                   {alerts.turnosManana.map((t) => (
 
@@ -438,13 +421,9 @@ export function HomePage() {
 
                       </span>
 
-                      <span>
+                      {'  '}
 
-                        {t.patientLabel}
-
-                        <span className="home-alert-list__sub">{t.doctorLabel}</span>
-
-                      </span>
+                      {t.patientLabel} - {t.doctorLabel}
 
                     </li>
 
@@ -466,7 +445,7 @@ export function HomePage() {
 
               ) : (
 
-                <ul className="home-alert-list">
+                <ul className="home-alert-list home-alert-list--inline">
 
                   {alerts.atendidosSinPago.slice(0, 8).map((t) => (
 
@@ -478,13 +457,9 @@ export function HomePage() {
 
                       </span>
 
-                      <span>
+                      {'  '}
 
-                        {t.patientLabel}
-
-                        <span className="home-alert-list__sub">{t.doctorLabel}</span>
-
-                      </span>
+                      {t.patientLabel} - {t.doctorLabel}
 
                     </li>
 
@@ -551,69 +526,6 @@ export function HomePage() {
           </p>
         </section>
       </div>
-
-
-
-      <section className="panel panel--home-turnos">
-
-        <div className="home-turnos__head">
-
-          <h2 className="home-turnos__title">Turnos de hoy</h2>
-
-          <span className="home-turnos__date">{tituloDia}</span>
-
-        </div>
-
-        {turnosPorMedico.length === 0 ? (
-
-          <p className="empty-hint">No hay turnos programados para hoy.</p>
-
-        ) : (
-
-          <div className="home-turnos-pills">
-
-            {turnosPorMedico.map((g) => (
-
-              <div key={g.key} className="day-pill">
-
-                <div className="day-pill__head">
-
-                  <h3 className="day-pill__title day-pill__title--doctor">
-
-                    {g.label}
-
-                  </h3>
-
-                  <span className="day-pill__range">
-
-                    {g.citas.length} turno{g.citas.length === 1 ? '' : 's'}
-
-                  </span>
-
-                </div>
-
-                <ul className="day-cita-list">{g.citas.map(renderCita)}</ul>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        )}
-
-        <p className="home-turnos__link">
-
-          <Link to="/agenda">Ver agenda completa →</Link>
-
-        </p>
-
-      </section>
-
     </div>
-
   )
-
 }
-
-

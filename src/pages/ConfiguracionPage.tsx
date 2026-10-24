@@ -4,6 +4,7 @@ import { es } from 'date-fns/locale'
 import { isTauri } from '@tauri-apps/api/core'
 import { IconEye, IconEyeOff } from '../components/icons'
 import { useAppState } from '../context/AppStateContext'
+import { useAuth } from '../context/AuthContext'
 import { useConfirm } from '../context/ConfirmContext'
 import {
   getEffectiveAccounts,
@@ -26,31 +27,44 @@ import {
   type DailyBackupEntry,
 } from '../lib/appBackup'
 import { getAppDataFilePath } from '../lib/appStorage'
+import { formatBackupSize } from '../lib/formatBackupSize'
+import { getInstallInfo, type InstallInfo } from '../lib/installInfo'
+import { canAccessConfiguracion } from '../lib/exportPermissions'
 import './pages.css'
+
+function backupWhenLabel(modifiedMs?: number): string {
+  if (!modifiedMs) return '—'
+  return format(new Date(modifiedMs), 'dd-MM-yyyy HH:mm', { locale: es })
+}
 
 function backupOptionLabel(entry: BackupEntry): string {
   if (!entry.exists) {
     return `Respaldo ${entry.slot} — (vacío)`
   }
-  const when = entry.modifiedMs
-    ? format(new Date(entry.modifiedMs), 'dd-MM-yyyy HH:mm', { locale: es })
-    : 'sin fecha'
+  const when = backupWhenLabel(entry.modifiedMs)
+  const size =
+    entry.sizeBytes != null ? ` · ${formatBackupSize(entry.sizeBytes)}` : ''
   const hint =
     entry.slot === 1
       ? ' — más reciente'
       : entry.slot === 2
         ? ' — anterior'
         : ' — más antigua'
-  return `Respaldo ${entry.slot} — ${when}${hint}`
+  return `Respaldo ${entry.slot} — ${when}${size}${hint}`
 }
 
 export function ConfiguracionPage() {
+  const { role } = useAuth()
+  const esAdmi = canAccessConfiguracion(role)
   const {
     data,
     updateSettings,
     restoreFromBackup,
+    restoreFromDailyBackup,
     createBackupNow,
     sendDatabaseBackupByEmail,
+    dailyBackupAlert,
+    retryDailyBackup,
   } = useAppState()
   const { confirm } = useConfirm()
   const [form, setForm] = useState(() => ({ ...data.settings }))
@@ -58,10 +72,16 @@ export function ConfiguracionPage() {
   const [showClave, setShowClave] = useState(false)
   const [dataFilePath, setDataFilePath] = useState<string | null>(null)
   const [backupLocations, setBackupLocations] = useState<string[]>([])
+  const [installInfo, setInstallInfo] = useState<InstallInfo | null>(null)
   const [backups, setBackups] = useState<BackupEntry[]>([])
   const [dailyBackups, setDailyBackups] = useState<DailyBackupEntry[]>([])
   const [restoreSlot, setRestoreSlot] = useState<'' | `${BackupSlot}`>('')
   const [restoreMsg, setRestoreMsg] = useState<{
+    type: 'ok' | 'err'
+    text: string
+  } | null>(null)
+  const [restoreDailyDate, setRestoreDailyDate] = useState('')
+  const [restoreDailyMsg, setRestoreDailyMsg] = useState<{
     type: 'ok' | 'err'
     text: string
   } | null>(null)
@@ -75,6 +95,7 @@ export function ConfiguracionPage() {
     type: 'ok' | 'err'
     text: string
   } | null>(null)
+  const [dailyRetryBusy, setDailyRetryBusy] = useState(false)
 
   const [accountsDraft, setAccountsDraft] = useState(() =>
     getEffectiveAccounts().map((a) => ({ ...a, password: a.password ?? '', nextPassword: '' })),
@@ -122,6 +143,7 @@ export function ConfiguracionPage() {
     if (!isTauri()) return
     void getAppDataFilePath().then(setDataFilePath)
     void getBackupLocations().then(setBackupLocations)
+    void getInstallInfo().then(setInstallInfo)
   }, [])
 
   useEffect(() => {
@@ -129,12 +151,16 @@ export function ConfiguracionPage() {
   }, [refreshBackups])
 
   useEffect(() => {
+    if (!dailyBackupAlert) void refreshBackups()
+  }, [dailyBackupAlert, refreshBackups])
+
+  useEffect(() => {
     void loadSmtpSecret().then((clave) => {
       if (clave) setForm((f) => ({ ...f, clave }))
     })
   }, [])
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault()
     updateSettings({
       email: form.email.trim(),
@@ -143,6 +169,9 @@ export function ConfiguracionPage() {
       clave: form.clave,
       telefono: form.telefono.trim(),
       cuit: form.cuit.trim(),
+      secretariaPuedeModificarMesActual: form.secretariaPuedeModificarMesActual === true,
+      secretariaPuedeModificarTurnosOtrosUsuarios: form.secretariaPuedeModificarTurnosOtrosUsuarios === true,
+      mostrarAccionesEnListaPagos: form.mostrarAccionesEnListaPagos === true,
     })
     setSaved(true)
     window.setTimeout(() => setSaved(false), 2500)
@@ -238,7 +267,7 @@ export function ConfiguracionPage() {
     }
     const ok = await confirm({
       title: 'Enviar base por correo',
-      message: `Se enviará la base de datos completa como adjunto JSON a:\n\n${to}\n\nEl archivo incluye datos personales. ¿Continuar?`,
+      message: `Se enviará un ZIP con la base de datos y archivos de usuarios/claves (si existen) a:\n\n${to}\n\nEl archivo incluye datos personales y puede incluir contraseñas. ¿Continuar?`,
       confirmLabel: 'Enviar',
       cancelLabel: 'Cancelar',
     })
@@ -298,7 +327,7 @@ export function ConfiguracionPage() {
     }
     const ok = await confirm({
       title: 'ADMINISTRACION',
-      message: `¿Restaurar ${backupOptionLabel(entry)}?\n\nSe reemplazarán todos los datos actuales (pacientes, turnos, pagos, etc.) por los de esa copia.`,
+      message: `¿Restaurar ${backupOptionLabel(entry)}?\n\nSe reemplazarán todos los datos actuales (pacientes, turnos, pagos, configuración, usuarios y claves) por los de esa copia.`,
     })
     if (!ok) return
     const result = await restoreFromBackup(slot)
@@ -317,15 +346,79 @@ export function ConfiguracionPage() {
     }
   }
 
+  async function handleRestoreDailyBackup() {
+    if (!restoreDailyDate) return
+    const entry = dailyBackups.find((b) => b.date === restoreDailyDate)
+    if (!entry) {
+      setRestoreDailyMsg({
+        type: 'err',
+        text: 'No hay respaldo diario para esa fecha.',
+      })
+      return
+    }
+    const when = entry.modifiedMs
+      ? format(new Date(entry.modifiedMs), 'dd-MM-yyyy HH:mm', { locale: es })
+      : entry.date
+    const ok = await confirm({
+      title: 'ADMINISTRACION',
+      message: `¿Restaurar respaldo diario del ${entry.date} (${when})?\n\nSe reemplazarán todos los datos actuales (incluida configuración, usuarios y claves) por los de esa copia.`,
+    })
+    if (!ok) return
+    const result = await restoreFromDailyBackup(entry.date)
+    if (result.ok) {
+      setRestoreDailyMsg({
+        type: 'ok',
+        text: 'Respaldo diario restaurado. Los datos en pantalla ya son los de la fecha elegida.',
+      })
+      setRestoreDailyDate('')
+      void refreshBackups()
+    } else {
+      setRestoreDailyMsg({
+        type: 'err',
+        text: result.error ?? 'No se pudo restaurar.',
+      })
+    }
+  }
+
   const availableBackups = backups.filter((b) => b.exists)
 
+  const backupHistoryRows = useMemo(() => {
+    const rotative = backups
+      .filter((b) => b.exists)
+      .map((b) => ({
+        key: `slot-${b.slot}`,
+        label: `Respaldo ${b.slot}${
+          b.slot === 1 ? ' (más reciente)' : b.slot === 3 ? ' (más antigua)' : ''
+        }`,
+        when: backupWhenLabel(b.modifiedMs),
+        size: formatBackupSize(b.sizeBytes),
+      }))
+    const daily = dailyBackups.map((b) => ({
+      key: `daily-${b.date}`,
+      label: `Diario ${b.date}`,
+      when: backupWhenLabel(b.modifiedMs),
+      size: formatBackupSize(b.sizeBytes),
+    }))
+    return [...rotative, ...daily]
+  }, [backups, dailyBackups])
+
+  async function handleRetryDailyBackup() {
+    setDailyRetryBusy(true)
+    const result = await retryDailyBackup()
+    setDailyRetryBusy(false)
+    if (result.ok) {
+      await refreshBackups()
+    }
+  }
+
   return (
-    <div className="page">
+    <div className={`page${esAdmi ? ' page--config-admi' : ''}`}>
       <header className="page-header">
         <h1>Configuración</h1>
       </header>
 
-      <div className="config-top-row">
+      <div className={esAdmi ? 'config-top-row' : 'config-top-row config-top-row--simple'}>
+        <div className={esAdmi ? 'config-top-col' : 'config-top-col config-top-col--solo'}>
         <section className="panel panel--config">
           <h2>Datos del centro médico</h2>
           <form onSubmit={submit}>
@@ -452,7 +545,7 @@ export function ConfiguracionPage() {
                 </div>
               </div>
             </div>
-            <div className="form-actions">
+            <div className="form-actions form-actions--config-datos">
               <button type="submit" className="btn btn-primary">
                 Guardar
               </button>
@@ -461,16 +554,67 @@ export function ConfiguracionPage() {
                   Cambios guardados
                 </span>
               )}
+              {dataFilePath && (
+                <p className="config-data-path config-data-path--inline" role="status">
+                  Base de datos (permanente, no se borra al actualizar el programa):{' '}
+                  <strong>{dataFilePath}</strong>
+                </p>
+              )}
             </div>
           </form>
-          {dataFilePath && (
-            <p className="config-data-path" role="status">
-              Base de datos (permanente, no se borra al actualizar el programa):{' '}
-              <strong>{dataFilePath}</strong>
-            </p>
-          )}
         </section>
 
+        {esAdmi && (
+          <section className="panel panel--config" style={{ marginTop: '1.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
+              <h2 style={{ margin: 0, fontSize: '1rem', color: '#0f2942', fontWeight: 700 }}>
+                CONFIGURACION PERMISOS USUARIOS
+              </h2>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.25rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', flex: '1 1 340px' }}>
+                <label style={{ userSelect: 'none', display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', color: '#1e293b', fontSize: '0.88rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.secretariaPuedeModificarMesActual === true}
+                    onChange={(e) => {
+                      const val = e.target.checked
+                      setForm((f) => ({ ...f, secretariaPuedeModificarMesActual: val }))
+                      updateSettings({ secretariaPuedeModificarMesActual: val })
+                    }}
+                  />
+                  Activar Modificar Mes (permite a Secretaría modificar turnos de todo el mes actual)
+                </label>
+                <label style={{ userSelect: 'none', display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', color: '#1e293b', fontSize: '0.88rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.secretariaPuedeModificarTurnosOtrosUsuarios === true}
+                    onChange={(e) => {
+                      const val = e.target.checked
+                      setForm((f) => ({ ...f, secretariaPuedeModificarTurnosOtrosUsuarios: val }))
+                      updateSettings({ secretariaPuedeModificarTurnosOtrosUsuarios: val })
+                    }}
+                  />
+                  Activar usuarios de distintos turnos modificar turnos no suyos
+                </label>
+                <label style={{ userSelect: 'none', display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', color: '#1e293b', fontSize: '0.88rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.mostrarAccionesEnListaPagos === true}
+                    onChange={(e) => {
+                      const val = e.target.checked
+                      setForm((f) => ({ ...f, mostrarAccionesEnListaPagos: val }))
+                      updateSettings({ mostrarAccionesEnListaPagos: val })
+                    }}
+                  />
+                  Activar las acciones en la lista de Pagos
+                </label>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {esAdmi && (
         <section className="panel panel--config panel--config-auth">
           <h2>Usuario y Contraseña</h2>
           <p className="config-auth-hint" role="status">
@@ -634,43 +778,59 @@ export function ConfiguracionPage() {
             )}
           </div>
         </section>
-      </div>
+        )}
+        </div>
 
-      <section className="panel panel--config panel--config-backup">
-        <h2>Copias de seguridad</h2>
+        {esAdmi && (
+        <div className="config-top-col">
+        <section className="panel panel--config panel--config-backup panel--config-backup--compact">
+          <h2>Copias de seguridad</h2>
+          <div className="config-backup-inner">
         <p className="config-backup-lead config-backup-lead--one" role="status">
-          Al salir (<strong>Salir</strong>) y cada <strong>hora</strong>{' '}
-          con la app abierta se actualizan las <strong>3 últimas</strong> copias
-          de respaldo en <strong>PC y Dropbox</strong> (si Dropbox está activo):
+          Al salir o con <strong>Copia ahora</strong> se rotan <strong>3 copias</strong>{' '}
+          en PC, en otro disco local si existe (D:, E:, …) y en Dropbox.
+          Una vez al día (con la app abierta) se guarda además una copia fechada en{' '}
+          <code>diario/</code>.
+          Cada copia rotativa incluye la base completa (pacientes, turnos, pagos, agenda,
+          configuración del centro, teléfonos, etc.) y los archivos
+          de <strong>usuarios/contraseñas</strong> y <strong>clave SMTP</strong>{' '}
+          en la misma carpeta:
           <ul className="config-backup-paths">
             {(backupLocations.length > 0
               ? backupLocations
-              : [
-                  'C:\\Sanatorio\\respaldo',
-                  'C:\\Users\\LAS\\Dropbox\\Sanatorio\\respaldo',
-                ]
+              : ['C:\\Sanatorio\\respaldo']
             ).map((path) => (
               <li key={path}>
                 <code>{path}</code>
               </li>
             ))}
           </ul>
+          {installInfo && (
+            <p className="config-backup-version" role="status">
+              Versión instalada: <strong>v{installInfo.appVersion}</strong>
+              {installInfo.previousVersion &&
+                installInfo.previousVersion !== installInfo.appVersion && (
+                  <>
+                    {' '}
+                    (antes v{installInfo.previousVersion})
+                  </>
+                )}
+              . Los datos permanecen en <code>{installInfo.dataDir}</code> al
+              actualizar el programa.
+            </p>
+          )}
         </p>
 
+        <div className="config-backup-actions-row">
         <div className="config-backup-manual">
           <h3>Copia ahora</h3>
-          <p>
-            Guarda la base actual y actualiza las tres copias de resguardo sin
-            cerrar el programa (útil antes de cambios grandes o para copiar a un
-            pendrive).
-          </p>
           <button
             type="button"
             className="btn btn-primary config-backup-manual__btn"
             disabled={manualBackupBusy}
             onClick={() => void handleManualBackup()}
           >
-            {manualBackupBusy ? 'Guardando…' : 'Hacer copia de resguardo ahora'}
+            {manualBackupBusy ? 'Guardando…' : 'Hacer copia ahora'}
           </button>
           {manualBackupMsg && (
             <p
@@ -687,19 +847,14 @@ export function ConfiguracionPage() {
         </div>
 
         <div className="config-backup-email">
-          <h3>Copia en la nube (correo)</h3>
-          <p>
-            Envía la base actual como archivo JSON al <strong>Email Gerente</strong>{' '}
-            usando el Gmail y la clave del formulario de arriba (contraseña de
-            aplicación de 16 caracteres para @gmail.com).
-          </p>
+          <h3>Copia por correo</h3>
           <button
             type="button"
             className="btn btn-primary config-backup-email__btn"
             disabled={emailBackupBusy}
             onClick={() => void handleSendBackupEmail()}
           >
-            {emailBackupBusy ? 'Enviando…' : 'Enviar copia de base por correo'}
+            {emailBackupBusy ? 'Enviando…' : 'Enviar por correo'}
           </button>
           {emailBackupMsg && (
             <p
@@ -714,61 +869,52 @@ export function ConfiguracionPage() {
             </p>
           )}
         </div>
-
-        <div className="config-backup-options">
-          <h3>¿Dónde se guardan las copias?</h3>
-          <p>
-            En <code>C:\Sanatorio\respaldo</code> en esta PC y, si Dropbox está
-            instalado, también en{' '}
-            <code>C:\Users\LAS\Dropbox\Sanatorio\respaldo</code>. Al abrir la app
-            no se usa Dropbox (así carga más rápido); se copia al guardar
-            respaldos.
-          </p>
-          <p className="config-backup-note">
-            «Recuperar respaldo» usa la copia de la carpeta en <strong>C:</strong>.
-            Los tres archivos se actualizan al salir, cada hora o con «Hacer
-            copia ahora». La base en uso sigue en AppData (arriba).
-          </p>
         </div>
 
-        <div className="config-backup-daily">
-          <h3>Respaldo diario</h3>
-          <p>
-            Una vez por día (al abrir la app o al cambiar de fecha con la app
-            abierta) se guarda una copia fechada en{' '}
-            <code>
-              C:\Sanatorio\respaldo\{DAILY_BACKUP_SUBDIR}\
-            </code>{' '}
-            con nombre <code>sanatorio-datos.AAAA-MM-DD.json</code>. Se conservan
-            las últimas <strong>{DAILY_BACKUP_RETENTION_DAYS}</strong> copias
-            (también en Dropbox si está activo).
-          </p>
-          {dailyBackups.length > 0 ? (
-            <ul className="config-backup-daily-list">
-              {dailyBackups.slice(0, 7).map((entry) => (
-                <li key={entry.date}>
-                  <code>{entry.date}</code>
-                  {entry.modifiedMs != null && (
-                    <span className="config-backup-daily-list__when">
-                      {' '}
-                      —{' '}
-                      {format(new Date(entry.modifiedMs), 'dd-MM-yyyy HH:mm', {
-                        locale: es,
-                      })}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
+        {dailyBackupAlert && (
+          <div className="config-backup-daily-alert" role="alert">
+            <p className="config-backup-daily-alert__text">
+              <strong>Respaldo diario falló</strong> ({dailyBackupAlert.date}):{' '}
+              {dailyBackupAlert.message}
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary config-backup-daily-alert__btn"
+              disabled={dailyRetryBusy}
+              onClick={() => void handleRetryDailyBackup()}
+            >
+              {dailyRetryBusy ? 'Reintentando…' : 'Reintentar respaldo diario'}
+            </button>
+          </div>
+        )}
+
+        <div className="config-backup-history">
+          <h3>Historial de respaldos</h3>
+          {backupHistoryRows.length > 0 ? (
+            <div className="config-backup-history__scroll">
+              <table className="config-backup-history__table">
+                <thead>
+                  <tr>
+                    <th scope="col">Copia</th>
+                    <th scope="col">Fecha y hora</th>
+                    <th scope="col">Tamaño</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {backupHistoryRows.map((row) => (
+                    <tr key={row.key}>
+                      <td>{row.label}</td>
+                      <td>{row.when}</td>
+                      <td>{row.size}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="field-hint">
-              Aún no hay copias diarias. Se crea la primera al usar la app hoy
-              (desktop).
-            </p>
-          )}
-          {dailyBackups.length > 7 && (
-            <p className="field-hint">
-              Mostrando las 7 más recientes de {dailyBackups.length} en total.
+              Aún no hay respaldos en disco. Salí con <strong>Salir</strong> o usá{' '}
+              <strong>Hacer copia ahora</strong>.
             </p>
           )}
         </div>
@@ -810,8 +956,7 @@ export function ConfiguracionPage() {
           </div>
           {availableBackups.length === 0 && (
             <p className="field-hint">
-              Aún no hay respaldos. Salí del programa una vez con{' '}
-              <strong>Salir</strong> para crear la primera copia.
+              Aún no hay respaldos. Salí con <strong>Salir</strong> para crear la primera.
             </p>
           )}
           {restoreMsg && (
@@ -827,7 +972,79 @@ export function ConfiguracionPage() {
             </p>
           )}
         </div>
-      </section>
+
+        <div className="config-backup-daily">
+          <h3>Respaldo diario</h3>
+          <p>
+            Copia fechada en{' '}
+            <code>C:\Sanatorio\respaldo\{DAILY_BACKUP_SUBDIR}\</code> (
+            {DAILY_BACKUP_RETENTION_DAYS} días).
+            {backupLocations.some((p) => p.toLowerCase().includes('dropbox')) && (
+              <>
+                {' '}
+                También en Dropbox si está instalado.
+              </>
+            )}
+          </p>
+          {dailyBackups.length === 0 ? (
+            <p className="field-hint">Aún no hay copias diarias en desktop.</p>
+          ) : (
+            <>
+              <div className="config-backup-restore__row config-backup-daily-restore">
+                <div className="field field--pill config-backup-restore__field">
+                  <label htmlFor="cfg-restore-daily">Restaurar fecha</label>
+                  <select
+                    id="cfg-restore-daily"
+                    className="config-backup-select"
+                    value={restoreDailyDate}
+                    onChange={(e) => {
+                      setRestoreDailyDate(e.target.value)
+                      setRestoreDailyMsg(null)
+                    }}
+                  >
+                    <option value="">— Seleccionar —</option>
+                    {dailyBackups.map((entry) => (
+                      <option key={entry.date} value={entry.date}>
+                        {entry.date}
+                        {entry.modifiedMs
+                          ? ` — ${backupWhenLabel(entry.modifiedMs)}`
+                          : ''}
+                        {entry.sizeBytes != null
+                          ? ` · ${formatBackupSize(entry.sizeBytes)}`
+                          : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary config-backup-restore__btn"
+                  disabled={!restoreDailyDate}
+                  onClick={() => void handleRestoreDailyBackup()}
+                >
+                  Restaurar diario
+                </button>
+              </div>
+              {restoreDailyMsg && (
+                <p
+                  className={
+                    restoreDailyMsg.type === 'ok'
+                      ? 'config-saved-msg'
+                      : 'field-hint field-hint--err'
+                  }
+                  role="status"
+                >
+                  {restoreDailyMsg.text}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+          </div>
+        </section>
+        </div>
+        )}
+      </div>
     </div>
   )
 }

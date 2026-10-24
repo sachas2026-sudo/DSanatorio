@@ -1,7 +1,7 @@
 .especialidades-sheet--medicos-esp {
-  width: min(920px, 100%);
-  height: min(92vh, 860px);
-  max-height: min(92vh, 860px);
+  width: min(1180px, calc(100vw - 2.5rem));
+  height: min(94vh, 900px);
+  max-height: min(94vh, 900px);
 }
 
 .especialidades-sheet--medicos-esp .especialidades-sheet__body {
@@ -91,8 +91,8 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #fff;
-  background: linear-gradient(180deg, #3d7fd4 0%, #2f6fdb 100%);
-  border-bottom: 1px solid #2563c7;
+  background: linear-gradient(180deg, #8eb4c0 0%, #7aa3b0 100%);
+  border-bottom: 1px solid #6a96a6;
 }
 
 .medicos-esp-table td {

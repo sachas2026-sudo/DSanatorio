@@ -8,6 +8,7 @@ import {
 } from 'date-fns'
 import { es } from 'date-fns/locale'
 import jsPDF from 'jspdf'
+import { getCurrentUserDisplayName } from './auth'
 import autoTable from 'jspdf-autotable'
 import {
   PAGOS_DOCTOR_BLOCK_RADIUS,
@@ -78,7 +79,7 @@ export function collectAgendaWeekRows(params: {
         hora: format(parseISO(c.fechaHora), 'HH:mm', { locale: es }),
         paciente: patientLabel(c.patientId),
         medico: doctorLabel(c.doctorId),
-        obraSocial: obraSocialLabel(c.patientId),
+        obraSocial: c.obraSocialOverride || obraSocialLabel(c.patientId),
         monto: montoLabel(c),
         estado: estadoLabel(c.estado),
         obs: obsLabel(c),
@@ -201,17 +202,17 @@ function agendaColumnStyles(
       return {
         0: { cellWidth: 22, fontStyle: 'bold', textColor: [26, 74, 138] },
         1: { cellWidth: 16, halign: 'center' },
-        2: { cellWidth: 44 },
-        3: { cellWidth: 23 },
-        4: { cellWidth: 21, halign: 'right' },
-        5: { cellWidth: 20, fontSize: estadoFont },
-        6: { cellWidth: 48 },
+        2: { cellWidth: 48 },
+        3: { cellWidth: 25 },
+        4: { cellWidth: 19, halign: 'right' },
+        5: { cellWidth: 18, fontSize: estadoFont },
+        6: { cellWidth: 46 },
       }
     }
     return {
       0: { cellWidth: 22, fontStyle: 'bold', textColor: [26, 74, 138] },
       1: { cellWidth: 15, halign: 'center' },
-      2: { cellWidth: 31 },
+      2: { cellWidth: 24 },
       3: { cellWidth: 35 },
       4: { cellWidth: 19 },
       5: { cellWidth: 21, halign: 'right' },
@@ -221,22 +222,22 @@ function agendaColumnStyles(
   }
   if (singleDoctor) {
     return {
-      0: { cellWidth: 18, halign: 'center' },
-      1: { cellWidth: 51 },
-      2: { cellWidth: 28 },
-      3: { cellWidth: 21, halign: 'right' },
-      4: { cellWidth: 21, fontSize: estadoFont },
-      5: { cellWidth: 50 },
+      0: { cellWidth: 17, halign: 'center' },
+      1: { cellWidth: 48 },
+      2: { cellWidth: 25 },
+      3: { cellWidth: 19, halign: 'right' },
+      4: { cellWidth: 18, fontSize: estadoFont },
+      5: { cellWidth: 46 },
     }
   }
   return {
     0: { cellWidth: 18, halign: 'center' },
-    1: { cellWidth: 35 },
-    2: { cellWidth: 38 },
-    3: { cellWidth: 22 },
-    4: { cellWidth: 21, halign: 'right' },
-    5: { cellWidth: 21, fontSize: estadoFont },
-    6: { cellWidth: 34 },
+    1: { cellWidth: 38 },
+    2: { cellWidth: 36 },
+    3: { cellWidth: 23 },
+    4: { cellWidth: 20, halign: 'right' },
+    5: { cellWidth: 20, fontSize: estadoFont },
+    6: { cellWidth: 24 },
   }
 }
 
@@ -314,10 +315,6 @@ function turnosCountLabel(count: number): string {
   return `${count} turno${count === 1 ? '' : 's'}`
 }
 
-function dayPdfFooterLabel(manana: number, tarde: number): string {
-  return `${turnosCountLabel(manana)} mañana · ${turnosCountLabel(tarde)} tarde`
-}
-
 function drawAgendaSectionTitle(
   doc: jsPDF,
   y: number,
@@ -342,7 +339,15 @@ type DrawAgendaTableParams = {
 }
 
 function drawAgendaTable(params: DrawAgendaTableParams): number {
-  const { doc, startY, rows, pageW, withDay, singleDoctor, scope } = params
+  const {
+    doc,
+    startY,
+    rows,
+    pageW,
+    withDay,
+    singleDoctor,
+    scope,
+  } = params
 
   const tableHead = agendaTableHead(withDay, singleDoctor)
   const tableBody = agendaTableBody(rows, withDay, singleDoctor)
@@ -363,14 +368,14 @@ function drawAgendaTable(params: DrawAgendaTableParams): number {
     tableLineWidth: 0,
     tableWidth,
     styles: {
-      fontSize: scope === 'month' ? 8.5 : 9,
-      cellPadding: scope === 'month' ? 2 : 2.35,
+      fontSize: scope === 'month' ? 7.5 : 7.6,
+      cellPadding: scope === 'month' ? 1.45 : 1.55,
       textColor: [61, 74, 92],
       overflow: 'linebreak',
       lineWidth: 0,
     },
     headStyles: {
-      fillColor: [47, 111, 219],
+      fillColor: [122, 163, 176],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       halign: 'left',
@@ -433,7 +438,17 @@ export function buildAgendaWeekPdf(params: {
   const scope: AgendaPdfScope =
     params.scope ?? (params.singleDay ? 'day' : 'week')
   const cfg = SCOPE_PDF[scope]
-  const singleDoctor = Boolean(params.singleDoctorLabel?.trim())
+  const inferredDoctorLabels = [
+    ...new Set(
+      rows
+        .map((row) => row.medico.trim())
+        .filter((label) => label.length > 0),
+    ),
+  ]
+  const singleDoctorText =
+    params.singleDoctorLabel?.trim() ??
+    (inferredDoctorLabels.length === 1 ? inferredDoctorLabels[0] : undefined)
+  const singleDoctor = Boolean(singleDoctorText)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
 
@@ -444,7 +459,7 @@ export function buildAgendaWeekPdf(params: {
     : cfg.header
 
   const headerBottom = drawPdfHeader(doc, pageW, headerSubtitle, {
-    secondLine: singleDoctor ? params.singleDoctorLabel!.trim() : undefined,
+    secondLine: singleDoctor ? singleDoctorText : undefined,
     marginX: PDF_HEADER_AGENDA_MARGIN,
   })
   const tableStartY = pdfBodyStartYAfterHeader(
@@ -458,31 +473,61 @@ export function buildAgendaWeekPdf(params: {
     doc.text(cfg.empty, 14, tableStartY)
   } else if (scope === 'day') {
     const { manana, tarde } = splitDayRowsByFranja(rows)
-    let cursorY = drawAgendaSectionTitle(doc, tableStartY, 'TURNO MAÑANA')
-    cursorY =
+    let cursorY = tableStartY
+
+    if (manana.length > 0) {
+      cursorY = drawAgendaSectionTitle(
+        doc,
+        cursorY,
+        `TURNO MAÑANA — ${turnosCountLabel(manana.length)}`,
+      )
+      cursorY =
+        drawAgendaTable({
+          doc,
+          startY: cursorY,
+          rows: manana,
+          pageW,
+          withDay: cfg.tableWithDay,
+          singleDoctor,
+          scope,
+        }) + 8
+    }
+
+    if (tarde.length > 0) {
+      if (manana.length > 0) {
+        // Si la mañana ocupa casi toda la hoja o ya generó una página adicional,
+        // iniciar la tarde en una hoja nueva para que no quede apretada debajo.
+        const afternoonNeedsNewPage =
+          doc.getNumberOfPages() > 1 ||
+          cursorY > doc.internal.pageSize.getHeight() - 55
+        if (afternoonNeedsNewPage) {
+          doc.addPage('a4', 'p')
+          const newHeaderBottom = drawPdfHeader(doc, pageW, headerSubtitle, {
+            secondLine: singleDoctor ? singleDoctorText : undefined,
+            marginX: PDF_HEADER_AGENDA_MARGIN,
+          })
+          cursorY = pdfBodyStartYAfterHeader(
+            newHeaderBottom,
+            PDF_BODY_EXTRA_DOWN_PLAIN,
+          )
+        }
+      }
+
+      cursorY = drawAgendaSectionTitle(
+        doc,
+        cursorY,
+        `TURNO TARDE — ${turnosCountLabel(tarde.length)}`,
+      )
       drawAgendaTable({
         doc,
         startY: cursorY,
-        rows: manana,
+        rows: tarde,
         pageW,
         withDay: cfg.tableWithDay,
         singleDoctor,
         scope,
-      }) + 8
-    cursorY = drawAgendaSectionTitle(doc, cursorY, 'TURNO TARDE')
-    const finalY = drawAgendaTable({
-      doc,
-      startY: cursorY,
-      rows: tarde,
-      pageW,
-      withDay: cfg.tableWithDay,
-      singleDoctor,
-      scope,
-    })
-
-    doc.setFontSize(8)
-    doc.setTextColor(107, 124, 147)
-    doc.text(dayPdfFooterLabel(manana.length, tarde.length), 14, finalY + 8)
+      })
+    }
   } else {
     const finalY = drawAgendaTable({
       doc,
@@ -505,7 +550,6 @@ export function buildAgendaWeekPdf(params: {
 
   stampPdfGeneratedFooterOnAllPages(doc, {
     bold: true,
-    label: `Generado: ${generatedAt}`,
   })
 
   const filename = `${cfg.filename}-${fileStamp}.pdf`

@@ -1,0 +1,4 @@
+identifier = "opener-whatsapp"
+description = "Permitir abrir WhatsApp Web en Chrome"
+windows = ["main"]
+permissions = ["opener:allow-open-url", "allow-abrir-whatsapp"]

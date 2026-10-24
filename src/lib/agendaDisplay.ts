@@ -1,3 +1,4 @@
+import { isBefore, parseISO, startOfDay } from 'date-fns'
 import type { Appointment, AppointmentEstado } from '../types'
 
 export const AGENDA_ESTADOS: { value: AppointmentEstado; label: string }[] = [
@@ -14,10 +15,29 @@ const estadoAbreviado: Record<AppointmentEstado, string> = {
   cancelado: 'Canc.',
 }
 
-export function dayCitaEstadoParts(c: Appointment, isPagado: boolean): string[] {
-  const base =
-    AGENDA_ESTADOS.find((e) => e.value === c.estado)?.label ?? c.estado
-  const parts = [base]
+/** En agenda: turnos de días anteriores se muestran como atendidos (salvo cancelados). */
+export function effectiveCitaEstadoForDisplay(
+  c: Appointment,
+  refDate: Date = new Date(),
+): AppointmentEstado {
+  if (c.estado === 'cancelado') return 'cancelado'
+  const turnoDay = startOfDay(parseISO(c.fechaHora))
+  const hoy = startOfDay(refDate)
+  if (isBefore(turnoDay, hoy)) return 'atendido'
+  return c.estado
+}
+
+export function dayCitaEstadoParts(
+  c: Appointment,
+  isPagado: boolean,
+  refDate?: Date,
+): string[] {
+  const estado = effectiveCitaEstadoForDisplay(c, refDate)
+  const parts: string[] = []
+  if (estado !== 'programado') {
+    const base = AGENDA_ESTADOS.find((e) => e.value === estado)?.label ?? estado
+    parts.push(base)
+  }
   if (/urgencia/i.test(c.notas)) parts.push('Urgencia')
   if (isPagado) parts.push('Pagado')
   return parts
@@ -27,9 +47,14 @@ export function formatDayCitaEstado(
   c: Appointment,
   isPagado: boolean,
   compact: boolean,
+  refDate?: Date,
 ): string {
-  if (!compact) return dayCitaEstadoParts(c, isPagado).join(' - ')
-  const parts = [estadoAbreviado[c.estado] ?? c.estado]
+  const estado = effectiveCitaEstadoForDisplay(c, refDate)
+  if (!compact) return dayCitaEstadoParts(c, isPagado, refDate).join(' - ')
+  const parts: string[] = []
+  if (estado !== 'programado') {
+    parts.push(estadoAbreviado[estado] ?? estado)
+  }
   if (/urgencia/i.test(c.notas)) parts.push('Urg.')
   if (isPagado) parts.push('Pag.')
   return parts.join(' · ')

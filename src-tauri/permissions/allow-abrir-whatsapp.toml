@@ -1,0 +1,7 @@
+"$schema" = "schemas/schema.json"
+
+[[permission]]
+identifier = "allow-abrir-whatsapp"
+description = "Permite abrir ventana propia de WhatsApp"
+
+commands.allow = ["abrir_whatsapp"]

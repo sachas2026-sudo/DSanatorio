@@ -40,3 +40,8 @@ export function serializeAppData(data: AppData): string {
     settings: { ...data.settings, clave: '' },
   })
 }
+
+/** Igual que serializeAppData: JSON sin clave SMTP en settings (va en archivo companion). */
+export function serializeAppDataForBackup(data: AppData): string {
+  return serializeAppData(data)
+}

@@ -6,9 +6,9 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import logoUrl from '../../Logo.jpeg?url'
+import logoUrl from '../assets/Logo.jpeg?url'
 import { APP_DISPLAY_NAME } from '../lib/pdfBranding'
-import '../components/confirm-dialog.css'
+import '../shared/components/confirm-dialog.css'
 
 type ConfirmOptions = {
   message: string

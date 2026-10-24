@@ -12,11 +12,27 @@ export function appointmentStartMinutes(c: Appointment): number {
   return t.getHours() * 60 + t.getMinutes()
 }
 
-export function citasDelDia(appointments: Appointment[], day: Date): Appointment[] {
+/** Devuelve la etiqueta del turno ('Mañana', 'Tarde', 'Noche') según la fecha/hora. */
+export function getTurnoFromFecha(fechaIsoOrDate: string | Date | undefined | null): string {
+  if (!fechaIsoOrDate) return '—'
+  const t = typeof fechaIsoOrDate === 'string' ? parseISO(fechaIsoOrDate) : fechaIsoOrDate
+  if (isNaN(t.getTime())) return '—'
+  const mins = t.getHours() * 60 + t.getMinutes()
+  if (mins < 810) return 'Mañana' // Hasta 13:30 hs (810 min)
+  if (mins < 1260) return 'Tarde' // 13:30 hs a 21:00 hs (1260 min)
+  return 'Noche' // 21:00 hs en adelante
+}
+
+export function citasDelDia(
+  appointments: Appointment[],
+  day: Date,
+  options?: { includeCancelled?: boolean },
+): Appointment[] {
   return [...appointments]
     .filter(
       (c) =>
-        c.estado !== 'cancelado' && isSameDay(parseISO(c.fechaHora), day),
+        (options?.includeCancelled || c.estado !== 'cancelado') &&
+        isSameDay(parseISO(c.fechaHora), day),
     )
     .sort(
       (a, b) =>
@@ -133,6 +149,60 @@ export function medicoGroupsEnFranja(params: {
   for (const g of conCitas) {
     if (!out.some((x) => x.key === g.key)) {
       out.push({ ...g, sinTurnosDisponibles: mostrarSinTurnos(g.key) })
+    }
+  }
+
+  return out.sort((a, b) => a.label.localeCompare(b.label, 'es'))
+}
+
+/**
+ * Todos los turnos del día por médico (sin filtrar por franja 08–11:30 / 15–20).
+ * Incluye horarios de mediodía (ej. 12:30). Usado en agenda y PDF Turnos.
+ */
+export function medicoGroupsCitasDelDia(params: {
+  citas: Appointment[]
+  selectedDay: Date
+  data: AppData
+  doctorLabel: (doctorId: string) => string
+}): DoctorCitaGroup[] {
+  const { citas, selectedDay, data, doctorLabel } = params
+  const mananaFranja = DEFAULT_AGENDA_RANGES[0]!
+  const tardeFranja = DEFAULT_AGENDA_RANGES[1]!
+  const conTodas = agruparPorMedico(citas, doctorLabel)
+  const byKey = new Map(conTodas.map((g) => [g.key, g]))
+
+  const avisoSinTurnos = (doctorId: string) =>
+    (doctorAtiendeEnFranja(doctorId, selectedDay, mananaFranja, data) &&
+      !hasTurnosDisponiblesEnFranja(doctorId, selectedDay, mananaFranja, data)) ||
+    (doctorAtiendeEnFranja(doctorId, selectedDay, tardeFranja, data) &&
+      !hasTurnosDisponiblesEnFranja(doctorId, selectedDay, tardeFranja, data))
+
+  const disponibles = data.doctors
+    .filter((d) => isDoctorAvailableOnDate(d.id, selectedDay, data))
+    .sort((a, b) =>
+      `${a.apellido} ${a.nombre}`.localeCompare(`${b.apellido} ${b.nombre}`, 'es'),
+    )
+
+  const out: DoctorCitaGroup[] = []
+
+  for (const d of disponibles) {
+    const g = byKey.get(d.id)
+    const aviso = avisoSinTurnos(d.id)
+    if (g) {
+      out.push({ ...g, sinTurnosDisponibles: aviso })
+    } else if (aviso) {
+      out.push({
+        key: d.id,
+        label: doctorLabel(d.id),
+        citas: [],
+        sinTurnosDisponibles: true,
+      })
+    }
+  }
+
+  for (const g of conTodas) {
+    if (!out.some((x) => x.key === g.key)) {
+      out.push({ ...g, sinTurnosDisponibles: avisoSinTurnos(g.key) })
     }
   }
 

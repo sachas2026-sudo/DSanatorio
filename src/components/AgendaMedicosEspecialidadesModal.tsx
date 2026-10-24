@@ -49,6 +49,7 @@ export function AgendaMedicosEspecialidadesModal({ rows, data, onClose }: Props)
       (r) =>
         r.medico.toLowerCase().includes(q) ||
         r.especialidad.toLowerCase().includes(q) ||
+        r.obrasSociales.toLowerCase().includes(q) ||
         r.dias.toLowerCase().includes(q) ||
         r.horario.toLowerCase().includes(q) ||
         r.duracion.toLowerCase().includes(q),
@@ -158,6 +159,7 @@ export function AgendaMedicosEspecialidadesModal({ rows, data, onClose }: Props)
                   <tr>
                     <th scope="col">Médico</th>
                     <th scope="col">Especialidad</th>
+                    <th scope="col">Obras sociales</th>
                     <th scope="col">Día que atiende</th>
                     <th scope="col">Horario</th>
                     <th scope="col">Duracion</th>
@@ -168,6 +170,7 @@ export function AgendaMedicosEspecialidadesModal({ rows, data, onClose }: Props)
                     <tr key={r.id}>
                       <td className="medicos-esp-table__medico">{r.medico}</td>
                       <td>{r.especialidad || '—'}</td>
+                      <td>{r.obrasSociales || '—'}</td>
                       <td className="medicos-esp-table__dias">{r.dias}</td>
                       <td className="medicos-esp-table__horario">{r.horario}</td>
                       <td className="medicos-esp-table__duracion">{r.duracion}</td>
@@ -180,8 +183,16 @@ export function AgendaMedicosEspecialidadesModal({ rows, data, onClose }: Props)
         </div>
 
         <footer className="especialidades-sheet__foot">
-          <button type="button" className="btn btn-pdf" onClick={() => void handlePdfPreview()}>
-            PDF
+          <button
+            type="button"
+            className="btn btn-pdf"
+            title="Vista previa de médicos, especialidades y horarios"
+            onClick={() => void handlePdfPreview()}
+          >
+            <span className="btn-pdf__icon" aria-hidden>
+              PDF
+            </span>
+            Vista Previa
           </button>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cerrar

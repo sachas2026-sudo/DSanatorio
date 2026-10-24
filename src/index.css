@@ -46,3 +46,79 @@ select,
 textarea {
   font: inherit;
 }
+
+/* Tablas Pacientes y Médicos: filas del mismo tamaño y fondo marrón claro en encabezados */
+.page--pacientes table.data,
+.page--medicos table.data {
+  font-size: 0.85rem !important;
+}
+
+.page--pacientes table.data th,
+.page--pacientes table.data td,
+.page--medicos table.data th,
+.page--medicos table.data td {
+  padding: 0.3rem 0.65rem !important;
+  vertical-align: middle !important;
+  height: 36px !important;
+}
+
+.page--pacientes table.data th,
+.page--medicos table.data th {
+  background: #dfd5c6 !important;
+  color: #332219 !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+  height: auto !important;
+}
+
+.page--pacientes table.data .obra-pill,
+.page--medicos table.data .obra-pill {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.74rem;
+}
+
+.page--pacientes table.data .row-actions,
+.page--medicos table.data .row-actions {
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.page--pacientes table.data .btn-icon,
+.page--medicos table.data .btn-icon {
+  width: 1.65rem !important;
+  height: 1.65rem !important;
+}
+
+/* Botones de navegación por día en Agenda */
+.day-list__day-nav-btn {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-size: 1.85rem !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  color: #1e3a8a !important;
+  padding: 0 0.4rem !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  transition: transform 0.15s ease, color 0.15s ease !important;
+}
+
+.day-list__day-nav-btn:hover {
+  color: #2563eb !important;
+  transform: scale(1.25) !important;
+}
+
+
+

@@ -1,45 +1,47 @@
-# Dependencies
+# Dependencias y build
 node_modules/
-
-# Build outputs
 dist/
-dist-ssr/
-
-# Tauri / Rust
 src-tauri/target/
-src-tauri/gen/
 
-# Logs
-logs/
+# Datos locales y credenciales
+C:/Sanatorio/datos/
+C:\\Sanatorio\\datos/
+**/sanatorio-datos.json
+**/sanatorio-datos.db
+**/auth-accounts.json
+**/smtp-secret.txt
+**/install-meta.json
+*.env
+*.env.*
+firebase-service-account*.json
+*-firebase-adminsdk-*.json
+*.pem
+*.key
+
+# Logs y temporales
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# Local env / secrets
-*.local
-.env
-.env.*
-
-# Resguardos / artefactos locales (no versionar)
-*.zip
-_verify-installer/
-Recuperar Zip.txt
-
-# Assets sueltos en raíz (copias locales; el logo está en src/)
-/Logo.jpeg
-/PdfHeaderPlain.png
-
-# Editor / OS
-.vscode/*
-!.vscode/extensions.json
-.idea/
 .DS_Store
 Thumbs.db
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+
+# Artefactos de build e instalador
+*.zip
+*.exe
+installer-assets/
+src-tauri/installer-bases/
+src-tauri/target/
+
+# Datos locales y snapshots
+panel-server/data/
+google_drive_config.json
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Historial de agentes / temporales
+.claude-code-history/
+scripts/_tmp-probe.mjs
+eslint_out*.txt
+old_agenda*.tsx
+backups/

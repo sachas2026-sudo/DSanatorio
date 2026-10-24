@@ -156,8 +156,13 @@
 .especialidades-sheet__foot {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 0.5rem;
   padding: 0.85rem 1.15rem;
   border-top: 1px solid #dde4f0;
   background: #fafcfe;
+}
+
+.especialidades-sheet__foot .btn-pdf {
+  margin-right: auto;
 }

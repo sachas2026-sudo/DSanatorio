@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obras Sociales — Centro Médico</title>
+<style>
+/* ============================================================
+   VARIABLES DE TEMA
+   Todos los colores van por variable para que el tema oscuro
+   (prefers-color-scheme) funcione sin duplicar reglas.
+   ============================================================ */
+:root{
+  --bg:#eef1f9;
+  --card:#ffffff;
+  --border:#e3e8f2;
+  --primary:#0284c7;
+  --primary-hover:#0369a1;
+  /* Texto legible ENCIMA del color primario. En oscuro el primario es un azul
+     claro, así que el texto tiene que ser oscuro o el contraste se cae a ~1.7:1. */
+  --on-primary:#ffffff;
+  --primary-weak:#e0f2fe;
+  --text:#1b2540;
+  --muted:#6b7794;
+  --head-bg:#f6f8fc;
+  --row-hover:#f7fafe;
+  --total-bg:#e8f4fb;
+  --input-bg:#ffffff;
+  --danger:#dc2626;
+  --danger-weak:#fee2e2;
+  --chip-off-bg:#eef1f6;
+  --chip-off-text:#6b7794;
+  --shadow:0 1px 2px rgba(27,37,64,.04), 0 8px 24px rgba(27,37,64,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#11151f;
+    --card:#181d29;
+    --border:#2a3242;
+    --primary:#38bdf8;
+    --primary-hover:#7dd3fc;
+    --on-primary:#0b1220;
+    --primary-weak:#12303f;
+    --text:#e8edf7;
+    --muted:#9aa6bd;
+    --head-bg:#1e2432;
+    --row-hover:#1d2431;
+    --total-bg:#12303f;
+    --input-bg:#131824;
+    --danger:#f87171;
+    --danger-weak:#3b1d1d;
+    --chip-off-bg:#232a38;
+    --chip-off-text:#9aa6bd;
+    --shadow:0 1px 2px rgba(0,0,0,.30), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font:14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+h1,h2,h3{margin:0;font-weight:600}
+
+/* ============================================================
+   PESTAÑAS SUPERIORES (Pagos a Médicos / Obras Sociales)
+   ============================================================ */
+.topbar{
+  position:sticky;top:0;z-index:20;
+  display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;
+  padding:.75rem 1.25rem;
+  background:var(--card);
+  border-bottom:1px solid var(--border);
+}
+.brand{display:flex;align-items:center;gap:.5rem;font-weight:700;letter-spacing:.2px;margin-right:auto}
+.brand__dot{width:10px;height:10px;border-radius:50%;background:var(--primary)}
+.brand small{display:block;font-weight:400;font-size:.72rem;color:var(--muted)}
+
+.tabs{display:flex;gap:.4rem;flex-wrap:wrap}
+.tab{
+  display:inline-flex;align-items:center;gap:.45rem;
+  padding:.5rem .9rem;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--card);
+  color:var(--muted);
+  font:inherit;font-weight:600;
+  cursor:pointer;
+}
+.tab:hover{color:var(--text);border-color:var(--primary)}
+.tab[aria-selected="true"]{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.tab[aria-selected="true"]:hover{background:var(--primary-hover);border-color:var(--primary-hover)}
+.tab svg{width:16px;height:16px;flex:none}
+
+/* ============================================================
+   SELECTOR DE VISTAS
+   ============================================================ */
+.viewsel{display:flex;gap:.35rem;margin-bottom:1rem;flex-wrap:wrap}
+.viewsel button{
+  padding:.4rem .85rem;border:1px solid var(--border);border-radius:999px;
+  background:var(--card);color:var(--muted);font:inherit;font-weight:600;cursor:pointer;
+}
+.viewsel button:hover{color:var(--text)}
+.viewsel button[aria-pressed="true"]{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+
+/* ============================================================
+   ESTRUCTURA
+   ============================================================ */
+main{padding:1.25rem;max-width:1600px;margin:0 auto}
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:1rem 1.15rem;
+  box-shadow:var(--shadow);
+}
+.card__head{display:flex;align-items:center;gap:.75rem;margin-bottom:.85rem;flex-wrap:wrap}
+.card__title{font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.count{
+  margin-left:auto;font-size:.78rem;color:var(--muted);
+  background:var(--head-bg);border:1px solid var(--border);
+  padding:.15rem .55rem;border-radius:999px;white-space:nowrap;
+}
+
+/* Maestro-detalle: lista de obras sociales + tabla (se apila en móvil) */
+.os-layout{display:grid;grid-template-columns:270px minmax(0,1fr);gap:1rem;align-items:start}
+/* min-width:0 evita que el min-width de la tabla (940px) ensanche la columna
+   del grid y haga scrollear la página entera en horizontal. */
+.os-layout > *{min-width:0}
+@media (max-width:900px){ .os-layout{grid-template-columns:minmax(0,1fr)} }
+
+/* Lista lateral */
+.oslist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.3rem;max-height:560px;overflow-y:auto}
+.oslist button{
+  width:100%;display:flex;align-items:center;gap:.5rem;
+  padding:.45rem .55rem;border:1px solid transparent;border-radius:9px;
+  background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer;
+}
+.oslist button:hover{background:var(--row-hover)}
+.oslist button[aria-pressed="true"]{background:var(--primary-weak);border-color:var(--primary)}
+.oslist__name{font-weight:600;font-size:.86rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oslist__meta{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;line-height:1.2}
+.oslist__amt{font-size:.8rem;font-weight:600;white-space:nowrap}
+.oslist__cnt{font-size:.7rem;color:var(--muted);white-space:nowrap}
+
+/* Buscador */
+.search{position:relative;flex:1;min-width:190px}
+.search input{
+  width:100%;padding:.45rem .6rem .45rem 2rem;
+  border:1px solid var(--border);border-radius:9px;
+  background:var(--input-bg);color:var(--text);font:inherit;
+}
+.search svg{position:absolute;left:.55rem;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--muted);pointer-events:none}
+
+/* ============================================================
+   TABLAS
+   ============================================================ */
+/* El scaneo horizontal vive DENTRO del contenedor: la página nunca scrollea en X.
+   position:relative es necesario: los .sr-only son position:absolute y, sin un
+   ancestro posicionado, su bloque contenedor sería la vista, con lo cual escaparian
+   del overflow:auto y ensancharían la página. */
+.table-wrap{position:relative;overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:10px}
+table{width:100%;border-collapse:separate;border-spacing:0}
+th,td{padding:.5rem .7rem;text-align:left;border-bottom:1px solid var(--border)}
+thead th{
+  position:sticky;top:0;z-index:1;
+  background:var(--head-bg);
+  font-size:.68rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+  white-space:nowrap;
+}
+tbody tr:hover{background:var(--row-hover)}
+tbody tr:last-child td{border-bottom:0}
+.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.paciente{font-weight:700}
+.muted{color:var(--muted)}
+.small{font-size:.78rem}
+
+.sortbtn{
+  display:inline-flex;align-items:center;gap:.25rem;
+  background:transparent;border:0;padding:0;margin:0;
+  font:inherit;color:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer;
+}
+.sortbtn:hover{color:var(--text)}
+.sortbtn .arrow{font-size:.62rem;opacity:.45;line-height:1}
+.sortbtn[aria-sort="ascending"] .arrow-up,
+.sortbtn[aria-sort="descending"] .arrow-down{opacity:1;color:var(--primary)}
+
+tfoot td{
+  background:var(--total-bg);font-weight:700;
+  border-top:2px solid var(--primary);border-bottom:0;
+}
+tfoot .label{text-transform:uppercase;font-size:.7rem;letter-spacing:.06em;color:var(--muted)}
+
+.empty-row td{text-align:center;color:var(--muted);padding:2rem 1rem}
+
+/* ============================================================
+   CHIPS DE OBRA SOCIAL (color derivado del nombre)
+   ============================================================ */
+.chip{
+  display:inline-flex;align-items:center;gap:.35rem;
+  padding:.14rem .55rem;border-radius:999px;
+  font-size:.75rem;font-weight:600;white-space:nowrap;
+  background:hsl(var(--h) 72% 93%);
+  color:hsl(var(--h) 62% 26%);
+  border:1px solid hsl(var(--h) 55% 80%);
+}
+/* Oscuro: fondo oscuro + texto claro, mismo tono (contraste legible) */
+@media (prefers-color-scheme: dark){
+  .chip{
+    background:hsl(var(--h) 42% 22%);
+    color:hsl(var(--h) 75% 84%);
+    border-color:hsl(var(--h) 38% 40%);
+  }
+}
+/* Estado inactivo (chip toggle de distribución / filtro) */
+.chip.chip--off{
+  background:var(--chip-off-bg);color:var(--chip-off-text);border-color:var(--border);
+}
+.chip--toggle{cursor:pointer;font:inherit;font-size:.75rem;font-weight:600}
+
+/* ============================================================
+   CAMPOS EDITABLES
+   ============================================================ */
+.cell-input{
+  width:86px;padding:.22rem .4rem;
+  border:1px solid transparent;border-radius:6px;
+  background:transparent;color:inherit;font:inherit;text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+.cell-input:hover{border-color:var(--border)}
+.cell-input:focus{background:var(--input-bg);border-color:var(--primary);outline:none;box-shadow:0 0 0 2px var(--primary-weak)}
+.cell-input--name{text-align:left;width:100%;min-width:130px;font-weight:600}
+.pct-input{
+  width:58px;padding:.2rem .35rem;text-align:right;
+  border:1px solid var(--border);border-radius:6px;
+  background:var(--input-bg);color:var(--text);font:inherit;font-variant-numeric:tabular-nums;
+}
+.pct-input:focus{border-color:var(--primary);outline:none;box-shadow:0 0 0 2px var(--primary-weak)}
+
+.pct-cell{white-space:nowrap}
+.pct-cell input{width:52px}
+.pct-cell span{color:var(--muted);font-size:.78rem;margin-left:.1rem}
+.pct-head{
+  background:var(--primary-weak);
+  font-size:.68rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+}
+.pct-head .pct-cell{color:var(--text)}
+
+/* ============================================================
+   BARRA DE ALTA (médicos / obras sociales)
+   ============================================================ */
+.addbar{
+  display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;
+  margin-top:1rem;padding-top:1rem;border-top:1px dashed var(--border);
+}
+.addbar input[type="text"]{
+  padding:.45rem .6rem;border:1px solid var(--border);border-radius:9px;
+  background:var(--input-bg);color:var(--text);font:inherit;
+}
+.addbar input[type="text"]:focus{border-color:var(--primary);outline:none;box-shadow:0 0 0 2px var(--primary-weak)}
+.btn{
+  display:inline-flex;align-items:center;gap:.35rem;
+  padding:.45rem .85rem;border:1px solid var(--primary);border-radius:9px;
+  background:var(--primary);color:var(--on-primary);font:inherit;font-weight:600;cursor:pointer;
+}
+.btn:hover{background:var(--primary-hover);border-color:var(--primary-hover)}
+.btn--ghost{background:var(--card);color:var(--text);border-color:var(--border)}
+.btn--ghost:hover{background:var(--row-hover);border-color:var(--primary);color:var(--text)}
+.iconbtn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;padding:0;
+  border:1px solid transparent;border-radius:7px;
+  background:transparent;color:var(--muted);cursor:pointer;
+}
+.iconbtn:hover{background:var(--danger-weak);color:var(--danger);border-color:var(--danger)}
+.iconbtn svg{width:15px;height:15px}
+
+/* Chip de la distribución: uniforme (no por color de obra social).
+   Activo = azul sólido con texto blanco; inactivo = blanco con borde gris. */
+.os-toggle{
+  display:inline-flex;align-items:center;gap:.35rem;
+  padding:.28rem .7rem;border-radius:999px;
+  font:inherit;font-size:.75rem;font-weight:600;white-space:nowrap;cursor:pointer;
+  border:1px solid transparent;
+}
+.os-toggle--on{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.os-toggle--off{background:var(--card);border-color:var(--border);color:var(--muted)}
+.os-toggle--off:hover{border-color:var(--primary);color:var(--text)}
+/* Los chips van en una sola línea; si no entran, scrollea la tabla, no crece la fila */
+.dist-chips{white-space:nowrap}
+
+/* Barra de alta: médico a la izquierda, obra social a la derecha */
+.addbar{justify-content:space-between}
+.addbar__group{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+
+/* Botón de quitar: rojo suave */
+.iconbtn{color:#e07a7a}
+.iconbtn:hover{background:var(--danger-weak);color:var(--danger);border-color:var(--danger)}
+
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* Estado vacío */
+.blank{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:.4rem;padding:3rem 1rem;text-align:center;color:var(--muted);
+}
+.blank strong{color:var(--text)}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand__dot" aria-hidden="true"></span>
+    <span>Centro Médico<small>Gestión de afiliados y obras sociales</small></span>
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Secciones de pagos">
+    <button class="tab" role="tab" id="tab-medicos" aria-controls="panel-medicos" aria-selected="false" data-tab="medicos">
+      <!-- ícono de persona -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="8" r="3.4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>
+      </svg>
+      Pagos a Médicos
+    </button>
+    <button class="tab" role="tab" id="tab-os" aria-controls="panel-os" aria-selected="true" data-tab="os">
+      <!-- ícono de maletín -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2.5" y="7.5" width="19" height="12.5" rx="2"/><path d="M8.5 7.5V5.8A1.8 1.8 0 0 1 10.3 4h3.4a1.8 1.8 0 0 1 1.8 1.8v1.7"/><path d="M2.5 12.5h19"/>
+      </svg>
+      Obras Sociales
+    </button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============ PANEL: PAGOS A MÉDICOS (intacto, solo aviso vacío) ============ -->
+  <section id="panel-medicos" role="tabpanel" aria-labelledby="tab-medicos" hidden>
+    <div class="card">
+      <div class="blank">
+        <strong>Pagos a Médicos</strong>
+        <span>Esta sección queda sin contenido por ahora.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PANEL: OBRAS SOCIALES ============ -->
+  <section id="panel-os" role="tabpanel" aria-labelledby="tab-os">
+
+    <!-- selector de vistas -->
+    <div class="viewsel" role="group" aria-label="Vista de obras sociales">
+      <button type="button" data-view="turnos" aria-pressed="true">Listado de turnos</button>
+      <button type="button" data-view="distribucion" aria-pressed="false">Distribución por médico (%)</button>
+    </div>
+
+    <!-- ---------- VISTA 1: LISTADO DE TURNOS (opción D: maestro-detalle) ---------- -->
+    <div id="vista-turnos">
+      <div class="os-layout">
+
+        <!-- Maestro: lista de obras sociales -->
+        <div class="card">
+          <div class="card__head">
+            <h2 class="card__title">Obras sociales</h2>
+            <span class="count" id="osCount">— Obras Sociales</span>
+          </div>
+          <ul class="oslist" id="osList"></ul>
+        </div>
+
+        <!-- Detalle: tabla del filtro elegido -->
+        <div class="card">
+          <div class="card__head">
+            <h2 class="card__title">Listado de obras sociales</h2>
+            <span class="count" id="turnosCount">0 turnos</span>
+            <div class="search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>
+              </svg>
+              <label class="sr-only" for="q">Buscar por paciente, médico o motivo</label>
+              <input id="q" type="search" placeholder="Buscar paciente, médico o motivo…" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table id="tablaTurnos" style="min-width:940px">
+              <caption class="sr-only">Turnos por obra social</caption>
+              <thead>
+                <tr>
+                  <th scope="col" aria-sort="none"><button class="sortbtn" data-sort="fecha" aria-sort="none">Fecha <span class="arrow arrow-up">▲</span><span class="arrow arrow-down">▼</span></button></th>
+                  <th scope="col">Turno</th>
+                  <th scope="col" aria-sort="none"><button class="sortbtn" data-sort="paciente" aria-sort="none">Paciente <span class="arrow arrow-up">▲</span><span class="arrow arrow-down">▼</span></button></th>
+                  <th scope="col" aria-sort="none"><button class="sortbtn" data-sort="medico" aria-sort="none">Médico <span class="arrow arrow-up">▲</span><span class="arrow arrow-down">▼</span></button></th>
+                  <th scope="col" aria-sort="none"><button class="sortbtn" data-sort="os" aria-sort="none">Obra social <span class="arrow arrow-up">▲</span><span class="arrow arrow-down">▼</span></button></th>
+                  <th scope="col" aria-sort="none"><button class="sortbtn" data-sort="motivo" aria-sort="none">Motivo consulta <span class="arrow arrow-up">▲</span><span class="arrow arrow-down">▼</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button class="sortbtn" data-sort="totalOs" aria-sort="none">Total OS <span class="arrow arrow-up">▲</span><span class="arrow arrow-down">▼</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button class="sortbtn" data-sort="totalCuidar" aria-sort="none">Total Cuidar <span class="arrow arrow-up">▲</span><span class="arrow arrow-down">▼</span></button></th>
+                </tr>
+              </thead>
+              <tbody id="turnosBody"></tbody>
+              <tfoot id="turnosFoot"></tfoot>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ---------- VISTA 2: DISTRIBUCIÓN POR MÉDICO (%) ---------- -->
+    <div id="vista-distribucion" hidden>
+      <div class="card">
+        <div class="card__head">
+          <h2 class="card__title">Distribución por médico · Obras Sociales</h2>
+          <span class="count" id="distCount">0 médicos</span>
+        </div>
+
+        <div class="table-wrap">
+          <table id="tablaDist" style="min-width:760px">
+            <caption class="sr-only">Distribución porcentual por médico y obra social</caption>
+            <thead>
+              <!-- fila de porcentajes editables -->
+              <tr class="pct-head" id="pctRow">
+                <th scope="col" class="pct-cell" style="text-align:left">% sobre el monto</th>
+              </tr>
+              <!-- fila de encabezados de columna -->
+              <tr id="distHead">
+                <th scope="col">Médico</th>
+                <th scope="col">Obras sociales</th>
+                <th scope="col" class="num">Monto</th>
+              </tr>
+            </thead>
+            <tbody id="distBody"></tbody>
+            <tfoot id="distFoot"></tfoot>
+          </table>
+        </div>
+
+        <!-- altas -->
+        <div class="addbar">
+          <div class="addbar__group">
+            <label class="sr-only" for="nuevoMedico">Nombre del médico</label>
+            <input id="nuevoMedico" type="text" placeholder="Nuevo médico" autocomplete="off">
+            <button class="btn" type="button" id="addMedico">+ Médico</button>
+          </div>
+          <div class="addbar__group">
+            <label class="sr-only" for="nuevaOS">Nombre de la obra social</label>
+            <input id="nuevaOS" type="text" placeholder="Nueva obra social" autocomplete="off">
+            <button class="btn" type="button" id="addOS">+ Obra social</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<script>
+'use strict';
+
+/* ============================================================
+   1. UTILIDADES
+   ============================================================ */
+
+/** Escapa HTML: todo texto que venga del usuario (o de datos) pasa por acá. */
+function esc(s){
+  return String(s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+
+/** Número acotado: NaN/negativo -> valor por defecto. Sólo se aceptan >= 0. */
+function num(v, fallback){
+  var n = parseFloat(v);
+  if (!isFinite(n) || n < 0) return fallback === undefined ? 0 : fallback;
+  return n;
+}
+/** Porcentaje acotado entre 0 y 100. */
+function pct(v){ return Math.min(100, num(v, 0)); }
+
+/** $50.000 (formato argentino, sin decimales si son enteros). */
+var moneyFmt = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+function money(n){ return '$' + moneyFmt.format(num(n, 0)); }
+
+/** Color estable por nombre: mismo nombre -> mismo tono, en claro y oscuro. */
+function hueOf(name){
+  var h = 0, s = String(name);
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+/** Atributo style del chip (el resto de los colores viven en CSS). */
+function hueStyle(name){ return 'style="--h:' + hueOf(name) + '"'; }
+
+var MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+/** "2026-10-08T08:00" -> "8 oct 2026 08:00" */
+function fechaLarga(iso){
+  var p = String(iso).split('T');
+  var d = p[0].split('-');
+  var hm = (p[1] || '').slice(0, 5);
+  return parseInt(d[2], 10) + ' ' + MESES[parseInt(d[1], 10) - 1] + ' ' + d[0] + ' ' + hm;
+}
+
+/* ============================================================
+   2. DATOS DE EJEMPLO (sólo en memoria)
+   ============================================================ */
+var state = {
+  tab: 'os',
+  vista: 'turnos',
+  q: '',
+  osSel: 'todas',
+  sort: { key: 'fecha', dir: 'asc' },
+
+  obras: [
+    { id: 'asis',  nombre: 'ASIS SALUD', porcentaje: 0  },
+    { id: 'ips',   nombre: 'IPS',        porcentaje: 10 },
+    { id: 'pami',  nombre: 'PAMI',       porcentaje: 20 },
+    { id: 'part',  nombre: 'Particular', porcentaje: 0  },
+    { id: 'salud', nombre: 'SALUD',      porcentaje: 20 }
+  ],
+
+  turnos: [
+    { id:1,  fechaHora:'2026-10-08T08:00', turno:'Mañana', paciente:'María Gómez',       medico:'Dr. Luis Ferreira',   osId:'ips',   motivo:'Consulta clínica',        totalOs:45000, totalCuidar:12000 },
+    { id:2,  fechaHora:'2026-10-08T08:40', turno:'Mañana', paciente:'Juan Pérez',        medico:'Dra. Ana Ruiz',       osId:'pami',  motivo:'Control de presión',       totalOs:32000, totalCuidar:9000  },
+    { id:3,  fechaHora:'2026-10-08T09:30', turno:'Mañana', paciente:'Lucía Fernández',   medico:'Dr. Luis Ferreira',   osId:'salud', motivo:'Ecografía',                totalOs:58000, totalCuidar:15000 },
+    { id:4,  fechaHora:'2026-10-08T14:00', turno:'Tarde',  paciente:'Carlos Díaz',       medico:'Dr. Sergio Lara',     osId:'asis',  motivo:'Traumatología',            totalOs:41000, totalCuidar:11000 },
+    { id:5,  fechaHora:'2026-10-08T15:20', turno:'Tarde',  paciente:'Sofía Martínez',    medico:'Dra. Ana Ruiz',       osId:'part',  motivo:'Consulta particular',      totalOs:35000, totalCuidar:35000 },
+    { id:6,  fechaHora:'2026-10-08T16:00', turno:'Tarde',  paciente:'Martín González',   medico:'Dr. Luis Ferreira',   osId:'ips',   motivo:'Revisión de laboratorios', totalOs:22000, totalCuidar:6000  },
+    { id:7,  fechaHora:'2026-10-09T09:00', turno:'Mañana', paciente:'Elena Rodríguez',   medico:'Dr. Sergio Lara',     osId:'pami',  motivo:'Cardiología',              totalOs:67000, totalCuidar:18000 },
+    { id:8,  fechaHora:'2026-10-07T10:30', turno:'Mañana', paciente:'Diego Sánchez',     medico:'Dra. Ana Ruiz',       osId:'salud', motivo:'Pediatría',                totalOs:28000, totalCuidar:7500  },
+    { id:9,  fechaHora:'2026-10-09T16:30', turno:'Tarde',  paciente:'Rosa Álvarez',      medico:'Dr. Luis Ferreira',   osId:'part',  motivo:'Consulta clínica',         totalOs:35000, totalCuidar:35000 },
+    { id:10, fechaHora:'2026-10-07T15:00', turno:'Tarde',  paciente:'Nicolás Torres',    medico:'Dr. Sergio Lara',     osId:'asis',  motivo:'Oftalmología',             totalOs:39000, totalCuidar:10000 }
+  ],
+
+  dist: [
+    { id:1, medico:'Luis',               monto:50000, osIds:['ips','pami','salud'] },
+    { id:2, medico:'Jazmín Bustamante',  monto:32000, osIds:['ips','pami'] }
+  ],
+  seqDist: 3
+};
+
+function obraDe(id){
+  for (var i = 0; i < state.obras.length; i++) if (state.obras[i].id === id) return state.obras[i];
+  return null;
+}
+
+/* ============================================================
+   3. VISTA 1 — LISTADO DE TURNOS
+   ============================================================ */
+
+/** Filtra por búsqueda + obra social elegida. */
+function turnosFiltrados(){
+  var q = state.q.trim().toLowerCase();
+  return state.turnos.filter(function(t){
+    if (state.osSel !== 'todas' && t.osId !== state.osSel) return false;
+    if (!q) return true;
+    return (t.paciente + ' ' + t.medico + ' ' + t.motivo).toLowerCase().indexOf(q) !== -1;
+  });
+}
+
+/** Ordena por la columna activa (alfanumérico o numérico). */
+function turnosOrdenados(){
+  var arr = turnosFiltrados().slice();
+  var key = state.sort.key, dir = state.sort.dir === 'desc' ? -1 : 1;
+  arr.sort(function(a, b){
+    var va, vb;
+    if (key === 'fecha')       { va = a.fechaHora;            vb = b.fechaHora; }
+    else if (key === 'totalOs') { va = a.totalOs;             vb = b.totalOs; }
+    else if (key === 'totalCuidar'){ va = a.totalCuidar;     vb = b.totalCuidar; }
+    else if (key === 'os')      { var oa = obraDe(a.osId), ob = obraDe(b.osId); va = oa ? oa.nombre : ''; vb = ob ? ob.nombre : ''; }
+    else if (key === 'turno')   { va = a.turno;                vb = b.turno; }
+    else { va = a[key] || '';    vb = b[key] || ''; }
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+    return String(va).localeCompare(String(vb), 'es', { sensitivity: 'base' }) * dir;
+  });
+  return arr;
+}
+
+function renderOsList(){
+  var ul = document.getElementById('osList');
+  var html = '<li><button type="button" data-os="todas" aria-pressed="' + (state.osSel === 'todas') + '">'
+           + '<span class="chip" style="--h:210">Todas</span>'
+           + '<span class="oslist__meta"><span class="oslist__amt">' + money(sumOS(state.turnos)) + '</span>'
+           + '<span class="oslist__cnt">' + state.turnos.length + ' turnos</span></span></button></li>';
+
+  state.obras.forEach(function(o){
+    var propios = state.turnos.filter(function(t){ return t.osId === o.id; });
+    html += '<li><button type="button" data-os="' + esc(o.id) + '" aria-pressed="' + (state.osSel === o.id) + '">'
+          +   '<span class="chip" ' + hueStyle(o.nombre) + '>' + esc(o.nombre) + '</span>'
+          +   '<span class="oslist__meta"><span class="oslist__amt">' + money(sumOS(propios)) + '</span>'
+          +   '<span class="oslist__cnt">' + propios.length + ' turnos</span></span>'
+          + '</button></li>';
+  });
+  ul.innerHTML = html;
+  document.getElementById('osCount').textContent = state.obras.length + ' Obras Sociales';
+}
+
+function sumOS(lista){
+  return lista.reduce(function(a, t){ return a + num(t.totalOs, 0); }, 0);
+}
+
+function renderTurnos(){
+  var filas = turnosOrdenados();
+  var body = document.getElementById('turnosBody');
+
+  if (filas.length === 0){
+    body.innerHTML = '<tr class="empty-row"><td colspan="8">No hay turnos para este filtro.</td></tr>';
+  } else {
+    body.innerHTML = filas.map(function(t){
+      var o = obraDe(t.osId);
+      var nombreOS = o ? o.nombre : '—';
+      return '<tr>'
+        + '<td class="small">' + esc(fechaLarga(t.fechaHora)) + '</td>'
+        + '<td class="small">' + esc(t.turno) + '</td>'
+        + '<td class="paciente">' + esc(t.paciente) + '</td>'
+        + '<td class="small">' + esc(t.medico) + '</td>'
+        + '<td><span class="chip" ' + hueStyle(nombreOS) + '>' + esc(nombreOS) + '</span></td>'
+        + '<td class="small muted">' + esc(t.motivo) + '</td>'
+        + '<td class="num"><label class="sr-only" for="os-' + t.id + '">Total OS de ' + esc(t.paciente) + '</label>'
+          + '<input id="os-' + t.id + '" class="cell-input js-total" type="number" min="0" step="any" inputmode="numeric"'
+          + ' data-id="' + t.id + '" data-field="totalOs" value="' + num(t.totalOs, 0) + '"></td>'
+        + '<td class="num"><label class="sr-only" for="cu-' + t.id + '">Total Cuidar de ' + esc(t.paciente) + '</label>'
+          + '<input id="cu-' + t.id + '" class="cell-input js-total" type="number" min="0" step="any" inputmode="numeric"'
+          + ' data-id="' + t.id + '" data-field="totalCuidar" value="' + num(t.totalCuidar, 0) + '"></td>'
+      + '</tr>';
+    }).join('');
+  }
+
+  document.getElementById('turnosCount').textContent = filas.length + (filas.length === 1 ? ' turno' : ' turnos');
+  renderTurnosFoot(filas);
+}
+
+/** Los TOTALES suman únicamente lo que está filtrado. */
+function renderTurnosFoot(filas){
+  var os = sumOS(filas);
+  var cui = filas.reduce(function(a, t){ return a + num(t.totalCuidar, 0); }, 0);
+  document.getElementById('turnosFoot').innerHTML =
+      '<tr><td colspan="6" class="label">Totales (' + filas.length + ')</td>'
+    + '<td class="num">' + money(os) + '</td>'
+    + '<td class="num">' + money(cui) + '</td></tr>';
+}
+
+/** Refresca sólo los totales (no re-renderiza la tabla: no se pierde el foco). */
+function refreshTotals(){
+  renderTurnosFoot(turnosOrdenados());
+  renderOsList();
+}
+
+/* ============================================================
+   4. VISTA 2 — DISTRIBUCIÓN POR MÉDICO (%)
+   ============================================================ */
+
+function renderPctRow(){
+  var tr = document.getElementById('pctRow');
+  // El rótulo ocupa Médico + Obras sociales + Monto (colSpan 3) y se alinea a la
+  // derecha, de modo que cada input de % caiga justo debajo de su columna de obra social.
+  var html = '<th scope="col" colSpan="3" class="pct-cell" style="text-align:right">% sobre el monto</th>';
+  state.obras.forEach(function(o){
+    html += '<th scope="col" class="pct-cell">'
+          +   '<label class="sr-only" for="pct-' + esc(o.id) + '">Porcentaje de ' + esc(o.nombre) + '</label>'
+          +   '<input id="pct-' + esc(o.id) + '" class="pct-input js-pct" type="number" min="0" max="100" step="any"'
+          +   ' inputmode="numeric" data-os="' + esc(o.id) + '" value="' + num(o.porcentaje, 0) + '">%'
+          + '</th>';
+  });
+  tr.innerHTML = html;
+}
+
+function renderDistHead(){
+  var html = '<th scope="col">Médico</th><th scope="col">Obras sociales</th><th scope="col" class="num">Monto</th>';
+  state.obras.forEach(function(o){
+    html += '<th scope="col" class="num"><span class="chip" ' + hueStyle(o.nombre) + '>' + esc(o.nombre) + '</span></th>';
+  });
+  html += '<th scope="col"><span class="sr-only">Acciones</span></th>';
+  document.getElementById('distHead').innerHTML = html;
+}
+
+function renderDist(){
+  renderPctRow();
+  renderDistHead();
+
+  document.getElementById('distBody').innerHTML = state.dist.map(function(f){
+    var chips = state.obras.map(function(o){
+      var on = f.osIds.indexOf(o.id) !== -1;
+      return '<button type="button" class="os-toggle ' + (on ? 'os-toggle--on' : 'os-toggle--off') + '"'
+           +   ' data-toggle="' + esc(f.id) + '" data-os="' + esc(o.id) + '"'
+           +   ' aria-pressed="' + on + '"'
+           +   ' aria-label="' + (on ? 'Quitar' : 'Agregar') + ' ' + esc(o.nombre) + ' a ' + esc(f.medico) + '">'
+           +   esc(o.nombre) + '</button>';
+    }).join(' ');
+
+    var celdas = state.obras.map(function(o){
+      // Importe de la columna: Monto × % / 100; "—" si la OS no aplica a este médico.
+      var aplica = f.osIds.indexOf(o.id) !== -1;
+      var imp = aplica ? num(f.monto, 0) * num(o.porcentaje, 0) / 100 : null;
+      return '<td class="num js-calc" data-f="' + f.id + '" data-os="' + esc(o.id) + '">'
+           + (imp === null ? '<span class="muted">—</span>' : money(imp)) + '</td>';
+    }).join('');
+
+    return '<tr>'
+      + '<td><label class="sr-only" for="med-' + f.id + '">Nombre del médico</label>'
+        + '<input id="med-' + f.id + '" class="cell-input cell-input--name js-medico" type="text"'
+        + ' data-id="' + f.id + '" value="' + esc(f.medico) + '"></td>'
+      + '<td class="small dist-chips">' + chips + '</td>'
+      + '<td class="num"><label class="sr-only" for="mon-' + f.id + '">Monto de ' + esc(f.medico) + '</label>'
+        + '<input id="mon-' + f.id + '" class="cell-input js-monto" type="number" min="0" step="any" inputmode="numeric"'
+        + ' data-id="' + f.id + '" value="' + num(f.monto, 0) + '"></td>'
+      + celdas
+      + '<td class="num"><button type="button" class="iconbtn js-quitar" data-id="' + f.id + '"'
+        + ' aria-label="Quitar la fila de ' + esc(f.medico) + '" title="Quitar fila">'
+        + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<path d="M4 6.5h16M9 6.5V4.8A1.3 1.3 0 0 1 10.3 3.5h3.4A1.3 1.3 0 0 1 15 4.8v1.7"/>'
+        + '<path d="M6.5 6.5l.9 12.2A1.8 1.8 0 0 0 9.2 20.5h5.6a1.8 1.8 0 0 0 1.8-1.8l.9-12.2"/>'
+        + '<path d="M10 10.5v6M14 10.5v6"/></svg></button></td>'
+    + '</tr>';
+  }).join('');
+
+  document.getElementById('distCount').textContent = state.dist.length + (state.dist.length === 1 ? ' médico' : ' médicos');
+  refreshCalc();
+}
+
+/** Recalcula celdas importes + fila de totales sin re-renderizar los inputs (mantiene el foco). */
+function refreshCalc(){
+  document.querySelectorAll('#distBody .js-calc').forEach(function(td){
+    var f = null, o = null, i;
+    for (i = 0; i < state.dist.length; i++) if (state.dist[i].id === +td.dataset.f) f = state.dist[i];
+    for (i = 0; i < state.obras.length; i++) if (state.obras[i].id === td.dataset.os) o = state.obras[i];
+    if (!f || !o) return;
+    var aplica = f.osIds.indexOf(o.id) !== -1;
+    td.innerHTML = aplica
+      ? money(num(f.monto, 0) * num(o.porcentaje, 0) / 100)
+      : '<span class="muted">—</span>';
+  });
+
+  var totalMonto = state.dist.reduce(function(a, f){ return a + num(f.monto, 0); }, 0);
+  var head = '<tr><td class="label">Totales</td><td class="label">' + state.dist.length + '</td>'
+           + '<td class="num">' + money(totalMonto) + '</td>';
+  state.obras.forEach(function(o){
+    var sum = state.dist.reduce(function(a, f){
+      return a + (f.osIds.indexOf(o.id) !== -1 ? num(f.monto, 0) * num(o.porcentaje, 0) / 100 : 0);
+    }, 0);
+    head += '<td class="num">' + money(sum) + '</td>';
+  });
+  head += '<td></td></tr>';
+  document.getElementById('distFoot').innerHTML = head;
+}
+
+/* ============================================================
+   5. EVENTOS (delegación: sobrevive a los re-render)
+   ============================================================ */
+var $ = function(s, r){ return (r || document).querySelector(s); };
+var $$ = function(s, r){ return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+
+// Pestañas superiores
+$$('.tab').forEach(function(b){
+  b.addEventListener('click', function(){ state.tab = b.dataset.tab; render(); });
+});
+
+// Selector de vista
+$$('.viewsel button').forEach(function(b){
+  b.addEventListener('click', function(){ state.vista = b.dataset.view; render(); });
+});
+
+// Buscador: se busca mientras se escribe; el input nunca se re-renderiza (no pierde foco)
+$('#q').addEventListener('input', function(e){
+  state.q = e.target.value;
+  if (state.vista !== 'turnos') return;
+  var filas = turnosOrdenados();
+  renderTurnosBodyOnly(filas);
+  renderTurnosFoot(filas);
+  renderOsList();
+  $('#turnosCount').textContent = filas.length + (filas.length === 1 ? ' turno' : ' turnos');
+});
+function renderTurnosBodyOnly(filas){
+  renderTurnos.call(null, filas);
+}
+
+// Filtro por obra social (lista maestra)
+$('#osList').addEventListener('click', function(e){
+  var btn = e.target.closest('button[data-os]');
+  if (!btn) return;
+  state.osSel = btn.dataset.os;
+  render();
+});
+
+// Encabezados ordenables
+document.addEventListener('click', function(e){
+  var sb = e.target.closest('.sortbtn');
+  if (!sb) return;
+  var k = sb.dataset.sort;
+  state.sort = { key: k, dir: state.sort.key === k && state.sort.dir === 'asc' ? 'desc' : 'asc' };
+  renderTurnos();
+  $$('.sortbtn').forEach(function(b){
+    var on = b.dataset.sort === k;
+    b.setAttribute('aria-sort', on ? (state.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+  });
+});
+
+// Totales OS / Cuidar editables en línea (sólo >= 0)
+document.addEventListener('input', function(e){
+  var el = e.target;
+
+  if (el.classList.contains('js-total')){
+    var t = turnoPorId(+el.dataset.id);
+    if (!t) return;
+    // No se pisa el campo mientras se tipea: sólo se normaliza al salir (change).
+    if (el.value !== '' && el.value !== '-') t[el.dataset.field] = num(el.value, 0);
+    refreshTotals();
+    return;
+  }
+
+  if (el.classList.contains('js-pct')){
+    var o = obraDe(el.dataset.os);
+    if (!o) return;
+    o.porcentaje = pct(el.value);
+    refreshCalc();          // sólo recalcula importes: el input conserva el foco
+    return;
+  }
+
+  if (el.classList.contains('js-monto')){
+    var f = distPorId(+el.dataset.id);
+    if (!f) return;
+    if (el.value !== '' && el.value !== '-') f.monto = num(el.value, 0);
+    refreshCalc();
+  }
+});
+
+// Al salir del campo: normaliza el valor (nunca queda negativo ni vacío)
+document.addEventListener('change', function(e){
+  var el = e.target;
+  if (el.classList.contains('js-total')){
+    el.value = num(el.value, 0);
+    refreshTotals();
+  } else if (el.classList.contains('js-pct')){
+    el.value = pct(el.value);
+    refreshCalc();
+  } else if (el.classList.contains('js-monto')){
+    el.value = num(el.value, 0);
+    refreshCalc();
+  }
+});
+
+// Nombre del médico editable
+document.addEventListener('change', function(e){
+  if (!e.target.classList.contains('js-medico')) return;
+  var f = distPorId(+e.target.dataset.id);
+  if (f) f.medico = e.target.value;
+});
+
+// Chips de obras sociales (activar/desactivar) y quitar fila
+document.addEventListener('click', function(e){
+  var tg = e.target.closest('[data-toggle]');
+  if (tg){
+    var f = distPorId(+tg.dataset.toggle);
+    if (f){
+      var i = f.osIds.indexOf(tg.dataset.os);
+      if (i === -1) f.osIds.push(tg.dataset.os); else f.osIds.splice(i, 1);
+    }
+    var idF = tg.dataset.toggle, idO = tg.dataset.os;
+    renderDist();
+    // Devuelve el foco al chip que se acaba de tocar
+    var again = document.querySelector('[data-toggle="' + idF + '"][data-os="' + idO + '"]');
+    if (again) again.focus();
+    return;
+  }
+
+  var del = e.target.closest('.js-quitar');
+  if (del){
+    state.dist = state.dist.filter(function(x){ return x.id !== +del.dataset.id; });
+    renderDist();
+  }
+});
+
+// Altas
+$('#addMedico').addEventListener('click', function(){
+  var inp = $('#nuevoMedico');
+  var nombre = inp.value.trim();
+  if (!nombre) { inp.focus(); return; }
+  state.dist.push({ id: state.seqDist++, medico: nombre, monto: 0, osIds: [] });
+  inp.value = '';
+  inp.focus();
+  renderDist();
+});
+
+$('#addOS').addEventListener('click', function(){
+  var inp = $('#nuevaOS');
+  var nombre = inp.value.trim();
+  if (!nombre) { inp.focus(); return; }
+  var existe = state.obras.some(function(o){ return o.nombre.toLowerCase() === nombre.toLowerCase(); });
+  if (existe) { alert('Ya existe una obra social con ese nombre.'); return; }
+  state.obras.push({
+    id: 'os' + Date.now().toString(36),
+    nombre: nombre,
+    porcentaje: 0          // columna nueva arranca en 0%
+  });
+  inp.value = '';
+  inp.focus();
+  render();
+});
+
+function turnoPorId(id){
+  for (var i = 0; i < state.turnos.length; i++) if (state.turnos[i].id === id) return state.turnos[i];
+  return null;
+}
+function distPorId(id){
+  for (var i = 0; i < state.dist.length; i++) if (state.dist[i].id === id) return state.dist[i];
+  return null;
+}
+
+/* ============================================================
+   6. RENDER GLOBAL
+   ============================================================ */
+function render(){
+  var esMedicos = state.tab === 'medicos';
+
+  $('#panel-medicos').hidden = !esMedicos;
+  $('#panel-os').hidden = esMedicos;
+  $$('.tab').forEach(function(b){ b.setAttribute('aria-selected', String(b.dataset.tab === state.tab)); });
+
+  if (esMedicos) return;              // "Pagos a Médicos" queda con su aviso vacío
+
+  var esTurnos = state.vista === 'turnos';
+  $('#vista-turnos').hidden = !esTurnos;
+  $('#vista-distribucion').hidden = esTurnos;
+  $$('.viewsel button').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.view === state.vista)); });
+
+  if (esTurnos){ renderOsList(); renderTurnos(); }
+  else renderDist();
+}
+
+render();
+</script>
+</body>
+</html>

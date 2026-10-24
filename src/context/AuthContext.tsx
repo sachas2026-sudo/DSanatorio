@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -10,17 +11,21 @@ import {
   authenticate,
   canAccessPath,
   clearStoredSession,
+  ensureAuthAccountsLoaded,
   isUsingDefaultAccounts,
-  readStoredSession,
+  migrateAllPlainPasswordAccounts,
+  revalidateStoredSession,
   storeSession,
   type AppRole,
   type AuthSession,
+  type LoginAttemptResult,
 } from '../lib/auth'
 import { useConfirm } from './ConfirmContext'
 
 type AuthCtx = {
   session: AuthSession | null
-  login: (username: string, password: string) => Promise<boolean>
+  authReady: boolean
+  login: (username: string, password: string) => Promise<LoginAttemptResult>
   logout: () => void
   canAccessPath: (pathname: string) => boolean
 }
@@ -29,17 +34,40 @@ const AuthContext = createContext<AuthCtx | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { confirm } = useConfirm()
-  const [session, setSession] = useState<AuthSession | null>(() =>
-    readStoredSession(),
-  )
+  const [authReady, setAuthReady] = useState(false)
+  const [session, setSession] = useState<AuthSession | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void ensureAuthAccountsLoaded()
+      .then(() => {
+        if (cancelled) return
+        // Migrar todas las cuentas con contraseñas en texto plano
+        void migrateAllPlainPasswordAccounts()
+        setSession(revalidateStoredSession())
+        setAuthReady(true)
+      })
+      .catch((err) => {
+        console.error('Error al preparar autenticación:', err)
+        if (cancelled) return
+        // Intentar migración incluso si hay error al cargar cuentas
+        void migrateAllPlainPasswordAccounts()
+        setSession(revalidateStoredSession())
+        setAuthReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const login = useCallback(
-    async (username: string, password: string) => {
+    async (username: string, password: string): Promise<LoginAttemptResult> => {
+      await ensureAuthAccountsLoaded()
       const wasDefaults = isUsingDefaultAccounts()
-      const next = await authenticate(username, password)
-      if (!next) return false
-      storeSession(next)
-      setSession(next)
+      const result = await authenticate(username, password)
+      if (!result.ok) return result
+      storeSession(result.session)
+      setSession(result.session)
       if (wasDefaults) {
         void confirm({
           title: 'Seguridad',
@@ -49,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           cancelLabel: 'Cerrar',
         })
       }
-      return true
+      return result
     },
     [confirm],
   )
@@ -70,12 +98,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       session,
+      authReady,
       login,
       logout,
       canAccessPath: canAccess,
     }),
-    [session, login, logout, canAccess],
+    [session, authReady, login, logout, canAccess],
   )
+
+  if (!authReady) {
+    return <div className="boot-placeholder" aria-hidden />
+  }
 
   return (
     <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

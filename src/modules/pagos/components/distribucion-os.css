@@ -1,0 +1,843 @@
+/* Distribución por médico · Obras Sociales (Pagos → Obras Sociales) */
+
+/* ── Listado de atenciones por plan ─────────────────────────────────
+   Tabla aparte, encima de la tira de cuotas. El bloque tiene fondo propio
+   para que se lea como una sección y no como parte de la tabla de arriba. */
+.dist-os__planes-aten {
+  margin-top: 0.2rem;
+  padding: 0.75rem 0.85rem 0.85rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.dist-os__planes-filtro {
+  margin-left: auto;
+}
+.dist-os__planes-filtro select {
+  height: 26px;
+  border: 1px solid #d5dbe5;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0 0.35rem;
+  cursor: pointer;
+}
+.dist-os__planes-filtro select:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: 1px;
+}
+
+.dist-os__planes-aten-wrap {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  max-height: 40vh;
+  overflow: auto;
+}
+.dist-os__aten-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.dist-os__aten-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.4rem 0.6rem;
+  background: #dbeefc;
+  color: #0f2942;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+.dist-os__aten-table td {
+  padding: 0.35rem 0.6rem;
+  border-top: 1px solid #eef2f7;
+  color: #334155;
+  vertical-align: middle;
+}
+.dist-os__aten-table tbody tr:nth-child(even) td {
+  background: #f8fafc;
+}
+.dist-os__aten-table tbody tr:hover td {
+  background: #f1f5f9;
+}
+.dist-os__aten-fecha {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+}
+.dist-os__aten-paciente {
+  font-weight: 600;
+  color: var(--heading);
+}
+/* El motivo es el texto largo: se recorta para que la fila no crezca. */
+.dist-os__aten-motivo {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dist-os__aten-plan {
+  display: inline-flex;
+  padding: 0.08rem 0.5rem;
+  border-radius: 6px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dist-os__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dist-os__aten-table tfoot td {
+  position: sticky;
+  bottom: 0;
+  padding: 0.45rem 0.6rem;
+  background: #e2e8f0;
+  color: #0f2942;
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  border-top: 1px solid #cbd5e1;
+}
+
+/* ── Tira de consumo de planes ──────────────────────────────────────
+   Va debajo de la tabla. El cupo es del plan, no del médico, así que queda
+   como bloque aparte en vez de metido en las celdas.
+   Sólo se renderiza en la vista Distribución, que a su vez sólo existe en
+   la pestaña Obras Sociales. */
+.dist-os__planes {
+  margin-top: 0.2rem;
+  padding: 0.75rem 0.85rem 0.85rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.dist-os__planes-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+.dist-os__planes-head h3 {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dist-os__planes-mes {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #0284c7;
+  background: #e0f2fe;
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+}
+
+.dist-os__planes-row {
+  display: grid;
+  /* Tarjetas más anchas: con la lista de pacientes adentro, 230px dejaba los
+     nombres recortados. */
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 0.8rem;
+}
+.dist-os__plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.95rem 1.05rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  /* La tarjeta toma un tono celeste cuando va bien y ámbar al pasarse. */
+  border-left: 4px solid #38bdf8;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.dist-os__plan.is-excedido {
+  background: #fffbeb;
+  border-color: #fde68a;
+  border-left-color: #f59e0b;
+}
+
+.dist-os__plan-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.dist-os__plan-name {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dist-os__plan-flag {
+  flex: none;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+}
+
+.dist-os__plan-nums {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: #475569;
+}
+.dist-os__plan-nums strong {
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--heading);
+  font-variant-numeric: tabular-nums;
+}
+.is-excedido .dist-os__plan-nums strong {
+  color: #b45309;
+}
+.dist-os__plan-sep {
+  color: #cbd5e1;
+}
+
+/* Barra de consumo del cupo. El ancho en % lo aplica el JSX. */
+.dist-os__plan-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.dist-os__plan-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #38bdf8;
+  transition: width 0.2s ease;
+}
+.is-excedido .dist-os__plan-bar > span {
+  background: #f59e0b;
+}
+.dist-os__plan-foot {
+  font-size: 0.73rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pacientes que usaron el plan este mes, dentro de la tarjeta. */
+.dist-os__plan-aten {
+  list-style: none;
+  margin: 0.15rem 0 0;
+  padding: 0.45rem 0 0;
+  border-top: 1px dashed #dbe3ec;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.dist-os__plan-aten li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  color: #475569;
+}
+.dist-os__plan-aten-pac {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dist-os__plan-aten-fecha {
+  flex: none;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.dist-os__plan-aten-mas {
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Si la lista crece, scrollea DENTRO del panel y no la página.
+   La cabecera y la fila de totales quedan fijas mientras se corre. */
+/* Este div lleva también la clase .pagos-table-wrap, que declara
+   `overflow-x: hidden`. Las dos reglas tienen la misma especificidad (una
+   clase), así que ganaba la que apareciera última en el bundle: en el build de
+   producción es PagosModern.css, y por eso la barra horizontal no aparecía
+   nunca aunque el ancho de la tabla sí excediera el contenedor. Se sube la
+   especificidad para que gane esta, sin depender del orden de los imports. */
+.pagos-table-wrap.dist-os__wrap {
+  overflow-x: auto;
+}
+.dist-os__wrap {
+  max-height: 58vh;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+.dist-os__wrap thead th {
+  position: sticky;
+  z-index: 2;
+}
+.dist-os__wrap thead tr:first-child th {
+  top: 0;
+}
+.dist-os__wrap thead tr:nth-child(2) th {
+  /* debajo de la fila de porcentajes */
+  top: 33px;
+}
+.dist-os__wrap tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
+.dist-os {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  /* La tarjeta contenedora va en blanco (no en el celeste de los PDF) */
+  background: var(--card);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem 0.7rem;
+}
+.dist-os__head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0 0.15rem 0.1rem;
+}
+
+/* Selector Resumen / Completo, junto al título de la tabla. */
+.dist-os__modo {
+  display: inline-flex;
+  margin-left: 0.4rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+.dist-os__modo-btn {
+  border: 0;
+  background: transparent;
+  color: #5b6577;
+  font-size: 0.59rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.dist-os__modo-btn + .dist-os__modo-btn {
+  border-left: 1px solid #cbd5e1;
+}
+.dist-os__modo-btn:hover {
+  background: #eef4fa;
+  color: #1a2744;
+}
+.dist-os__modo-btn--on,
+.dist-os__modo-btn--on:hover {
+  background: #1a2744;
+  color: #fff;
+}
+.dist-os__modo-btn:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: -2px;
+}
+
+/* Botón "Exportar PDF", a la derecha del selector de vista. */
+.dist-os__export-btn {
+  margin-left: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #1a2744;
+  font-size: 0.59rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.dist-os__export-btn:hover:not(:disabled) {
+  background: #eef4fa;
+  border-color: #0284c7;
+}
+.dist-os__export-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.dist-os__export-btn:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: 1px;
+}
+
+/* Aviso con la ruta del PDF generado y su acción "Abrir". */
+.dist-os__aviso {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  background: #f0fdf4;
+  font-size: 0.7rem;
+  color: #14532d;
+}
+.dist-os__aviso-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dist-os__aviso-text code {
+  font-size: 0.68rem;
+}
+.dist-os__aviso-accion {
+  border: 1px solid #22c55e;
+  border-radius: 5px;
+  background: #22c55e;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+.dist-os__aviso-accion:hover {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+.dist-os__aviso-cerrar {
+  border: 0;
+  background: transparent;
+  color: #14532d;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+.dist-os__aviso-accion:focus-visible,
+.dist-os__aviso-cerrar:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: 1px;
+}
+
+/* ── Tabla ─────────────────────────────────────────────────────────── */
+.dist-os__table {
+  width: 100%;
+  border-collapse: collapse;
+  /* El scroll horizontal vive dentro de .pagos-table-wrap; este piso sólo evita
+     que la tabla se aplaste en ventanas muy angostas. */
+  min-width: 0;
+  /* Anchos fijos de las columnas que quedan ancladas a los bordes. Médico y
+     Paciente se pegan a la izquierda y "Total Medico" a la derecha, así el
+     total se ve siempre sin tener que scrollear hasta el final. */
+  --dist-os-w-fecha: 76px;
+  --dist-os-w-medico: 180px;
+  --dist-os-w-paciente: 178px;
+  --dist-os-w-especialidad: 132px;
+  --dist-os-w-motivo: 130px;
+}
+.dist-os__table th,
+.dist-os__table td {
+  padding: 0.16rem 0.25rem;
+  border-bottom: 0.5px solid #e4e8f0;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+.dist-os__table thead th {
+  font-size: 0.59rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5b6577;
+  /* Barra de títulos en gris, para que se separe del cuerpo de la tabla */
+  background: #e9edf3;
+  border-bottom: 1px solid #d5dbe5;
+}
+/* La utilidad .text-right del proyecto está acotada a `.pagos-table`, así que
+   no llegaba a esta tabla: se define acá para alinear columnas y montos. */
+.dist-os__table th.text-right,
+.dist-os__table td.text-right {
+  text-align: right;
+  min-width: 70px;
+}
+/* Una obra social necesita más que 70 px para que el nombre del encabezado se
+   lea entero ("PREVENCION SALUD") y el importe no se pegue al vecino. Con 70 px
+   la tabla entraba justa en el contenedor y nunca había scroll horizontal:
+   .dist-os__wrap ya tenía overflow-x: auto y las columnas sticky, pero sin un
+   piso de ancho no había nada que scrollear. */
+.dist-os__table th.dist-os__os-cell,
+.dist-os__table td.dist-os__os-cell {
+  min-width: 96px;
+}
+/* Los nombres largos de obra social ("PREVENCION SALUD") van con nowrap por la
+   regla general de la tabla, así que sin esto se desbordarían sobre la columna
+   vecina aunque la celda mida 96 px. Se les permite partir en dos líneas: los
+   datos de abajo siguen en una sola línea. */
+.dist-os__table thead th.dist-os__os-cell {
+  white-space: normal;
+  overflow-wrap: break-word;
+  line-height: 1.1;
+  vertical-align: bottom;
+}
+/* Las columnas de obras sociales siguen el gris de la fila (striped por
+   registro): la celda no lleva fondo propio, así que se ve la banda gris de
+   las filas pares y blanca de las impares. */
+.dist-os__table tbody tr .dist-os__os-cell { background: inherit !important; }
+/* (heredar del tr) */
+/* Al pasar el mouse, el hover de la fila se ve parejo en todo el ancho. */
+.dist-os__table tbody tr:hover .dist-os__os-cell {
+  background: transparent;
+}
+/* Columna "Total": sin fondo propio, para que siga el gris de cada registro. */
+.dist-os__table tbody tr .dist-os__total-col { background: inherit !important; }
+/* (heredar del tr) */
+.dist-os__table tbody tr:hover .dist-os__total-col {
+  background: transparent;
+}
+/* Filas alternadas: una blanca y la siguiente gris muy claro. */
+.dist-os__table tbody tr:nth-child(even) {
+  background: #f6f8fb;
+}
+.dist-os__table tbody tr:nth-child(odd) {
+  background: var(--card);
+}
+.dist-os__table tbody tr:hover {
+  background: #eef4fa;
+}
+
+/* Separación entre médicos (línea sólida) y filas del mismo médico (punteada). */
+.dist-os__table tbody tr.dist-os__row-doctor td {
+  border-top: 2px solid #94a3b8;
+}
+.dist-os__table tbody tr.dist-os__row-child td {
+  border-top: 1px dashed #cbd5e1;
+  background: #fbfcfe;
+}
+.dist-os__continuation {
+  display: inline-block;
+  margin-left: 0.75rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.dist-os__table tbody tr.dist-os__row-doctor td {
+  border-top: 1px solid #94a3b8;
+}
+.dist-os__table tbody tr.dist-os__row-selected td {
+  background: #dcfce7 !important;
+  /* no cambiar color de fuente */
+}
+.dist-os__table tbody tr.dist-os__row-selected td.dist-os__motivo {
+  background: #dcfce7 !important;
+}
+.dist-os__table tbody tr.dist-os__row-child td {
+  border-top: 0.5px dashed #cbd5e1;
+}
+.dist-os__motivo {
+  background: #eceffd !important;
+  color: #3d4a66 !important;
+  font-weight: 600;
+}
+.dist-os__table tbody tr.dist-os__doc--even td {
+  background: #ffffff !important;
+}
+.dist-os__table tbody tr.dist-os__doc--odd td {
+  background: #f3f5fb !important;
+}
+.dist-os__table tbody tr.dist-os__doc--even:hover td,
+.dist-os__table tbody tr.dist-os__doc--odd:hover td {
+  background: #dcfce7 !important;
+}
+.dist-os__table tbody tr.dist-os__doc--even:hover td,
+.dist-os__table tbody tr.dist-os__doc--odd:hover td {
+  background: #eef4fa;
+}
+.dist-os__table tbody tr td.dist-os__motivo--accent {
+  background: #eef2ff !important;
+  color: #1e3a8a;
+  font-weight: 600;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: unset;
+  display: table-cell;
+  max-width: none;
+}
+.dist-os__motivo--accent {
+  background: #eef2ff;
+  color: #1e3a8a;
+  font-weight: 600;
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: unset;
+  display: table-cell;
+  padding-left: 0.6rem;
+}
+
+/* Fila de porcentajes: fondo azul claro, rótulo a la derecha */
+/* Fila de porcentajes / barra de título: celeste muy claro */
+.dist-os__pct-row th {
+  background: #dbeefc;
+  color: #2c5f80;
+  text-transform: none;
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  border-bottom: 1px solid #cfe2ef;
+}
+.dist-os__pct-label {
+  text-align: right;
+}
+/* Título + contador: ahora viven en la barra de arriba de la tabla
+   (.dist-os__head), no dentro de una celda. */
+.dist-os__head .pagos-table-title {
+  font-size: 0.72rem;
+}
+.dist-os__head .pagos-table-count-badge {
+  vertical-align: middle;
+}
+.dist-os__pct-cell {
+  text-align: right;
+  /* Mismo piso que la celda de datos: si el encabezado quedara más angosto,
+     la tabla descentra los rótulos respecto de los importes de abajo. */
+  min-width: 96px;
+}
+.dist-os__pct-cell span {
+  color: #5b7d99;
+  font-size: 0.75rem;
+  margin-right: 0.15rem;
+}
+.dist-os__pct-input {
+  width: 46px;
+  padding: 0.2rem 0.25rem;
+  text-align: right;
+  border: 1px solid #dde4f0;
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+.dist-os__pct-input:focus {
+  outline: none;
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.16);
+}
+/* Sin triangulitos de subir/bajar: se escriben a mano (o con las flechas). */
+.dist-os__pct-input::-webkit-outer-spin-button,
+.dist-os__pct-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.dist-os__pct-input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Chip de obra social en el encabezado */
+.dist-os__os-chip {
+  display: inline-block;
+  padding: 0.14rem 0.55rem;
+  /* Redondeo leve, no pastilla completa */
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #c3cede;
+  color: #1a365d;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.3rem;
+}
+
+/* ── Médico y suma de la fila (derivados del filtro: no editables) ── */
+/* Médico: columna fija y anclada a la izquierda.
+   El texto va en un bloque con ancho DEFINIDO: si queda directo en la celda,
+   el navegador toma el nombre más largo como ancho mínimo y la columna no
+   baja del tamaño del texto, por más que se le ponga max-width. */
+.dist-os__clip {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dist-os__med-col .dist-os__clip {
+  width: calc(var(--dist-os-w-medico) - 0.5rem);
+}
+.dist-os__pac-col .dist-os__clip {
+  width: calc(var(--dist-os-w-paciente) - 0.9rem);
+}
+.dist-os__esp-col .dist-os__clip {
+  width: calc(var(--dist-os-w-especialidad) - 0.5rem);
+}
+.dist-os__med-col {
+  width: var(--dist-os-w-medico);
+  min-width: var(--dist-os-w-medico);
+  max-width: var(--dist-os-w-medico);
+  overflow: hidden;
+  position: sticky;
+  left: var(--dist-os-w-fecha);
+  z-index: 1;
+}
+/* Paciente: justo al lado del médico y también anclada, así al scrollear se
+   sigue viendo de quién es cada fila. */
+.dist-os__pac-col {
+  width: var(--dist-os-w-paciente);
+  min-width: var(--dist-os-w-paciente);
+  max-width: var(--dist-os-w-paciente);
+  position: sticky;
+  left: calc(var(--dist-os-w-fecha) + var(--dist-os-w-medico));
+  z-index: 1;
+}
+/* Fecha: la columna más a la izquierda y anclada, hace de ancla del bloque. */
+.dist-os__fecha-col {
+  width: var(--dist-os-w-fecha);
+  min-width: var(--dist-os-w-fecha);
+  max-width: var(--dist-os-w-fecha);
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.71rem;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.dist-os__fecha-col .dist-os__clip {
+  width: calc(var(--dist-os-w-fecha) - 0.5rem);
+}
+/* Total Medico: anclada a la derecha, nunca queda fuera de la vista. */
+.dist-os__total-col {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
+/* Especialidad: ancho fijo con recorte (antes crecía con el texto más largo). */
+.dist-os__esp-col {
+  width: var(--dist-os-w-especialidad);
+  min-width: var(--dist-os-w-especialidad);
+  max-width: var(--dist-os-w-especialidad);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 0.3rem;
+}
+.dist-os__med {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Motivo: encabezado de columna, para poder fijar el ancho también arriba */
+.dist-os__motivo-col {
+  width: var(--dist-os-w-motivo);
+  max-width: var(--dist-os-w-motivo);
+}
+
+.dist-os__motivo {
+  width: var(--dist-os-w-motivo);
+  min-width: var(--dist-os-w-motivo);
+  max-width: var(--dist-os-w-motivo);
+}
+.dist-os__table th.dist-os__motivo-col,
+.dist-os__table td.dist-os__motivo {
+  position: static;
+}
+/* Motivo de consulta: alineado a la izquierda, hasta 2 líneas con elipsis. */
+.dist-os__motivo {
+  color: #3d4a66;
+  font-size: 0.71rem;
+  width: var(--dist-os-w-motivo);
+  min-width: var(--dist-os-w-motivo);
+  max-width: var(--dist-os-w-motivo);
+  text-align: left;
+  padding-left: 0.6rem;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: table-cell;
+}
+.dist-os__suma {
+  font-weight: 700;
+  color: #0284c7;
+}
+
+/* (Los chips de obras sociales se eliminaron junto con esa columna.) */
+
+.dist-os__dash {
+  color: var(--muted);
+}
+
+/* ── Totales ───────────────────────────────────────────────────────── */
+.dist-os__table tfoot td {
+  background: #e2e8f0;
+  font-weight: 700;
+  border-top: 2px solid #94a3b8;
+  border-bottom: 0;
+}
+.dist-os__foot-label {
+  text-transform: uppercase;
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+}
+
+/* ── Botón de quitar ───────────────────────────────────────────────── */
+.dist-os__table .iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #e07a7a;
+  cursor: pointer;
+}
+.dist-os__table .iconbtn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #f8c9c9;
+}
+.dist-os__table .iconbtn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Botón de quitar (reservado) ───────────────────────────────────── */

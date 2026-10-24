@@ -14,11 +14,15 @@ export default defineConfig({
   },
   clearScreen: false,
   base: './',
+  optimizeDeps: {
+    // xlsx es pesado: el pre-bundle en .vite/deps puede agotar el timeout y romper Pagos.
+    exclude: ['xlsx'],
+  },
   server: {
     port: 5173,
     strictPort: true,
     watch: {
-      ignored: ['**/src-tauri/**'],
+      ignored: ['**/src-tauri/**', '**/*.zip'],
     },
   },
   test: {

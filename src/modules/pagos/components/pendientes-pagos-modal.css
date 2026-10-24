@@ -1,0 +1,127 @@
+.pendientes-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  z-index: 100;
+}
+
+.pendientes-sheet {
+  width: min(46rem, 96vw);
+  max-height: min(80vh, 42rem);
+  background: #fff;
+  border: 1px solid #dbe6f4;
+  border-radius: 9px;
+  box-shadow: 0 18px 60px rgba(15, 40, 80, 0.22);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.pendientes-sheet__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem 0.65rem;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.pendientes-sheet__head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: #1e3a5f;
+}
+
+.pendientes-sheet__sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.84rem;
+  color: #64748b;
+}
+
+.pendientes-sheet__close {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 1.6rem;
+  line-height: 1;
+  padding: 0.1rem 0.35rem;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.pendientes-sheet__close:hover {
+  background: #f1f5f9;
+}
+
+.pendientes-sheet__empty {
+  padding: 1rem;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.pendientes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem 0.95rem 0.95rem;
+  overflow: auto;
+}
+
+.pendientes-item {
+  display: grid;
+  grid-template-columns: 6.8rem minmax(0, 1fr);
+  gap: 0.7rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.9rem;
+}
+
+.pendientes-item__time {
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pendientes-item__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.pendientes-item__patient {
+  color: #0f172a;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pendientes-item__doctor {
+  color: #64748b;
+  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pendientes-sheet__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #eef2f7;
+}
+
+@media (max-width: 520px) {
+  .pendientes-item {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
+

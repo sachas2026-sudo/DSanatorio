@@ -21,6 +21,10 @@ Aplicación de escritorio para gestión clínica: pacientes, médicos, agenda, p
 | `npm test` | Tests unitarios (Vitest) |
 | `npm run test:watch` | Tests en modo watch |
 
+## CI
+
+En cada push/PR a `main` o `master`, GitHub Actions ejecuta `npm run lint`, `npm test`, `npm run build` y `cargo test` (respaldos Rust).
+
 ## Datos y respaldos
 
 - **Web (dev):** `localStorage` bajo la clave `sanatorio-clinica-v1`.
@@ -51,14 +55,14 @@ Ejecutar antes de entregar una versión o después de cambios en datos/PDFs:
 - [ ] Cancelar pago; aparece en Pagos cancelados.
 
 ### Roles (secretaría vs administración)
-- [ ] Ingresar como **Secretaria** / `123`: no aparecen Configuración ni Pagos cancelados en el menú.
-- [ ] Secretaría: en Pagos no hay exportaciones Gerencia/Excel/correo ni PDF con pacientes.
-- [ ] Secretaría: en Pacientes y Médicos no hay botón PDF; no se ve el % del médico.
-- [ ] Secretaría: en Agenda no hay **Enviar Correo** (sí PDF Turnos local).
-- [ ] Ingresar como **Admi**: todas las exportaciones y rutas admin disponibles.
+- [ ] Ingresar como **Secretaria** / `123`: no aparecen Configuración, Mantenimiento ni Pagos cancelados en el menú.
+- [ ] Secretaría en Pagos: Resumen por Médico (PDF), Excel Gerencia, Correo (PDF resumen, no Gerencia); sin PDF Obra Social ni pendientes sin pago.
+- [ ] Secretaría en Pacientes y Médicos: botón PDF de listado; ve el % del médico.
+- [ ] Secretaría en Agenda: **PDF Turnos** y **Enviar Correo** disponibles.
+- [ ] Ingresar como **Admi**: todas las exportaciones Gerencia, pendientes y rutas admin disponibles.
 
 ### Producto
-- [ ] Barra lateral: **v1.1.7 · F1 ayuda** abre modal Acerca de.
+- [ ] Barra lateral: versión actual · **F1 ayuda** abre modal Acerca de.
 - [ ] **F1** o **?** (fuera de un campo de texto) abre ayuda con atajos y novedades.
 - [ ] **Alt+4** lleva a Agenda; **Alt+7** solo funciona como administración.
 
@@ -78,30 +82,35 @@ Ejecutar antes de entregar una versión o después de cambios en datos/PDFs:
 - [ ] JSON corrupto al iniciar muestra pantalla de restauración con respaldos 1–3.
 - [ ] Fallo al guardar muestra aviso rojo en la barra superior (no silencioso).
 
-## Dónde se guardan los datos (Windows, disco C:)
+## Dónde se guarda todo (Windows — disco C:)
 
-Al usar la app **instalada en Tauri** (no el navegador en desarrollo), **todo lo que cargás o modificás** (pacientes, médicos, turnos, pagos, configuración, etc.) se guarda automáticamente en disco. No hace falta un botón «Guardar base» en cada pantalla: cada cambio dispara un guardado con un pequeño retardo (~400 ms) para no escribir en disco en cada tecla.
+Todo queda bajo **`C:\Sanatorio\`**:
 
-### Base principal (siempre)
+| Carpeta | Contenido |
+|---------|-----------|
+| `C:\Sanatorio\app\` | Programa instalado (.exe) |
+| `C:\Sanatorio\datos\` | Base de datos (`sanatorio-datos.json`), usuarios de ingreso y clave SMTP |
+| `C:\Sanatorio\respaldo\` | 3 respaldos rotativos + carpeta `diario\` (30 días) |
 
-| Qué | Dónde (típico en C:) |
-|-----|----------------------|
-| **Base de datos** | `C:\Users\<tu usuario>\AppData\Roaming\com.sanatorio.gestion\sanatorio-datos.json` |
-| **Clave SMTP** (aparte del JSON) | `...\com.sanatorio.gestion\smtp-secret.txt` |
-| **Respaldos diarios** (30 días) | `...\com.sanatorio.gestion\diario\sanatorio-datos.YYYY-MM-DD.json` |
+Al **actualizar o reinstalar**, los datos en `datos\` y `respaldo\` **no se borran**.
 
-La ruta exacta la ves en **Configuración → Datos** al abrir la app instalada.
+El instalador solo reemplaza `C:\Sanatorio\app\`. En `C:\Sanatorio\` hay también `LEEME-ACTUALIZACION.txt` con los pasos.
 
-La base **no** vive dentro de la carpeta del `.exe` (por ejemplo `C:\Program Files\...`). Así, al **actualizar o reinstalar** el programa en C:, **tus datos no se borran**.
+### Cómo actualizar en una PC ya instalada
 
-### Copias de resguardo en C:
+1. Cerrar la app.
+2. Ejecutar el **nuevo instalador** (mismo asistente; no hace falta desinstalar antes).
+3. Abrir la app: pacientes, turnos, pagos, usuarios y claves siguen en `C:\Sanatorio\datos\`.
 
-| Qué | Dónde |
-|-----|--------|
-| **3 respaldos rotativos** (al salir / cada hora con la app abierta) | `C:\Sanatorio\respaldo\` |
-| **Dropbox** (opcional, si está instalado) | `C:\Users\LAS\Dropbox\Sanatorio\respaldo\` |
+En futuras versiones, `C:\Sanatorio\datos\install-meta.json` registra la versión instalada y permite migraciones automáticas de datos si el formato cambia.
 
-Si `C:\Sanatorio\respaldo` no se puede crear, los respaldos van a una subcarpeta `respaldo` dentro de AppData (misma unidad C:).
+Si venía de una versión anterior, la base en AppData se **migra sola** a `C:\Sanatorio\datos\`.
+
+La ruta exacta de la base la ves en **Configuración → Datos** al abrir la app.
+
+### Dropbox (opcional)
+
+Si Dropbox está instalado: `C:\Users\<usuario>\Dropbox\Sanatorio\respaldo\`
 
 ### Qué no cambió con los refactors recientes
 
@@ -111,10 +120,16 @@ Los cambios de organización del código (Agenda, libs, CSS) **no alteraron** `s
 
 Sin Tauri, los datos van a **localStorage** del navegador (solo para probar). Para uso real en la clínica, usá el **instalador en C:**.
 
+Compilar instalador:
+
+```powershell
+npm run installer:build
+```
+
 ## Desarrollo
 
 Credenciales por defecto (cambiar en Configuración → Usuarios): usuario `Admi` / clave `Admi`.
 
-- Contraseñas de ingreso: hash PBKDF2 en almacenamiento local (no texto plano).
-- Clave SMTP Gmail: archivo separado (`smtp-secret.txt` en AppData); no se incluye en export/backup JSON.
+- Contraseñas de ingreso: hash PBKDF2 en `auth-accounts.json` (`C:\Sanatorio\datos`); migración automática desde localStorage.
+- Clave SMTP Gmail: archivo separado (`smtp-secret.txt` en `C:\Sanatorio\datos`); no se incluye en export/backup JSON.
 - Los tests cubren parsing de la base (`parseAppData`), persistencia (`appStorage`), respaldos (`appBackup`) y pagos múltiples (`paymentDisplay`).

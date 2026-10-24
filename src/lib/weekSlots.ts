@@ -1,8 +1,10 @@
 import type { AppData, Doctor } from '../types'
+import { addDays, startOfDay } from 'date-fns'
 import {
   dateToYmd,
   doctorDuracionTurno,
   doctorTipoAgenda,
+  horariosEfectivosDoctor,
   minutesToHHmm,
 } from './doctorAgenda'
 import { validateAppointmentSlot } from './agendaRules'
@@ -94,7 +96,7 @@ export function planDoctorDay(
   }
 
   const dow = date.getDay()
-  const delDoctor = data.horarios.filter((h) => h.doctorId === doctorId)
+  const delDoctor = horariosEfectivosDoctor(doctorId, data.horarios)
   const daySlots = delDoctor.filter((h) => h.diaSemana === dow)
   if (delDoctor.length > 0 && daySlots.length === 0) {
     return { kind: 'no-day' }
@@ -326,6 +328,49 @@ export function countTurnosLibresDelDia(
     data,
   })
   return slots.filter((s) => s.available).length
+}
+
+export type ProximoTurnoLibre = {
+  fecha: Date
+  hora: string
+}
+
+/** Primer hueco libre del médico a partir del día siguiente a `desde`. */
+export function findProximoTurnoLibreDoctor(params: {
+  doctorId: string
+  desde: Date
+  data: AppData
+  excludeAppointmentId?: string
+  maxDias?: number
+}): ProximoTurnoLibre | null {
+  const { doctorId, desde, data, excludeAppointmentId, maxDias = 120 } = params
+  const doctor = data.doctors.find((d) => d.id === doctorId)
+  if (!doctor) return null
+  const step = doctorDuracionTurno(doctor)
+
+  let cursor = startOfDay(addDays(desde, 1))
+
+  for (let i = 0; i < maxDias; i++) {
+    const date = addDays(cursor, i)
+    if (!isDoctorAvailableOnDate(doctorId, date, data)) continue
+
+    const slots = generateSlotsForDay({
+      date,
+      doctorId,
+      duracionMinutos: step,
+      data,
+      excludeAppointmentId,
+    })
+    const libre = slots.find((s) => s.available)
+    if (!libre) continue
+
+    const [hh, mm] = libre.hm.split(':').map((x) => Number(x))
+    const fecha = new Date(date)
+    fecha.setHours(hh || 0, mm || 0, 0, 0)
+    return { fecha, hora: libre.hm }
+  }
+
+  return null
 }
 
 export function generateSlotsForDay(params: {

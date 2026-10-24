@@ -7,9 +7,13 @@ import {
   normalizePagosCancelados,
   parseAppDataJson,
   parseAppDataRecord,
+  parseAppDataRecordWithReport,
+  hasIntegrityIssues,
+  formatIntegrityAlert,
   parseDoctor,
   parsePatient,
   parsePayment,
+  parseAppointment,
 } from './parseAppData'
 
 describe('parseAppData helpers', () => {
@@ -33,6 +37,30 @@ describe('parseAppData helpers', () => {
   })
 })
 
+describe('parseAppointment', () => {
+  const base = {
+    id: 'a1',
+    patientId: 'p1',
+    doctorId: 'd1',
+    fechaHora: '2026-05-04T09:00:00.000Z',
+  }
+
+  it('lee motivoConsulta2 cuando viene', () => {
+    expect(
+      parseAppointment({ ...base, notas: 'Consulta', motivoConsulta2: ' Control ' }),
+    ).toMatchObject({ notas: 'Consulta', motivoConsulta2: 'Control' })
+  })
+
+  it('omite motivoConsulta2 vacío y en turnos viejos', () => {
+    expect(parseAppointment({ ...base, notas: 'Consulta' })).not.toHaveProperty(
+      'motivoConsulta2',
+    )
+    expect(
+      parseAppointment({ ...base, notas: 'Consulta', motivoConsulta2: '   ' }),
+    ).not.toHaveProperty('motivoConsulta2')
+  })
+})
+
 describe('parsePatient', () => {
   it('requiere id no vacío', () => {
     expect(parsePatient({ id: 'p1', nombre: 'Ana' })).toMatchObject({
@@ -44,6 +72,11 @@ describe('parsePatient', () => {
 })
 
 describe('parseDoctor', () => {
+  it('acepta porcentaje con decimales', () => {
+    expect(parseDoctor({ id: 'd1', porcentaje: 10.28 })?.porcentaje).toBe(10.28)
+    expect(parseDoctor({ id: 'd1', porcentaje: '15,5' })?.porcentaje).toBe(15.5)
+  })
+
   it('descarta porcentaje fuera de rango', () => {
     expect(parseDoctor({ id: 'd1', porcentaje: 1000 })?.porcentaje).toBeUndefined()
     expect(parseDoctor({ id: 'd1', porcentaje: 50 })?.porcentaje).toBe(50)
@@ -56,6 +89,11 @@ describe('parseDoctor', () => {
     expect(parseDoctor({ id: 'd1', tipoAgenda: 'otro' })?.tipoAgenda).toBe(
       'semanal',
     )
+  })
+
+  it('guarda alias opcional', () => {
+    expect(parseDoctor({ id: 'd1', alias: '  DR-G  ' })?.alias).toBe('DR-G')
+    expect(parseDoctor({ id: 'd1', alias: '   ' })?.alias).toBeUndefined()
   })
 })
 
@@ -71,15 +109,47 @@ describe('parsePayment', () => {
       }),
     ).toMatchObject({ citaId: null, metodo: 'Efectivo' })
   })
+
+  it('parsea porcentajeAplicado', () => {
+    expect(
+      parsePayment({
+        id: 'pay1',
+        patientId: 'p1',
+        doctorId: 'd1',
+        fecha: '2026-01-01',
+        monto: 100,
+        porcentajeAplicado: 12,
+      }),
+    ).toMatchObject({ porcentajeAplicado: 12 })
+  })
+
+  it('parsea registradoPor, modificadoPor y modificadoEn', () => {
+    expect(
+      parsePayment({
+        id: 'pay1',
+        patientId: 'p1',
+        doctorId: 'd1',
+        fecha: '2026-01-01',
+        registradoPor: 'Barua Andrea',
+        modificadoPor: 'Aguirre Mary',
+        modificadoEn: '2026-01-02T10:00:00.000Z',
+      }),
+    ).toMatchObject({
+      registradoPor: 'Barua Andrea',
+      modificadoPor: 'Aguirre Mary',
+      modificadoEn: '2026-01-02T10:00:00.000Z',
+    })
+  })
 })
 
 describe('normalizePagosCancelados', () => {
-  it('migra eliminadoEn a canceladoEn', () => {
+  it('migra eliminadoEn a canceladoEn y conserva canceladoPor', () => {
     const rows = normalizePagosCancelados([
       {
         id: 'pc1',
         motivo: 'cancelacion_paciente',
         eliminadoEn: '2026-01-02T10:00:00.000Z',
+        canceladoPor: 'Barua Andrea',
         payment: {
           id: 'pay1',
           patientId: 'p1',
@@ -94,6 +164,7 @@ describe('normalizePagosCancelados', () => {
     ])
     expect(rows).toHaveLength(1)
     expect(rows[0]?.canceladoEn).toBe('2026-01-02T10:00:00.000Z')
+    expect(rows[0]?.canceladoPor).toBe('Barua Andrea')
   })
 })
 
@@ -158,6 +229,108 @@ describe('parseAppDataRecord', () => {
       'Formato de base de datos no reconocido.',
     )
   })
+
+  it('conserva turnos y pagos aunque falte paciente o médico en la base', () => {
+    const data = parseAppDataRecord({
+      patients: [{ id: 'p1', nombre: 'Ana', apellido: 'López' }],
+      doctors: [{ id: 'd1', nombre: 'Dr', apellido: 'House' }],
+      appointments: [
+        {
+          id: 'c1',
+          patientId: 'p1',
+          doctorId: 'd1',
+          fechaHora: '2026-05-01T10:00:00',
+        },
+        {
+          id: 'c2',
+          patientId: 'p-missing',
+          doctorId: 'd1',
+          fechaHora: '2026-05-01T11:00:00',
+        },
+      ],
+      payments: [
+        {
+          id: 'pay1',
+          patientId: 'p1',
+          doctorId: 'd1',
+          citaId: 'c1',
+          monto: 100,
+          fecha: '2026-05-01T10:30:00',
+        },
+        {
+          id: 'pay2',
+          patientId: 'p1',
+          doctorId: 'd-missing',
+          monto: 50,
+          fecha: '2026-05-01T11:30:00',
+        },
+        {
+          id: 'pay3',
+          patientId: 'p1',
+          doctorId: 'd1',
+          citaId: 'c-missing',
+          monto: 25,
+          fecha: '2026-05-01T12:00:00',
+        },
+      ],
+    })
+    expect(data.appointments).toHaveLength(2)
+    expect(data.payments).toHaveLength(3)
+    expect(data.payments.find((p) => p.id === 'pay2')?.doctorId).toBe('d-missing')
+    expect(data.payments.find((p) => p.id === 'pay3')?.citaId).toBeNull()
+  })
+
+  it('conserva diasLibres aunque falte el médico en la base', () => {
+    const data = parseAppDataRecord({
+      ...minimal,
+      diasLibres: [
+        { id: 'dl1', doctorId: 'd1', fecha: '2026-06-01' },
+        { id: 'dl2', doctorId: 'd-missing', fecha: '2026-06-02' },
+      ],
+    })
+    expect(data.diasLibres).toHaveLength(2)
+  })
+
+  it('preserva configuraciones de permisos de usuarios y modificación de mes', () => {
+    const data = parseAppDataRecord({
+      ...minimal,
+      settings: {
+        email: 'test@example.com',
+        secretariaPuedeModificarMesActual: true,
+        secretariaPuedeModificarTurnosOtrosUsuarios: true,
+        mostrarAccionesEnListaPagos: true,
+      },
+    })
+    expect(data.settings.secretariaPuedeModificarMesActual).toBe(true)
+    expect(data.settings.secretariaPuedeModificarTurnosOtrosUsuarios).toBe(true)
+    expect(data.settings.mostrarAccionesEnListaPagos).toBe(true)
+  })
+})
+
+describe('parseAppDataRecordWithReport', () => {
+  it('informa filas inválidas y referencias huérfanas', () => {
+    const { data, report } = parseAppDataRecordWithReport({
+      patients: [{ id: 'p1', nombre: 'Ana', apellido: 'López' }, { nombre: 'Sin id' }],
+      doctors: [{ id: 'd1', nombre: 'Dr', apellido: 'House' }],
+      appointments: [
+        {
+          id: 'c1',
+          patientId: 'p1',
+          doctorId: 'd1',
+          fechaHora: '2026-05-01T10:00:00',
+        },
+        {
+          id: 'c2',
+          patientId: 'p-missing',
+          doctorId: 'd1',
+          fechaHora: '2026-05-02T11:00:00',
+        },
+      ],
+    })
+    expect(data.appointments).toHaveLength(2)
+    expect(hasIntegrityIssues(report)).toBe(true)
+    expect(formatIntegrityAlert(report)).toContain('paciente(s) inválido(s)')
+  })
 })
 
 describe('parseAppDataJson', () => {
@@ -167,10 +340,21 @@ describe('parseAppDataJson', () => {
     )
   })
 
-  it('parsea JSON válido', () => {
+  it('parsea JSON válido y respeta permisos de configuración', () => {
     const data = parseAppDataJson(
-      JSON.stringify({ patients: [], doctors: [] }),
+      JSON.stringify({
+        patients: [],
+        doctors: [],
+        settings: {
+          mostrarAccionesEnListaPagos: true,
+          secretariaPuedeModificarMesActual: true,
+          secretariaPuedeModificarTurnosOtrosUsuarios: true,
+        },
+      }),
     )
     expect(data.patients).toEqual([])
+    expect(data.settings.mostrarAccionesEnListaPagos).toBe(true)
+    expect(data.settings.secretariaPuedeModificarMesActual).toBe(true)
+    expect(data.settings.secretariaPuedeModificarTurnosOtrosUsuarios).toBe(true)
   })
 })

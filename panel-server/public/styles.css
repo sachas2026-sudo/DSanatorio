@@ -1,0 +1,390 @@
+:root {
+  --bg: #ffffff;
+  --card: #fff;
+  --text: #1a2744;
+  --muted: #6b7c93;
+  --accent: #2f6fdb;
+  --border: #e2e8f0;
+  --error: #b42318;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html {
+  overflow-x: auto;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-width: 320px;
+}
+
+.shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 8px 24px rgba(26, 39, 68, 0.06);
+}
+
+.card--stat {
+  background: #fff;
+}
+
+.stat-pill__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem 0.65rem;
+  margin: 0;
+}
+
+.stat-pill__row--head {
+  margin-bottom: 0.65rem;
+}
+
+.stat-pill__row--detail {
+  align-items: center;
+}
+
+.stat-pill__row--detail + .stat-pill__row--detail {
+  margin-top: 0.45rem;
+}
+
+.stat-pill__title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stat-pill__period {
+  font-size: 0.92rem;
+}
+
+.stat-pill__sep {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.stat-pill__caption {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stat-pill__amount {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.1;
+}
+
+.stat-pill__amount--bruto {
+  font-size: 1.35rem;
+}
+
+.stat-pill__amount--neto {
+  font-size: 1.35rem;
+}
+
+.stat-pill__caption--inline {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.stat-pill__count {
+  font-size: 0.9rem;
+}
+
+.lead {
+  color: var(--muted);
+  margin-top: 0;
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+input[type='password'] {
+  width: 100%;
+  max-width: 320px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  font: inherit;
+}
+
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.btn-celestito {
+  background: linear-gradient(180deg, #e8f4fc 0%, #dceefb 100%);
+  color: #1a4a8a;
+  border: 1px solid #b8daf5;
+  box-shadow: 0 2px 10px rgba(47, 111, 219, 0.08);
+}
+
+.btn-celestito:hover:not(:disabled) {
+  background: linear-gradient(180deg, #dce9f8 0%, #d0e4f6 100%);
+}
+
+.btn-celestito:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.error {
+  color: var(--error);
+  font-size: 0.88rem;
+}
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dash-head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.3rem;
+  padding-top: 0.15rem;
+}
+
+.dash-head-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+}
+
+.dash-head-brand h1 {
+  margin: 0;
+}
+
+.dash-logo {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: contain;
+  background: none;
+}
+
+.dash-head-meta {
+  margin: 0;
+}
+
+.dash-head-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.grid--stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.card--chart {
+  width: 100%;
+}
+
+.card--chart h2 {
+  margin-bottom: 0.5rem;
+}
+
+.bar-chart {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.35rem;
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.bar-chart__plot {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.2rem;
+  width: max-content;
+  min-width: 100%;
+  min-height: 10.5rem;
+  padding-top: 0.15rem;
+}
+
+.bar-chart__col {
+  flex: 0 0 1.85rem;
+  min-width: 1.85rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.bar-chart__value {
+  font-size: 0.56rem;
+  line-height: 1;
+  font-weight: 600;
+  color: #4a6280;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  overflow: visible;
+  min-height: 2.75rem;
+  max-height: 3.25rem;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.bar-chart__col--zero .bar-chart__value {
+  visibility: hidden;
+}
+
+.bar-chart__bar-wrap {
+  width: 100%;
+  height: 6rem;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.bar-chart__bar {
+  width: 72%;
+  min-height: 2px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #6ba3f5 0%, var(--accent) 100%);
+  border-radius: 4px 4px 2px 2px;
+}
+
+.bar-chart__col--zero .bar-chart__bar {
+  background: #e4eaf3;
+}
+
+.bar-chart__label {
+  font-size: 0.62rem;
+  line-height: 1.1;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+@media (max-width: 639px) {
+  .dash-head {
+    padding-top: 3.25rem;
+  }
+
+  .dash-head-actions {
+    left: 0;
+    right: 0;
+    justify-content: center;
+  }
+
+  .grid--stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 640px) {
+  .grid:not(.grid--stats) {
+    grid-template-columns: 1fr 1fr;
+  }
+  .card--stat {
+    grid-column: span 1;
+  }
+}

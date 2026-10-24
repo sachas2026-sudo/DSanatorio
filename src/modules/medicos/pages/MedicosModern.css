@@ -1,0 +1,121 @@
+.page--medicos-modern {
+  background: #f7faf9;
+}
+
+.page--medicos-modern .pacientes-metrics-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(190px, 0.8fr);
+}
+
+.page--medicos-modern button.pacientes-metric-card {
+  font: inherit;
+  text-align: left;
+}
+
+.page--medicos-modern .pac-modal--doctor {
+  max-width: 1000px;
+}
+
+.page--medicos-modern .medicos-modern-form {
+  gap: 0.75rem;
+}
+
+.page--medicos-modern .pacientes-table-wrap {
+  min-height: 0;
+}
+
+.page--medicos-modern .medicos-td-contact {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page--medicos-modern .medicos-row-actions .btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.page--medicos-modern .table-list__scroll {
+  max-height: 596px;
+  overflow-y: auto;
+}
+
+.page--medicos-modern .medicos-modern-table {
+  min-width: 820px;
+}
+
+.page--medicos-modern .medicos-modern-table thead th {
+  height: 36px;
+  box-sizing: border-box;
+}
+
+.page--medicos-modern .medicos-modern-table tbody tr {
+  height: 40px;
+  box-sizing: border-box;
+}
+
+.page--medicos-modern .medicos-modern-table tbody td {
+  height: 40px;
+  box-sizing: border-box;
+}
+
+.page--medicos-modern .medicos-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+@media (max-width: 1024px) {
+  .page--medicos-modern .pacientes-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .page--medicos-modern .pacientes-metrics-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Pastillas de acción en Médicos (Vista previa, Excel, Obra Social) */
+.page--medicos-modern .pacientes-btn-pdf,
+.page--medicos-modern .pacientes-btn-os {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+  color: #1e293b !important;
+  transition: all 0.15s ease;
+}
+
+.page--medicos-modern .pacientes-btn-pdf:hover,
+.page--medicos-modern .pacientes-btn-os:hover {
+  background: #cbd5e1;
+  border-color: #94a3b8;
+  color: #0f172a !important;
+}
+
+.page--medicos-modern .pacientes-btn-pdf:active,
+.page--medicos-modern .pacientes-btn-os:active {
+  background: #94a3b8;
+}
+
+.page--medicos-modern .pacientes-btn-pdf svg,
+.page--medicos-modern .pacientes-btn-os svg {
+  color: #334155;
+}
+
+.page--medicos-modern .pacientes-btn-pdf:hover svg,
+.page--medicos-modern .pacientes-btn-os:hover svg {
+  color: #0f172a;
+}
+
+.page--medicos-modern .pacientes-btn-pdf .btn-pdf__icon {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+.page--medicos-modern .pacientes-btn-pdf:hover .btn-pdf__icon {
+  background: #94a3b8;
+  color: #0f172a;
+}

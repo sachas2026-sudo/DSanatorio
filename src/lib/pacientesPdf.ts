@@ -1,6 +1,7 @@
 import { format } from 'date-fns'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { DNI_PAC_LABEL } from './dniLabels'
 import { drawPdfHeader, pdfBodyStartYAfterHeader, PDF_BODY_EXTRA_DOWN_PLAIN } from './pdfHeader'
 import {
   drawPdfPeriodMetaBlock,
@@ -12,7 +13,7 @@ import {
 import type { Patient } from '../types'
 
 const TABLE_HEAD_STYLES = {
-  fillColor: [47, 111, 219] as [number, number, number],
+  fillColor: [122, 163, 176] as [number, number, number],
   textColor: [255, 255, 255] as [number, number, number],
   fontStyle: 'bold' as const,
   fontSize: 8,
@@ -127,7 +128,7 @@ export function buildPacientesPdf(patients: Patient[]): {
     const tableLeft = PAGOS_PDF_MARGIN
     const tableWidth = pageW - 2 * PAGOS_PDF_MARGIN
     const colWidths = pacientesTableColWidths(tableWidth)
-    const headers = ['#', 'Apellido y nombre', 'DNI', 'Obra social', 'Teléfono', 'Email']
+    const headers = ['#', 'Apellido y nombre', DNI_PAC_LABEL, 'Obra social', 'Teléfono', 'Email']
     const tableStartY = cursorY
 
     const columnStyles: Record<

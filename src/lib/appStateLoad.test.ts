@@ -4,7 +4,6 @@ import {
   enrichLoadedData,
   parseStoredData,
   saveAppData,
-  withDemoData,
 } from './appStateLoad'
 import { serializeAppData } from './appStorage'
 
@@ -27,14 +26,13 @@ describe('appStateLoad', () => {
     expect(EMPTY_APP_DATA.settings.clave).toBe('')
   })
 
-  it('withDemoData no pisa datos existentes', () => {
-    const withPatients = {
-      ...EMPTY_APP_DATA,
-      patients: [{ id: 'p1', nombre: 'A', apellido: 'B', dni: '', telefono: '', email: '', domicilio: '', localidad: '', fechaNacimiento: '', obraSocial: '', notas: '' }],
-    }
-    const out = withDemoData(withPatients)
-    expect(out.patients).toHaveLength(1)
-    expect(out.doctors.length).toBeGreaterThan(0)
+  it('parseStoredData no agrega datos inventados en base vacía', () => {
+    const emptyJson = JSON.stringify(EMPTY_APP_DATA)
+    const out = parseStoredData(emptyJson)
+    expect(out.patients).toEqual([])
+    expect(out.doctors).toEqual([])
+    expect(out.appointments).toEqual([])
+    expect(out.payments).toEqual([])
   })
 
   it('parseStoredData rechaza JSON inválido', () => {
@@ -46,16 +44,21 @@ describe('appStateLoad', () => {
     expect(out.settings.clave).toBe('secret-from-file')
   })
 
-  it('saveAppData serializa sin clave SMTP en JSON', async () => {
+  it('saveAppData serializa sin secretos en JSON', async () => {
     const { saveStorageRaw } = await import('./appStorage')
     const data = {
       ...EMPTY_APP_DATA,
-      settings: { ...EMPTY_APP_DATA.settings, clave: 'no-debe-quedar' },
+      settings: {
+        ...EMPTY_APP_DATA.settings,
+        clave: 'no-debe-quedar',
+      },
     }
     await saveAppData(data)
     expect(saveStorageRaw).toHaveBeenCalledOnce()
     const json = vi.mocked(saveStorageRaw).mock.calls[0]![0]!
-    const parsed = JSON.parse(json) as { settings: { clave: string } }
+    const parsed = JSON.parse(json) as {
+      settings: { clave: string }
+    }
     expect(parsed.settings.clave).toBe('')
     expect(json).toBe(serializeAppData(data))
   })
