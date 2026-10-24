@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+use serde_json::Value;
 use crate::core::error::AppError;
 
 pub const DEFAULT_ROOT: &str = r"C:\Sanatorio";
@@ -13,6 +15,17 @@ fn env_trim(key: &str) -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+fn read_config() -> Option<Value> {
+    let root = env_trim("SANATORIO_ROOT").unwrap_or_else(|| DEFAULT_ROOT.to_string());
+    let path = PathBuf::from(root).join("config.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn config_str(key: &str) -> Option<String> {
+    read_config()?.get(key)?.as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 fn cached_path(key: &'static str, build: fn() -> PathBuf) -> PathBuf {
@@ -38,16 +51,16 @@ pub fn sanatorio_root() -> PathBuf {
 
 pub fn data_dir() -> PathBuf {
     env_trim("SANATORIO_DATA_DIR")
+        .or_else(|| config_str("dataDir"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DATA_DIR_ON_C))
 }
 
 pub fn backup_dir() -> PathBuf {
-    cached_path("backup", || {
-        env_trim("SANATORIO_BACKUP_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(BACKUP_DIR_ON_C))
-    })
+    env_trim("SANATORIO_BACKUP_DIR")
+        .or_else(|| config_str("backupDir"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(BACKUP_DIR_ON_C))
 }
 
 pub fn user_dropbox_root() -> Option<PathBuf> {

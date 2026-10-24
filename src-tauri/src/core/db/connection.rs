@@ -54,3 +54,26 @@ pub fn backup_db_safe(src: &Path, dst: &Path) -> Result<(), AppError> {
         .map_err(|e| AppError::Database(format!("No se pudo respaldar la base: {e}")))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn backup_db_safe_preserves_counts() {
+        let temp = TempDir::new().unwrap();
+        let src = temp.path().join("src.db");
+        let dst = temp.path().join("backup.db");
+        // Crear base mínima
+        {
+            let conn = Connection::open(&src).unwrap();
+            conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", []).unwrap();
+            conn.execute("INSERT INTO t (v) VALUES ('a'),('b')", []).unwrap();
+        }
+        backup_db_safe(&src, &dst).unwrap();
+        let conn = Connection::open(&dst).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 2);
+    }
+}
