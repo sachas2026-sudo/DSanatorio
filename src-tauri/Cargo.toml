@@ -42,6 +42,7 @@ time = "0.3"
 uuid = { version = "1", features = ["v4"] }
 pbkdf2 = "0.12"
 sha2 = "0.10"
+rand = "0.8"
 axum = "0.7"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 tokio = { version = "1", features = ["full"] }

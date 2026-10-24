@@ -3,6 +3,10 @@ mod modules;
 mod server;
 mod whatsapp;
 
+#[cfg(test)]
+mod service_tests;
+
+
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

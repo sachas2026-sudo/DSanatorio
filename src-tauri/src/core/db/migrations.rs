@@ -33,6 +33,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0005_app_modules",
         sql: include_str!("../../../migrations/0005_app_modules.sql"),
     },
+    Migration {
+        version: 6,
+        name: "0006_afiliados_tablas",
+        sql: include_str!("../../../migrations/0006_afiliados_tablas.sql"),
+    },
 ];
 
 fn initialize_migrations_table(conn: &Connection) -> Result<(), AppError> {

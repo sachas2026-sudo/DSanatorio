@@ -527,6 +527,69 @@ pub fn load_app_module(conn: &Connection, key: &str) -> Result<Vec<serde_json::V
 }
 
 /// Guarda un módulo como JSON en app_modules.
+pub fn load_afiliados_table(conn: &Connection) -> Result<Vec<serde_json::Value>, AppError> {
+    let mut stmt = conn.prepare("SELECT id, nombre, version FROM afiliados")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?}))
+    })?;
+    let mut res = Vec::new();
+    for r in rows { res.push(r?); }
+    Ok(res)
+}
+
+pub fn load_planes_table(conn: &Connection) -> Result<Vec<serde_json::Value>, AppError> {
+    let mut stmt = conn.prepare("SELECT id, nombre, version FROM planes_afiliados")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?}))
+    })?;
+    let mut res = Vec::new();
+    for r in rows { res.push(r?); }
+    Ok(res)
+}
+
+pub fn load_cuotas_table(conn: &Connection) -> Result<Vec<serde_json::Value>, AppError> {
+    let mut stmt = conn.prepare("SELECT id, monto, version FROM cuotas_afiliados")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "monto": row.get::<_, f64>(1)?}))
+    })?;
+    let mut res = Vec::new();
+    for r in rows { res.push(r?); }
+    Ok(res)
+}
+
+pub fn save_afiliados_table(tx: &Transaction<'_>, values: &[serde_json::Value]) -> Result<(), AppError> {
+    tx.execute("DELETE FROM afiliados", [])?;
+    let mut stmt = tx.prepare("INSERT INTO afiliados (id, nombre, version) VALUES (?1, ?2, ?3)")?;
+    for v in values {
+        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
+        let nombre = v.get("nombre").and_then(|x| x.as_str()).unwrap_or("");
+        stmt.execute(params![id, nombre, 1])?;
+    }
+    Ok(())
+}
+
+pub fn save_planes_table(tx: &Transaction<'_>, values: &[serde_json::Value]) -> Result<(), AppError> {
+    tx.execute("DELETE FROM planes_afiliados", [])?;
+    let mut stmt = tx.prepare("INSERT INTO planes_afiliados (id, nombre, version) VALUES (?1, ?2, ?3)")?;
+    for v in values {
+        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
+        let nombre = v.get("nombre").and_then(|x| x.as_str()).unwrap_or("");
+        stmt.execute(params![id, nombre, 1])?;
+    }
+    Ok(())
+}
+
+pub fn save_cuotas_table(tx: &Transaction<'_>, values: &[serde_json::Value]) -> Result<(), AppError> {
+    tx.execute("DELETE FROM cuotas_afiliados", [])?;
+    let mut stmt = tx.prepare("INSERT INTO cuotas_afiliados (id, monto, version) VALUES (?1, ?2, ?3)")?;
+    for v in values {
+        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
+        let monto = v.get("monto").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        stmt.execute(params![id, monto, 1])?;
+    }
+    Ok(())
+}
+
 pub fn save_app_module(tx: &Transaction<'_>, key: &str, values: &[serde_json::Value]) -> Result<(), AppError> {
     let json = serde_json::to_string(values)
         .map_err(|e| AppError::Validation(format!("JSON inválido para {key}: {e}")))?;

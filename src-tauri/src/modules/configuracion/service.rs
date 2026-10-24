@@ -105,9 +105,9 @@ pub fn load_app_data() -> Result<AppData, AppError> {
     
     let settings = repository::load_settings(&conn)?;
 
-    let afiliados = repository::load_app_module(&conn, "afiliados")?;
-    let planes_afiliados = repository::load_app_module(&conn, "planes_afiliados")?;
-    let cuotas_afiliados = repository::load_app_module(&conn, "cuotas_afiliados")?;
+    let afiliados = repository::load_afiliados_table(&conn).unwrap_or_else(|_| repository::load_app_module(&conn, "afiliados").unwrap_or_default());
+    let planes_afiliados = repository::load_planes_table(&conn).unwrap_or_else(|_| repository::load_app_module(&conn, "planes_afiliados").unwrap_or_default());
+    let cuotas_afiliados = repository::load_cuotas_table(&conn).unwrap_or_else(|_| repository::load_app_module(&conn, "cuotas_afiliados").unwrap_or_default());
     let distribucion_os_percentajes = repository::load_app_module(&conn, "distribucion_os_percentajes")?;
 
     Ok(AppData {
@@ -267,9 +267,9 @@ fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppE
 
     repository::save_settings(&tx, &data.settings)?;
 
-    repository::save_app_module(&tx, "afiliados", &afiliados_to_save)?;
-    repository::save_app_module(&tx, "planes_afiliados", &planes_to_save)?;
-    repository::save_app_module(&tx, "cuotas_afiliados", &cuotas_to_save)?;
+    repository::save_afiliados_table(&tx, &afiliados_to_save)?;
+    repository::save_planes_table(&tx, &planes_to_save)?;
+    repository::save_cuotas_table(&tx, &cuotas_to_save)?;
     repository::save_app_module(&tx, "distribucion_os_percentajes", &distribucion_to_save)?;
 
     tx.commit()?;
