@@ -133,3 +133,10 @@ Credenciales por defecto (cambiar en Configuración → Usuarios): usuario `Admi
 - Contraseñas de ingreso: hash PBKDF2 en `auth-accounts.json` (`C:\Sanatorio\datos`); migración automática desde localStorage.
 - Clave SMTP Gmail: archivo separado (`smtp-secret.txt` en `C:\Sanatorio\datos`); no se incluye en export/backup JSON.
 - Los tests cubren parsing de la base (`parseAppData`), persistencia (`appStorage`), respaldos (`appBackup`) y pagos múltiples (`paymentDisplay`).
+
+## Variables de entorno (Etapa 2B)
+
+- SANATORIO_DATA_DIR: carpeta de datos (por defecto C:\Sanatorio\datos).
+- SANATORIO_BACKUP_DIR: carpeta de respaldos (por defecto C:\Sanatorio\respaldo).
+- SANATORIO_ROOT: carpeta raiz (por defecto C:\Sanatorio).
+

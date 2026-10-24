@@ -2,6 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::core::config::settings;
+
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
@@ -89,7 +91,7 @@ fn migrate_data_to_sanatorio_dir(app: &tauri::AppHandle, dir: &Path) -> Result<(
 }
 
 fn ensure_app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = PathBuf::from(DATA_DIR_ON_C);
+    let dir = settings::data_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     migrate_data_to_sanatorio_dir(app, &dir)?;
     if let Ok(old_dir) = app.path().app_data_dir() {
@@ -343,14 +345,13 @@ fn write_data_file(path: &Path, json: &str) -> Result<(), String> {
     atomic_replace(path, json.as_bytes())
 }
 
-fn try_backup_dir(path: &str) -> Option<PathBuf> {
-    let p = PathBuf::from(path);
-    fs::create_dir_all(&p).ok()?;
-    Some(p)
+fn try_backup_dir_path(path: &Path) -> Option<PathBuf> {
+    fs::create_dir_all(path).ok()?;
+    Some(path.to_path_buf())
 }
 
 fn backup_dirs_local_only(app: &tauri::AppHandle) -> Vec<PathBuf> {
-    if let Some(p) = try_backup_dir(BACKUP_DIR_ON_C) {
+    if let Some(p) = try_backup_dir_path(&settings::backup_dir()) {
         return vec![p];
     }
     if let Ok(app_data) = ensure_app_data_dir(app) {
@@ -388,7 +389,7 @@ fn dropbox_installed() -> bool {
 fn ensure_dropbox_backup_dirs() -> Vec<PathBuf> {
     dropbox_backup_dir_candidates()
         .into_iter()
-        .filter_map(|p| try_backup_dir(p.to_str()?))
+        .filter_map(|p| try_backup_dir_path(&p))
         .collect()
 }
 
@@ -418,7 +419,7 @@ fn secondary_drive_backup_dir_candidates() -> Vec<PathBuf> {
 fn ensure_secondary_drive_backup_dirs() -> Vec<PathBuf> {
     secondary_drive_backup_dir_candidates()
         .into_iter()
-        .filter_map(|p| try_backup_dir(p.to_str()?))
+        .filter_map(|p| try_backup_dir_path(&p))
         .collect()
 }
 
@@ -440,7 +441,7 @@ fn backup_dirs_for_rotation(app: &tauri::AppHandle) -> Vec<PathBuf> {
 
 /// Carpeta principal para listar/restaurar (siempre la PC local si existe).
 fn backup_dir_primary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    if let Some(p) = try_backup_dir(BACKUP_DIR_ON_C) {
+    if let Some(p) = try_backup_dir_path(&settings::backup_dir()) {
         return Ok(p);
     }
     backup_dirs_local_only(app)
@@ -448,8 +449,8 @@ fn backup_dir_primary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .next()
         .ok_or_else(|| {
             format!(
-                "No se pudo crear la carpeta de respaldo en {BACKUP_DIR_ON_C}.",
-                BACKUP_DIR_ON_C = BACKUP_DIR_ON_C,
+                "No se pudo crear la carpeta de respaldo en {}.",
+                settings::backup_dir().display()
             )
         })
 }

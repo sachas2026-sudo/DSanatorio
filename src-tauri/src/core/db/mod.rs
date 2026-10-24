@@ -1,7 +1,7 @@
 pub mod connection;
 pub mod migrations;
 
-pub use connection::{open_connection, db_file_path, json_export_path, DB_FILE};
+pub use connection::{open_connection, db_file_path, json_export_path, DB_FILE, backup_db_safe};
 
 use rusqlite::Transaction;
 use crate::core::error::AppError;
