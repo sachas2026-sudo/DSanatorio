@@ -513,6 +513,30 @@ fn opt_bool(value: &Option<bool>) -> &str {
     }
 }
 
+/// Carga un módulo almacenado como JSON (afiliados, planes, cuotas, distribución).
+pub fn load_app_module(conn: &Connection, key: &str) -> Result<Vec<serde_json::Value>, AppError> {
+    let json: Option<String> = conn
+        .query_row("SELECT json FROM app_modules WHERE key = ?1", params![key], |row| row.get(0))
+        .ok();
+    match json {
+        Some(raw) if !raw.trim().is_empty() => {
+            Ok(serde_json::from_str(&raw).unwrap_or_default())
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// Guarda un módulo como JSON en app_modules.
+pub fn save_app_module(tx: &Transaction<'_>, key: &str, values: &[serde_json::Value]) -> Result<(), AppError> {
+    let json = serde_json::to_string(values)
+        .map_err(|e| AppError::Validation(format!("JSON inválido para {key}: {e}")))?;
+    tx.execute(
+        "INSERT OR REPLACE INTO app_modules (key, json) VALUES (?1, ?2)",
+        params![key, json],
+    )?;
+    Ok(())
+}
+
 pub fn save_settings(tx: &Transaction<'_>, settings: &AppSettings) -> Result<(), AppError> {
     let mut stmt = tx.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)")?;
     stmt.execute(params!["email", settings.email])?;

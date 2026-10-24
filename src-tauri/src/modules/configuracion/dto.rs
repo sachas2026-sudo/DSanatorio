@@ -188,4 +188,12 @@ pub struct AppData {
     #[serde(default)]
     pub motivos_consulta_custom: Vec<String>,
     pub settings: AppSettings,
+    #[serde(default)]
+    pub afiliados: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub planes_afiliados: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub cuotas_afiliados: Option<Vec<serde_json::Value>>,
+    #[serde(default, rename = "distribucionOSPercentajes")]
+    pub distribucion_os_percentajes: Option<Vec<serde_json::Value>>,
 }

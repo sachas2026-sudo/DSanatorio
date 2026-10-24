@@ -105,6 +105,11 @@ pub fn load_app_data() -> Result<AppData, AppError> {
     
     let settings = repository::load_settings(&conn)?;
 
+    let afiliados = repository::load_app_module(&conn, "afiliados")?;
+    let planes_afiliados = repository::load_app_module(&conn, "planes_afiliados")?;
+    let cuotas_afiliados = repository::load_app_module(&conn, "cuotas_afiliados")?;
+    let distribucion_os_percentajes = repository::load_app_module(&conn, "distribucion_os_percentajes")?;
+
     Ok(AppData {
         patients,
         doctors,
@@ -121,6 +126,10 @@ pub fn load_app_data() -> Result<AppData, AppError> {
         localidades_custom,
         motivos_consulta_custom,
         settings,
+        afiliados: Some(afiliados),
+        planes_afiliados: Some(planes_afiliados),
+        cuotas_afiliados: Some(cuotas_afiliados),
+        distribucion_os_percentajes: Some(distribucion_os_percentajes),
     })
 }
 
@@ -137,6 +146,25 @@ pub fn replace_app_data_direct(data: &AppData) -> Result<(), AppError> {
 
 fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppError> {
     let mut conn = db::open_connection()?;
+
+    // Preservar módulos si la versión anterior no los envía (None).
+    let afiliados_to_save = match &data.afiliados {
+        Some(v) => v.clone(),
+        None => repository::load_app_module(&conn, "afiliados").unwrap_or_default(),
+    };
+    let planes_to_save = match &data.planes_afiliados {
+        Some(v) => v.clone(),
+        None => repository::load_app_module(&conn, "planes_afiliados").unwrap_or_default(),
+    };
+    let cuotas_to_save = match &data.cuotas_afiliados {
+        Some(v) => v.clone(),
+        None => repository::load_app_module(&conn, "cuotas_afiliados").unwrap_or_default(),
+    };
+    let distribucion_to_save = match &data.distribucion_os_percentajes {
+        Some(v) => v.clone(),
+        None => repository::load_app_module(&conn, "distribucion_os_percentajes").unwrap_or_default(),
+    };
+
     let tx = conn.transaction()?;
 
     if replace_all {
@@ -155,7 +183,8 @@ fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppE
              DELETE FROM obras_sociales_custom;
              DELETE FROM localidades_custom;
              DELETE FROM motivos_consulta_custom;
-             DELETE FROM app_settings;"
+             DELETE FROM app_settings;
+             DELETE FROM app_modules;"
         )?;
     }
 
@@ -237,6 +266,11 @@ fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppE
     repository::save_custom_list(&tx, "motivos_consulta_custom", &data.motivos_consulta_custom)?;
 
     repository::save_settings(&tx, &data.settings)?;
+
+    repository::save_app_module(&tx, "afiliados", &afiliados_to_save)?;
+    repository::save_app_module(&tx, "planes_afiliados", &planes_to_save)?;
+    repository::save_app_module(&tx, "cuotas_afiliados", &cuotas_to_save)?;
+    repository::save_app_module(&tx, "distribucion_os_percentajes", &distribucion_to_save)?;
 
     tx.commit()?;
     Ok(())
@@ -465,7 +499,11 @@ mod tests {
                 "clave": "secreto",
                 "telefono": "654321",
                 "cuit": "20-12345678-9"
-            }
+            },
+            "afiliados": [{"id":"a1","nombre":"Afiliado1"}],
+            "planesAfiliados": [{"id":"pl1","nombre":"Plan1"}],
+            "cuotasAfiliados": [{"id":"cu1","monto":100}],
+            "distribucionOSPercentajes": [{"os":"OSDE","pct":10}]
         }"#;
 
         fs::write(&json_path, test_json.as_bytes()).unwrap();
@@ -491,6 +529,11 @@ mod tests {
         assert_eq!(loaded.doctors[0].nombre, "Dr. House");
         assert_eq!(loaded.doctors[0].alias, Some("House".to_string()));
         assert_eq!(loaded.doctors[0].obras_sociales.as_ref().unwrap()[0], "OSDE");
+
+        assert_eq!(loaded.afiliados.as_ref().unwrap().len(), 1);
+        assert_eq!(loaded.planes_afiliados.as_ref().unwrap().len(), 1);
+        assert_eq!(loaded.cuotas_afiliados.as_ref().unwrap().len(), 1);
+        assert_eq!(loaded.distribucion_os_percentajes.as_ref().unwrap().len(), 1);
 
         assert_eq!(loaded.horarios.len(), 1);
         assert_eq!(loaded.horarios[0].hora_inicio, "08:00");
@@ -520,7 +563,18 @@ mod tests {
         assert_eq!(loaded.settings.email, "clinica@test.com");
         assert_eq!(loaded.settings.cuit, "20-12345678-9");
 
-        // 5. Probar guardado round-trip y orphan cleanup
+        // 5a. Guardado parcial (sin módulos) no borra los existentes
+        let mut partial = loaded.clone();
+        partial.afiliados = None;
+        partial.planes_afiliados = None;
+        partial.cuotas_afiliados = None;
+        partial.distribucion_os_percentajes = None;
+        save_app_data_direct(&partial).unwrap();
+        let preserved = load_app_data().unwrap();
+        assert_eq!(preserved.afiliados.as_ref().unwrap().len(), 1);
+        assert_eq!(preserved.planes_afiliados.as_ref().unwrap().len(), 1);
+
+        // 5b. Probar guardado round-trip y orphan cleanup
         let mut modified_data = loaded.clone();
         modified_data.patients.retain(|p| p.id != "pat-2"); // Eliminar solo el segundo paciente
         save_app_data_direct(&modified_data).unwrap();
@@ -529,5 +583,19 @@ mod tests {
         assert_eq!(reloaded.patients.len(), 1); // Queda 1 paciente (pat-1)
         assert_eq!(reloaded.patients[0].id, "pat-1");
         assert_eq!(reloaded.doctors.len(), 1);  // Los demás siguen estando
+
+        // 6. Base sin módulos (JSON legacy) carga bien
+        let temp_dir2 = TempDir::new().unwrap();
+        std::env::set_var("SANATORIO_DATA_DIR", temp_dir2.path().to_str().unwrap());
+        let json_path2 = temp_dir2.path().join("sanatorio-datos.json");
+        let json2 = r#"{
+            "patients": [{"id":"p2","nombre":"Maria","apellido":"Gomez","dni":"2","telefono":"","email":"","domicilio":"","localidad":"","fechaNacimiento":"","obraSocial":"","notas":"","activo":true}],
+            "doctors": [], "horarios": [], "diasLibres": [], "atencionesMensuales": [], "appointments": [], "payments": [], "atencionesSinTurno": [], "pagosCancelados": [], "especialidadesCustom": [], "obrasSocialesCustom": [], "localidadesCustom": [], "motivosConsultaCustom": [], "settings": {"email":"","emailGerente":"","telefonoGerente":"","clave":"","telefono":"","cuit":""}
+        }"#;
+        fs::write(&json_path2, json2.as_bytes()).unwrap();
+        ensure_initialized().unwrap();
+        let loaded2 = load_app_data().unwrap();
+        assert_eq!(loaded2.patients.len(), 1);
+        assert_eq!(loaded2.afiliados.as_ref().unwrap().len(), 0);
     }
 }

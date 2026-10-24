@@ -37,11 +37,9 @@ pub fn sanatorio_root() -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
-    cached_path("data", || {
-        env_trim("SANATORIO_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DATA_DIR_ON_C))
-    })
+    env_trim("SANATORIO_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DATA_DIR_ON_C))
 }
 
 pub fn backup_dir() -> PathBuf {

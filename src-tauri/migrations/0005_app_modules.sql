@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS app_modules (
+    key TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+);

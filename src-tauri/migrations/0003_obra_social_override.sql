@@ -1,2 +1,2 @@
-ALTER TABLE appointments ADD COLUMN obra_social_override TEXT;
-ALTER TABLE payments ADD COLUMN obra_social_override TEXT;
+-- Columna ya incluida en 0001_init.sql; migración mantenida como no-op por compatibilidad.
+SELECT 1;
