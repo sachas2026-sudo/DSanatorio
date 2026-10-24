@@ -1,5 +1,6 @@
 mod core;
 mod modules;
+mod server;
 mod whatsapp;
 
 use tauri::Manager;
@@ -78,4 +79,8 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+pub fn run_server() {
+    server::run_server();
 }
