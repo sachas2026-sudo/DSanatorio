@@ -23,12 +23,12 @@ pub fn json_export_path() -> Result<PathBuf, AppError> {
 
 pub fn open_connection() -> Result<Connection, AppError> {
     let path = db_file_path()?;
-    let conn = Connection::open(&path)
+    let mut conn = Connection::open(&path)
         .map_err(|e| AppError::Database(format!("No se pudo abrir la base SQLite: {e}")))?;
     
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
     
-    super::migrations::initialize_schema(&conn)?;
+    super::migrations::initialize_schema(&mut conn)?;
     
     Ok(conn)
 }

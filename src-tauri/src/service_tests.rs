@@ -99,10 +99,10 @@ mod tests {
         std::env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());
         
         // Base vacía (no hay tablas, no hay migración 0006)
-        let conn = open_connection().unwrap();
+        let mut conn = open_connection().unwrap();
         
         // Simular el arranque de la app (que corre initialize_schema)
-        crate::core::db::migrations::initialize_schema(&conn).unwrap();
+        crate::core::db::migrations::initialize_schema(&mut conn).unwrap();
         
         // Verificar que la tabla afiliados existe ahora
         let exists: bool = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='afiliados'", [], |r| r.get::<_, i32>(0)).unwrap() > 0;
