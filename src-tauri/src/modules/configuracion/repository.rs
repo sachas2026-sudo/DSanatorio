@@ -1,9 +1,9 @@
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, Transaction, OptionalExtension};
 use crate::core::error::AppError;
 use super::dto::*;
 
 pub fn load_patients(conn: &Connection) -> Result<Vec<Patient>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo FROM patients")?;
+    let mut stmt = conn.prepare("SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version, deleted_at FROM patients WHERE deleted_at IS NULL")?;
     let rows = stmt.query_map([], |row| {
         Ok(Patient {
             id: row.get(0)?,
@@ -18,9 +18,11 @@ pub fn load_patients(conn: &Connection) -> Result<Vec<Patient>, AppError> {
             obra_social: row.get(9)?,
             notas: row.get(10)?,
             activo: Some(row.get::<_, i32>(11)? != 0),
+            version: row.get(12)?,
+            deleted_at: row.get(13)?,
         })
     })?;
-
+    
     let mut result = Vec::new();
     for r in rows {
         result.push(r?);
@@ -29,27 +31,55 @@ pub fn load_patients(conn: &Connection) -> Result<Vec<Patient>, AppError> {
 }
 
 pub fn save_patients(tx: &Transaction<'_>, patients: &[Patient]) -> Result<(), AppError> {
-    let mut stmt = tx.prepare(
-        "INSERT OR REPLACE INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
-    )?;
-
     for p in patients {
         let activo_val = if p.activo.unwrap_or(true) { 1 } else { 0 };
-        stmt.execute(params![
-            p.id,
-            p.nombre,
-            p.apellido,
-            p.dni,
-            p.telefono,
-            p.email,
-            p.domicilio,
-            p.localidad,
-            p.fecha_nacimiento,
-            p.obra_social,
-            p.notas,
-            activo_val
-        ])?;
+        
+        let existing = tx.query_row(
+            "SELECT nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version FROM patients WHERE id = ?1", 
+            params![p.id], 
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, i32>(10)?,
+                    row.get::<_, i32>(11)?,
+                ))
+            }
+        ).optional()?;
+
+        let changed = match &existing {
+            Some((n, a, d, t, e, dom, l, fn_date, os, nt, act, _v)) => {
+                n != &p.nombre || a != &p.apellido || d != &p.dni || t != &p.telefono || e != &p.email ||
+                dom != &p.domicilio || l != &p.localidad || fn_date != &p.fecha_nacimiento ||
+                os != &p.obra_social || nt != &p.notas || 
+                (*act != 0 && !p.activo.unwrap_or(true)) || 
+                (*act == 0 && p.activo.unwrap_or(true))
+            }
+            None => true,
+        };
+
+        if changed {
+            if existing.is_some() {
+                tx.execute(
+                    "UPDATE patients SET nombre=?1, apellido=?2, dni=?3, telefono=?4, email=?5, domicilio=?6, localidad=?7, fecha_nacimiento=?8, obra_social=?9, notas=?10, activo=?11, version=version+1 WHERE id=?12",
+                    params![p.nombre, p.apellido, p.dni, p.telefono, p.email, p.domicilio, p.localidad, p.fecha_nacimiento, p.obra_social, p.notas, activo_val, p.id],
+                )?;
+            } else {
+                tx.execute(
+                    "INSERT INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    params![p.id, p.nombre, p.apellido, p.dni, p.telefono, p.email, p.domicilio, p.localidad, p.fecha_nacimiento, p.obra_social, p.notas, activo_val, 1],
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -78,7 +108,7 @@ pub fn load_doctors(conn: &Connection) -> Result<Vec<Doctor>, AppError> {
             activo: Some(row.get::<_, i32>(15)? != 0),
         })
     })?;
-
+    
     let mut result = Vec::new();
     for r in rows {
         result.push(r?);

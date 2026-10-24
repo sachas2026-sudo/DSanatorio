@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+fn default_version() -> i32 { 1 }
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Patient {
@@ -15,6 +17,10 @@ pub struct Patient {
     pub obra_social: String,
     pub notas: String,
     pub activo: Option<bool>,
+    #[serde(default = "default_version")]
+    pub version: i32,
+    #[serde(default)]
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

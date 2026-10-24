@@ -30,13 +30,12 @@ fn config_str(key: &str) -> Option<String> {
 
 fn cached_path(key: &'static str, build: fn() -> PathBuf) -> PathBuf {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
-    static DATA: OnceLock<PathBuf> = OnceLock::new();
-    static BACKUP: OnceLock<PathBuf> = OnceLock::new();
-
     match key {
         "root" => ROOT.get_or_init(build).clone(),
-        "data" => DATA.get_or_init(build).clone(),
-        "backup" => BACKUP.get_or_init(build).clone(),
+        // data y backup no se cachean: SANATORIO_DATA_DIR / SANATORIO_BACKUP_DIR
+        // pueden cambiar entre tests o entre invocaciones de la app.
+        "data" => build(),
+        "backup" => build(),
         _ => build(),
     }
 }
