@@ -53,4 +53,5 @@ tokio-rustls = "0.26"
 rcgen = "0.13"
 
 [dev-dependencies]
+axum-test = "17.0.2"
 tempfile = "3.14"

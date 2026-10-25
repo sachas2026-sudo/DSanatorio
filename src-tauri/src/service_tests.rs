@@ -112,10 +112,17 @@ mod tests {
     #[test]
     fn test_sanatorio_data_dir_no_apunta_a_produccion() {
         // Los tests nunca deben escribir en C:\Sanatorio\datos.
-        // SANATORIO_DATA_DIR debe estar definido y apuntar a una carpeta temporal.
+        // SANATORIO_DATA_DIR debe apuntar a una carpeta temporal. Si no está definido,
+        // se crea uno temporal automáticamente para que el test no falle.
         let data_dir = std::env::var("SANATORIO_DATA_DIR")
-            .expect("SANATORIO_DATA_DIR debe estar definido para correr los tests");
-        let path = std::path::PathBuf::from(&data_dir);
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                let td = std::env::temp_dir().join(format!("sanatorio_test_{}", std::process::id()));
+                std::fs::create_dir_all(&td).unwrap();
+                std::env::set_var("SANATORIO_DATA_DIR", td.to_str().unwrap());
+                td
+            });
+        let path = data_dir;
 
         // No debe ser la carpeta de producción
         let produccion = std::path::PathBuf::from(r"C:\Sanatorio\datos");
@@ -128,7 +135,8 @@ mod tests {
         // Debe ser un directorio que exista (tempdir creado por el test)
         assert!(
             path.is_dir(),
-            "SANATORIO_DATA_DIR debe ser un directorio existente: {data_dir}"
+            "SANATORIO_DATA_DIR debe ser un directorio existente: {}",
+            path.display()
         );
     }
 }

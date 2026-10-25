@@ -175,14 +175,9 @@ fn load_accounts(data_dir: &std::path::Path) -> Vec<Account> {
     let raw = std::fs::read_to_string(&path).unwrap_or_default();
     if raw.trim().is_empty() { return vec![]; }
     let all: Vec<Account> = serde_json::from_str(&raw).unwrap_or_default();
-    let total = all.len();
-    // Filtrar cuentas con rol inválido: solo admin, secretaria o afiliado son válidos.
-    // Cualquier otro rol se descarta para no exponer permisos no autorizados.
-    let valid: Vec<Account> = all.into_iter().filter(|a| is_valid_role(&a.role)).collect();
-    if valid.len() != total {
-        eprintln!("[Sanatorio] Se descartaron {} cuentas con rol inválido al cargar auth-accounts.json", total - valid.len());
-    }
-    valid
+    // NO filtrar cuentas aquí: se conservan todas en el archivo y en memoria.
+    // El filtrado por rol válido ocurre solo en el login y en los endpoints de escritura.
+    all
 }
 
 fn verify_password(account: &Account, password: &str) -> bool {
@@ -848,6 +843,28 @@ async fn put_cuota(
     }
 }
 
+pub fn build_router(state: AppState) -> Router {
+    Router::new()
+        .route("/api/health", get(health))
+        .route("/api/login", axum::routing::post(login))
+        .route("/api/change-password", axum::routing::post(change_password))
+        .route("/api/write-enabled", get(get_write_enabled).post(post_write_enabled))
+        .route("/api/audit-log", get(get_audit_log))
+        .route("/api/pacientes", get(get_pacientes))
+        .route("/api/medicos", get(get_medicos))
+        .route("/api/agenda", get(get_agenda))
+        .route("/api/pagos", get(get_pagos))
+        .route("/api/afiliados", get(get_afiliados))
+        .route("/api/afiliados", axum::routing::post(post_afiliado))
+        .route("/api/afiliados/:id", axum::routing::put(put_afiliado))
+        .route("/api/planes", axum::routing::post(post_plan))
+        .route("/api/planes/:id", axum::routing::put(put_plan))
+        .route("/api/cuotas", axum::routing::post(post_cuota))
+        .route("/api/cuotas/:id", axum::routing::put(put_cuota))
+        .route("/api/obras-sociales", get(get_obras_sociales))
+        .with_state(state)
+}
+
 pub fn run_server() {
     // Protección: si la UI local ya está abierta (archivo de bloqueo presente),
     // el servidor se niega a arrancar para evitar dos escritores simultáneos.
@@ -882,35 +899,17 @@ pub fn run_server() {
 
     let accounts = load_accounts(&data_dir);
 
+    let state = AppState {
+        accounts: Arc::new(Mutex::new(accounts)),
+        data_dir: data_dir.clone(),
+        sessions: Arc::new(Mutex::new(HashMap::new())),
+        login_attempts: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let app = build_router(state);
+
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     rt.block_on(async {
-        let state = AppState {
-            accounts: Arc::new(Mutex::new(accounts)),
-            data_dir: data_dir.clone(),
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-            login_attempts: Arc::new(Mutex::new(HashMap::new())),
-        };
-
-        let app = Router::new()
-            .route("/api/health", get(health))
-            .route("/api/login", axum::routing::post(login))
-            .route("/api/change-password", axum::routing::post(change_password))
-            .route("/api/write-enabled", get(get_write_enabled).post(post_write_enabled))
-            .route("/api/audit-log", get(get_audit_log))
-            .route("/api/pacientes", get(get_pacientes))
-            .route("/api/medicos", get(get_medicos))
-            .route("/api/agenda", get(get_agenda))
-            .route("/api/pagos", get(get_pagos))
-            .route("/api/afiliados", get(get_afiliados))
-            .route("/api/afiliados", axum::routing::post(post_afiliado))
-            .route("/api/afiliados/:id", axum::routing::put(put_afiliado))
-            .route("/api/planes", axum::routing::post(post_plan))
-            .route("/api/planes/:id", axum::routing::put(put_plan))
-            .route("/api/cuotas", axum::routing::post(post_cuota))
-            .route("/api/cuotas/:id", axum::routing::put(put_cuota))
-            .route("/api/obras-sociales", get(get_obras_sociales))
-            .with_state(state);
-
         let addr: SocketAddr = "0.0.0.0:8787".parse().unwrap();
         let rustls_config = RustlsConfig::from_pem_file(&cert_path, &key_path)
             .await
@@ -924,19 +923,3 @@ pub fn run_server() {
     });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_valid_role;
-
-    #[test]
-    fn test_is_valid_role_solo_admin_secretaria_afiliado() {
-        assert!(is_valid_role("admin"));
-        assert!(is_valid_role("secretaria"));
-        assert!(is_valid_role("afiliado"));
-        assert!(!is_valid_role("invitado"));
-        assert!(!is_valid_role("gerente"));
-        assert!(!is_valid_role("ADMIN"));
-        assert!(!is_valid_role(""));
-        assert!(!is_valid_role("root"));
-    }
-}

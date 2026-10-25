@@ -6,7 +6,7 @@ use lettre::{SmtpTransport, Transport};
 use serde::Deserialize;
 use tauri_plugin_opener::OpenerExt;
 
-/// Mismo contrato que Admin (`send_email_gmail`): parámetro `payload` en el invoke.
+/// Mismo contrato que Admi (`send_email_gmail`): parámetro `payload` en el invoke.
 #[derive(Deserialize)]
 pub struct SendEmailGmailPayload {
     pub from_email: String,
@@ -173,7 +173,7 @@ fn finish_message(
     }
 }
 
-/// Envío Gmail — igual que Admin: `smtp.gmail.com` + relay + contraseña de aplicación 16 caracteres.
+/// Envío Gmail — igual que Admi: `smtp.gmail.com` + relay + contraseña de aplicación 16 caracteres.
 #[tauri::command]
 pub async fn send_email_gmail(payload: SendEmailGmailPayload) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -287,7 +287,7 @@ pub fn send_agenda_email(payload: SendEmailPayload) -> Result<(), String> {
     }
     if is_gmail_address(from) {
         return Err(
-            "Para @gmail.com usá una contraseña de aplicación de 16 caracteres; el envío va por Gmail como en Admin."
+            "Para @gmail.com usá una contraseña de aplicación de 16 caracteres; el envío va por Gmail como en Admi."
                 .into(),
         );
     }

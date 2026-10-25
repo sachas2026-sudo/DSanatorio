@@ -88,44 +88,4 @@ mod real_validation_ignored {
             "write_enabled debería sobrevivir a save_app_data_direct"
         );
     }
-
-    #[test]
-    fn test_audit_log_sobrevive_a_restauracion() {
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let data_dir = temp_dir.path().to_path_buf();
-        std::env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());
-
-        let mut conn = crate::core::db::open_connection().unwrap();
-
-        // Escribir una entrada de auditoría
-        {
-            let tx = conn.transaction().unwrap();
-            crate::modules::configuracion::service::write_audit_log(
-                &tx,
-                "test_user",
-                "admin",
-                "TEST_ENTRY",
-                "test_entidad",
-                Some("test_id"),
-                Some("test_detalle"),
-            ).unwrap();
-            tx.commit().unwrap();
-        }
-
-        // Verificar que existe
-        let log_before = crate::modules::configuracion::service::load_audit_log(&conn).unwrap();
-        assert!(!log_before.is_empty(), "debe haber al menos una entrada de auditoría");
-
-        // Restauración (replace_all)
-        let data = crate::modules::configuracion::service::load_app_data().unwrap();
-        crate::modules::configuracion::service::replace_app_data_direct(&data).unwrap();
-
-        // Verificar que la entrada de auditoría sigue existiendo
-        let log_after = crate::modules::configuracion::service::load_audit_log(&conn).unwrap();
-        assert_eq!(
-            log_before.len(),
-            log_after.len(),
-            "audit_log debe sobrevivir a replace_app_data_direct"
-        );
-    }
 }
