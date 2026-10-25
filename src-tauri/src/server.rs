@@ -242,6 +242,26 @@ fn role_allowed(role: &str, path: &str) -> bool {
     }
 }
 
+/// Verifica que el usuario no tenga must_change_password pendiente.
+/// Si lo tiene, solo puede acceder a /api/change-password.
+fn check_password_change_required(session: &Session) -> Result<(), StatusCode> {
+    if session.must_change_password {
+        Err(StatusCode::FORBIDDEN)
+    } else {
+        Ok(())
+    }
+}
+
+async fn check_write_enabled(state: &AppState) -> Result<(), StatusCode> {
+    let conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let enabled = service::get_write_enabled(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if !enabled {
+        Err(StatusCode::FORBIDDEN)
+    } else {
+        Ok(())
+    }
+}
+
 async fn health() -> Json<Health> {
     Json(Health { status: "ok", version: "15.0.0" })
 }
@@ -307,6 +327,7 @@ async fn login(State(state): State<AppState>, Json(body): Json<LoginReq>) -> Res
 
 async fn get_pacientes(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
     let session = authenticate_request(&state, &headers, None)?;
+    check_password_change_required(&session)?;
     if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
     if !role_allowed(&session.role, "/api/pacientes") { return Err(StatusCode::FORBIDDEN); }
     let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -315,6 +336,7 @@ async fn get_pacientes(State(state): State<AppState>, headers: HeaderMap) -> Res
 
 async fn get_medicos(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
     let session = authenticate_request(&state, &headers, None)?;
+    check_password_change_required(&session)?;
     if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
     if !role_allowed(&session.role, "/api/medicos") { return Err(StatusCode::FORBIDDEN); }
     let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -323,6 +345,7 @@ async fn get_medicos(State(state): State<AppState>, headers: HeaderMap) -> Resul
 
 async fn get_agenda(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
     let session = authenticate_request(&state, &headers, None)?;
+    check_password_change_required(&session)?;
     if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
     if !role_allowed(&session.role, "/api/agenda") { return Err(StatusCode::FORBIDDEN); }
     let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -331,6 +354,7 @@ async fn get_agenda(State(state): State<AppState>, headers: HeaderMap) -> Result
 
 async fn get_pagos(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
     let session = authenticate_request(&state, &headers, None)?;
+    check_password_change_required(&session)?;
     if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
     if !role_allowed(&session.role, "/api/pagos") { return Err(StatusCode::FORBIDDEN); }
     let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -339,6 +363,7 @@ async fn get_pagos(State(state): State<AppState>, headers: HeaderMap) -> Result<
 
 async fn get_afiliados(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
     let session = authenticate_request(&state, &headers, None)?;
+    check_password_change_required(&session)?;
     if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
     if !role_allowed(&session.role, "/api/afiliados") { return Err(StatusCode::FORBIDDEN); }
     let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -347,6 +372,7 @@ async fn get_afiliados(State(state): State<AppState>, headers: HeaderMap) -> Res
 
 async fn get_obras_sociales(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
     let session = authenticate_request(&state, &headers, None)?;
+    check_password_change_required(&session)?;
     if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
     if !role_allowed(&session.role, "/api/obras-sociales") { return Err(StatusCode::FORBIDDEN); }
     let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -379,7 +405,7 @@ fn save_accounts(state: &AppState) -> Result<(), String> {
 }
 
 async fn change_password(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<ChangePasswordReq>) -> Result<impl IntoResponse, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+    let session = authenticate_request(&state, &headers, None)?; /* change-password está exenta */
     if validate_new_password(&session.username, &body.new_password).is_err() { return Err(StatusCode::BAD_REQUEST); }
     let mut accounts = state.accounts.lock().unwrap();
     let account = accounts.iter_mut().find(|a| a.username.eq_ignore_ascii_case(&session.username))
@@ -404,6 +430,7 @@ async fn get_write_enabled(
     headers: HeaderMap,
 ) -> Result<Json<WriteEnabledRes>, StatusCode> {
     let _session = authenticate_request(&state, &headers, None)?; // auth requerido
+    check_password_change_required(&_session)?;
     let conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let enabled = service::get_write_enabled(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(WriteEnabledRes { write_enabled: enabled }))
@@ -415,6 +442,7 @@ async fn post_write_enabled(
     Json(body): Json<WriteEnabledReq>,
 ) -> Result<Json<WriteEnabledRes>, StatusCode> {
     let session = authenticate_request(&state, &headers, None)?;
+    check_password_change_required(&session)?;
     if session.role != "admin" {
         // Auditoría PERMISO_DENEGADO
         let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -452,6 +480,7 @@ async fn get_audit_log(
     headers: HeaderMap,
 ) -> Result<Json<Vec<crate::modules::configuracion::dto::AuditLogEntry>>, StatusCode> {
     let session = authenticate_request(&state, &headers, None)?;
+    check_password_change_required(&session)?;
     if session.role != "admin" {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -483,6 +512,8 @@ async fn post_afiliado(
     Json(body): Json<AfiliadoReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     if !can_write_afiliados(&session.role) {
         let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
@@ -546,6 +577,8 @@ async fn put_afiliado(
     Json(body): Json<AfiliadoReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     if !can_write_afiliados(&session.role) {
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
     }
@@ -594,6 +627,8 @@ async fn post_plan(
     Json(body): Json<PlanReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     if !can_write_afiliados(&session.role) {
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
     }
@@ -643,6 +678,8 @@ async fn put_plan(
     Json(body): Json<PlanReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     if !can_write_afiliados(&session.role) {
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
     }
@@ -691,6 +728,8 @@ async fn post_cuota(
     Json(body): Json<CuotaReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     if !can_write_afiliados(&session.role) {
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
     }
@@ -740,6 +779,8 @@ async fn put_cuota(
     Json(body): Json<CuotaReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     if !can_write_afiliados(&session.role) {
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
     }
