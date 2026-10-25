@@ -150,7 +150,7 @@ fn load_accounts(data_dir: &std::path::Path) -> Vec<Account> {
         let p_andrea = uuid::Uuid::new_v4().to_string()[..12].to_string();
         let p_afiliados = uuid::Uuid::new_v4().to_string()[..12].to_string();
         let accounts = vec![
-            serde_json::json!({"username":"Admi","role":"admin","displayName":"Admi","password":p_admi,"mustChangePassword":true}),
+            serde_json::json!({"username":"Admin","role":"admin","displayName":"Admin","password":p_admi,"mustChangePassword":true}),
             serde_json::json!({"username":"Aguirre Mary","role":"secretaria","displayName":"Aguirre Mary","turno":"Mañana","password":p_mary,"mustChangePassword":true}),
             serde_json::json!({"username":"Barua Andrea","role":"secretaria","displayName":"Barua Andrea","turno":"Tarde","password":p_andrea,"mustChangePassword":true}),
             serde_json::json!({"username":"Afiliados","role":"afiliado","displayName":"Afiliados","password":p_afiliados,"mustChangePassword":true}),
@@ -161,7 +161,7 @@ fn load_accounts(data_dir: &std::path::Path) -> Vec<Account> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
             let file_path = parent.join("cuentas-iniciales.txt");
-            let _ = std::fs::write(&file_path, format!("Admi: {}\nAguirre Mary: {}\nBarua Andrea: {}\nAfiliados: {}", p_admi, p_mary, p_andrea, p_afiliados));
+            let _ = std::fs::write(&file_path, format!("Admin: {}\nAguirre Mary: {}\nBarua Andrea: {}\nAfiliados: {}", p_admi, p_mary, p_andrea, p_afiliados));
             let user = std::env::var("USERNAME").unwrap_or_else(|_| "Administrador".to_string());
             let args: Vec<String> = vec![
                 file_path.to_string_lossy().to_string(),
@@ -174,7 +174,15 @@ fn load_accounts(data_dir: &std::path::Path) -> Vec<Account> {
     }
     let raw = std::fs::read_to_string(&path).unwrap_or_default();
     if raw.trim().is_empty() { return vec![]; }
-    serde_json::from_str(&raw).unwrap_or_default()
+    let all: Vec<Account> = serde_json::from_str(&raw).unwrap_or_default();
+    let total = all.len();
+    // Filtrar cuentas con rol inválido: solo admin, secretaria o afiliado son válidos.
+    // Cualquier otro rol se descarta para no exponer permisos no autorizados.
+    let valid: Vec<Account> = all.into_iter().filter(|a| is_valid_role(&a.role)).collect();
+    if valid.len() != total {
+        eprintln!("[Sanatorio] Se descartaron {} cuentas con rol inválido al cargar auth-accounts.json", total - valid.len());
+    }
+    valid
 }
 
 fn verify_password(account: &Account, password: &str) -> bool {
@@ -242,6 +250,12 @@ fn role_allowed(role: &str, path: &str) -> bool {
     }
 }
 
+/// Devuelve true solo si el rol es uno de los válidos: admin, secretaria o afiliado.
+/// Cualquier otro rol se considera inválido y se deniega por defecto.
+fn is_valid_role(role: &str) -> bool {
+    matches!(role, "admin" | "secretaria" | "afiliado")
+}
+
 /// Verifica que el usuario no tenga must_change_password pendiente.
 /// Si lo tiene, solo puede acceder a /api/change-password.
 fn check_password_change_required(session: &Session) -> Result<(), StatusCode> {
@@ -278,6 +292,17 @@ async fn login(State(state): State<AppState>, Json(body): Json<LoginReq>) -> Res
             let display_name = account.display_name.clone();
             let must_change = account.must_change_password;
             drop(accounts);
+
+            // Rechazar roles desconocidos: solo admin, secretaria o afiliado pueden iniciar sesión.
+            if !is_valid_role(&role) {
+                // Auditoría LOGIN_FAIL por rol inválido
+                let detalle = format!("rol invalido: {}", role);
+                let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                let tx = conn.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                service::write_audit_log(&tx, &username, &role, "LOGIN_FAIL", "autenticacion", None, Some(&detalle)).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                return Err(StatusCode::FORBIDDEN);
+            }
 
             let token = Uuid::new_v4().to_string();
             let session = Session {
@@ -897,4 +922,21 @@ pub fn run_server() {
             .await
             .expect("server");
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_role;
+
+    #[test]
+    fn test_is_valid_role_solo_admin_secretaria_afiliado() {
+        assert!(is_valid_role("admin"));
+        assert!(is_valid_role("secretaria"));
+        assert!(is_valid_role("afiliado"));
+        assert!(!is_valid_role("invitado"));
+        assert!(!is_valid_role("gerente"));
+        assert!(!is_valid_role("ADMIN"));
+        assert!(!is_valid_role(""));
+        assert!(!is_valid_role("root"));
+    }
 }

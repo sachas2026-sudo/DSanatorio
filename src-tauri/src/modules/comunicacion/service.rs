@@ -289,7 +289,7 @@ pub fn send_agenda_email(payload: SendEmailPayload) -> Result<(), AppError> {
     }
     if is_gmail_address(from) {
         return Err(AppError::Email(
-            "Para @gmail.com usá una contraseña de aplicación de 16 caracteres; el envío va por Gmail como en Admi.".into(),
+            "Para @gmail.com usá una contraseña de aplicación de 16 caracteres; el envío va por Gmail como en Admin.".into(),
         ));
     }
     let password = clean_app_password(&payload.password);
