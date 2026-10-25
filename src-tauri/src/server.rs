@@ -16,12 +16,14 @@ use axum_server::tls_rustls::RustlsConfig;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use pbkdf2::pbkdf2_hmac;
 use rcgen::generate_simple_self_signed;
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::core::config::settings;
 use crate::core::db;
+use crate::modules::configuracion::dto::{Afiliado, CuotaAfiliado, PlanAfiliado, WriteResult};
 use crate::modules::configuracion::service;
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -84,6 +86,48 @@ struct WriteEnabledReq {
 #[derive(Serialize)]
 struct WriteEnabledRes {
     write_enabled: bool,
+}
+
+#[derive(Deserialize)]
+struct AfiliadoReq {
+    id: String,
+    nombre: String,
+    version: i32,
+}
+
+#[derive(Serialize)]
+struct AfiliadoRes {
+    id: String,
+    nombre: String,
+    version: i32,
+}
+
+#[derive(Deserialize)]
+struct PlanReq {
+    id: String,
+    nombre: String,
+    version: i32,
+}
+
+#[derive(Serialize)]
+struct PlanRes {
+    id: String,
+    nombre: String,
+    version: i32,
+}
+
+#[derive(Deserialize)]
+struct CuotaReq {
+    id: String,
+    monto: f64,
+    version: i32,
+}
+
+#[derive(Serialize)]
+struct CuotaRes {
+    id: String,
+    monto: f64,
+    version: i32,
 }
 
 #[derive(Deserialize)]
@@ -416,6 +460,328 @@ async fn get_audit_log(
     Ok(Json(log))
 }
 
+/// Verifica si un rol puede escribir afiliados/planes/cuotas.
+fn can_write_afiliados(role: &str) -> bool {
+    matches!(role, "afiliado" | "admin")
+}
+
+/// Helper: construye una respuesta 409 con el registro actual.
+fn conflict_response(current: Option<serde_json::Value>) -> (StatusCode, axum::Json<serde_json::Value>) {
+    (
+        StatusCode::CONFLICT,
+        axum::Json(serde_json::json!({
+            "error": "conflict",
+            "message": "El registro fue modificado por otro usuario",
+            "current": current
+        })),
+    )
+}
+
+async fn post_afiliado(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AfiliadoReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    if !can_write_afiliados(&session.role) {
+        let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        service::write_audit_log(
+            &tx,
+            &session.username,
+            &session.role,
+            "PERMISO_DENEGADO",
+            "afiliados",
+            Some(&body.id),
+            Some("intento de crear afiliado sin rol afiliado o admin"),
+        ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+    }
+
+    let afiliado = Afiliado { id: body.id.clone(), nombre: body.nombre.clone(), version: body.version };
+    match service::save_afiliado(&afiliado).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
+        WriteResult::Saved => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, nombre, version FROM afiliados WHERE id = ?1",
+                params![&body.id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            // Auditoría
+            let mut conn2 = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let tx = conn2.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            service::write_audit_log(
+                &tx,
+                &session.username,
+                &session.role,
+                "CREATE_AFILIADO",
+                "afiliados",
+                Some(&body.id),
+                Some("crear afiliado"),
+            ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            Ok(Json(serde_json::json!({
+                "id": body.id,
+                "nombre": body.nombre,
+                "version": current.and_then(|v| v.get("version").and_then(|x| x.as_i64())).unwrap_or(1) as i32
+            })))
+        }
+        WriteResult::Conflict { current_version } => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, nombre, version FROM afiliados WHERE id = ?1",
+                params![&body.id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            Err(conflict_response(current))
+        }
+    }
+}
+
+async fn put_afiliado(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<AfiliadoReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    if !can_write_afiliados(&session.role) {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+    }
+    let afiliado = Afiliado { id: id.clone(), nombre: body.nombre.clone(), version: body.version };
+    match service::save_afiliado(&afiliado).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
+        WriteResult::Saved => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, nombre, version FROM afiliados WHERE id = ?1",
+                params![&id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            let mut conn2 = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let tx = conn2.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            service::write_audit_log(
+                &tx,
+                &session.username,
+                &session.role,
+                "UPDATE_AFILIADO",
+                "afiliados",
+                Some(&id),
+                Some("actualizar afiliado"),
+            ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            Ok(Json(serde_json::json!({
+                "id": id,
+                "nombre": body.nombre,
+                "version": current.and_then(|v| v.get("version").and_then(|x| x.as_i64())).unwrap_or(1) as i32
+            })))
+        }
+        WriteResult::Conflict { current_version } => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, nombre, version FROM afiliados WHERE id = ?1",
+                params![&id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            Err(conflict_response(current))
+        }
+    }
+}
+
+async fn post_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PlanReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    if !can_write_afiliados(&session.role) {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+    }
+    let plan = PlanAfiliado { id: body.id.clone(), nombre: body.nombre.clone(), version: body.version };
+    match service::save_plan_afiliado(&plan).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
+        WriteResult::Saved => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, nombre, version FROM planes_afiliados WHERE id = ?1",
+                params![&body.id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            let mut conn2 = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let tx = conn2.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            service::write_audit_log(
+                &tx,
+                &session.username,
+                &session.role,
+                "CREATE_PLAN",
+                "planes",
+                Some(&body.id),
+                Some("crear plan"),
+            ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            Ok(Json(serde_json::json!({
+                "id": body.id,
+                "nombre": body.nombre,
+                "version": current.and_then(|v| v.get("version").and_then(|x| x.as_i64())).unwrap_or(1) as i32
+            })))
+        }
+        WriteResult::Conflict { current_version } => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, nombre, version FROM planes_afiliados WHERE id = ?1",
+                params![&body.id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            Err(conflict_response(current))
+        }
+    }
+}
+
+async fn put_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<PlanReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    if !can_write_afiliados(&session.role) {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+    }
+    let plan = PlanAfiliado { id: id.clone(), nombre: body.nombre.clone(), version: body.version };
+    match service::save_plan_afiliado(&plan).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
+        WriteResult::Saved => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, nombre, version FROM planes_afiliados WHERE id = ?1",
+                params![&id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            let mut conn2 = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let tx = conn2.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            service::write_audit_log(
+                &tx,
+                &session.username,
+                &session.role,
+                "UPDATE_PLAN",
+                "planes",
+                Some(&id),
+                Some("actualizar plan"),
+            ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            Ok(Json(serde_json::json!({
+                "id": id,
+                "nombre": body.nombre,
+                "version": current.and_then(|v| v.get("version").and_then(|x| x.as_i64())).unwrap_or(1) as i32
+            })))
+        }
+        WriteResult::Conflict { current_version } => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, nombre, version FROM planes_afiliados WHERE id = ?1",
+                params![&id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            Err(conflict_response(current))
+        }
+    }
+}
+
+async fn post_cuota(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CuotaReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    if !can_write_afiliados(&session.role) {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+    }
+    let cuota = CuotaAfiliado { id: body.id.clone(), monto: body.monto, version: body.version };
+    match service::save_cuota_afiliado(&cuota).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
+        WriteResult::Saved => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, monto, version FROM cuotas_afiliados WHERE id = ?1",
+                params![&body.id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "monto": row.get::<_, f64>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            let mut conn2 = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let tx = conn2.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            service::write_audit_log(
+                &tx,
+                &session.username,
+                &session.role,
+                "CREATE_CUOTA",
+                "cuotas",
+                Some(&body.id),
+                Some("crear cuota"),
+            ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            Ok(Json(serde_json::json!({
+                "id": body.id,
+                "monto": body.monto,
+                "version": current.and_then(|v| v.get("version").and_then(|x| x.as_i64())).unwrap_or(1) as i32
+            })))
+        }
+        WriteResult::Conflict { current_version } => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, monto, version FROM cuotas_afiliados WHERE id = ?1",
+                params![&body.id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "monto": row.get::<_, f64>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            Err(conflict_response(current))
+        }
+    }
+}
+
+async fn put_cuota(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<CuotaReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    if !can_write_afiliados(&session.role) {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+    }
+    let cuota = CuotaAfiliado { id: id.clone(), monto: body.monto, version: body.version };
+    match service::save_cuota_afiliado(&cuota).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
+        WriteResult::Saved => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, monto, version FROM cuotas_afiliados WHERE id = ?1",
+                params![&id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "monto": row.get::<_, f64>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            let mut conn2 = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let tx = conn2.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            service::write_audit_log(
+                &tx,
+                &session.username,
+                &session.role,
+                "UPDATE_CUOTA",
+                "cuotas",
+                Some(&id),
+                Some("actualizar cuota"),
+            ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            Ok(Json(serde_json::json!({
+                "id": id,
+                "monto": body.monto,
+                "version": current.and_then(|v| v.get("version").and_then(|x| x.as_i64())).unwrap_or(1) as i32
+            })))
+        }
+        WriteResult::Conflict { current_version } => {
+            let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+            let current: Option<serde_json::Value> = conn.query_row(
+                "SELECT id, monto, version FROM cuotas_afiliados WHERE id = ?1",
+                params![&id],
+                |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "monto": row.get::<_, f64>(1)?, "version": row.get::<_, i32>(2)?})),
+            ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+            Err(conflict_response(current))
+        }
+    }
+}
+
 pub fn run_server() {
     // Protección: si la UI local ya está abierta (archivo de bloqueo presente),
     // el servidor se niega a arrancar para evitar dos escritores simultáneos.
@@ -470,6 +836,12 @@ pub fn run_server() {
             .route("/api/agenda", get(get_agenda))
             .route("/api/pagos", get(get_pagos))
             .route("/api/afiliados", get(get_afiliados))
+            .route("/api/afiliados", axum::routing::post(post_afiliado))
+            .route("/api/afiliados/:id", axum::routing::put(put_afiliado))
+            .route("/api/planes", axum::routing::post(post_plan))
+            .route("/api/planes/:id", axum::routing::put(put_plan))
+            .route("/api/cuotas", axum::routing::post(post_cuota))
+            .route("/api/cuotas/:id", axum::routing::put(put_cuota))
             .route("/api/obras-sociales", get(get_obras_sociales))
             .with_state(state);
 

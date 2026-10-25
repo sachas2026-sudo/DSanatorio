@@ -676,6 +676,95 @@ pub fn save_cuotas_table(tx: &Transaction<'_>, values: &[serde_json::Value]) -> 
     Ok(())
 }
 
+/// Guarda un afiliado por registro con control de versión.
+/// Devuelve WriteResult::Conflict con la versión actual si hay conflicto,
+/// WriteResult::Saved si se guardó correctamente.
+pub fn save_afiliado(tx: &Transaction<'_>, afiliado: &super::dto::Afiliado) -> Result<WriteResult, AppError> {
+    let existing: Option<i32> = tx.query_row(
+        "SELECT version FROM afiliados WHERE id = ?1",
+        params![&afiliado.id],
+        |row| row.get(0),
+    ).optional()?;
+
+    match existing {
+        Some(v) => {
+            if v != afiliado.version {
+                return Ok(WriteResult::Conflict { current_version: v });
+            }
+            tx.execute(
+                "UPDATE afiliados SET nombre = ?1, version = version + 1 WHERE id = ?2",
+                params![&afiliado.nombre, &afiliado.id],
+            )?;
+            Ok(WriteResult::Saved)
+        }
+        None => {
+            tx.execute(
+                "INSERT INTO afiliados (id, nombre, version) VALUES (?1, ?2, ?3)",
+                params![&afiliado.id, &afiliado.nombre, 1],
+            )?;
+            Ok(WriteResult::Saved)
+        }
+    }
+}
+
+/// Guarda un plan de afiliado por registro con control de versión.
+pub fn save_plan_afiliado(tx: &Transaction<'_>, plan: &super::dto::PlanAfiliado) -> Result<WriteResult, AppError> {
+    let existing: Option<i32> = tx.query_row(
+        "SELECT version FROM planes_afiliados WHERE id = ?1",
+        params![&plan.id],
+        |row| row.get(0),
+    ).optional()?;
+
+    match existing {
+        Some(v) => {
+            if v != plan.version {
+                return Ok(WriteResult::Conflict { current_version: v });
+            }
+            tx.execute(
+                "UPDATE planes_afiliados SET nombre = ?1, version = version + 1 WHERE id = ?2",
+                params![&plan.nombre, &plan.id],
+            )?;
+            Ok(WriteResult::Saved)
+        }
+        None => {
+            tx.execute(
+                "INSERT INTO planes_afiliados (id, nombre, version) VALUES (?1, ?2, ?3)",
+                params![&plan.id, &plan.nombre, 1],
+            )?;
+            Ok(WriteResult::Saved)
+        }
+    }
+}
+
+/// Guarda una cuota de afiliado por registro con control de versión.
+pub fn save_cuota_afiliado(tx: &Transaction<'_>, cuota: &super::dto::CuotaAfiliado) -> Result<WriteResult, AppError> {
+    let existing: Option<i32> = tx.query_row(
+        "SELECT version FROM cuotas_afiliados WHERE id = ?1",
+        params![&cuota.id],
+        |row| row.get(0),
+    ).optional()?;
+
+    match existing {
+        Some(v) => {
+            if v != cuota.version {
+                return Ok(WriteResult::Conflict { current_version: v });
+            }
+            tx.execute(
+                "UPDATE cuotas_afiliados SET monto = ?1, version = version + 1 WHERE id = ?2",
+                params![&cuota.monto, &cuota.id],
+            )?;
+            Ok(WriteResult::Saved)
+        }
+        None => {
+            tx.execute(
+                "INSERT INTO cuotas_afiliados (id, monto, version) VALUES (?1, ?2, ?3)",
+                params![&cuota.id, &cuota.monto, 1],
+            )?;
+            Ok(WriteResult::Saved)
+        }
+    }
+}
+
 pub fn save_app_module(tx: &Transaction<'_>, key: &str, values: &[serde_json::Value]) -> Result<(), AppError> {
     let json = serde_json::to_string(values)
         .map_err(|e| AppError::Validation(format!("JSON inválido para {key}: {e}")))?;

@@ -218,3 +218,35 @@ pub struct AuditLogEntry {
     pub fecha_hora: String,
     pub detalle: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Afiliado {
+    pub id: String,
+    pub nombre: String,
+    #[serde(default = "default_version")]
+    pub version: i32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanAfiliado {
+    pub id: String,
+    pub nombre: String,
+    #[serde(default = "default_version")]
+    pub version: i32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CuotaAfiliado {
+    pub id: String,
+    pub monto: f64,
+    #[serde(default = "default_version")]
+    pub version: i32,
+}
+
+pub enum WriteResult {
+    Saved,
+    Conflict { current_version: i32 },
+}

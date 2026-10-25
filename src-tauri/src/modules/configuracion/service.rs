@@ -143,6 +143,33 @@ pub fn replace_app_data_direct(data: &AppData) -> Result<(), AppError> {
     save_app_data_with_mode(data, true)
 }
 
+/// Guarda un afiliado por registro con control de versión.
+pub fn save_afiliado(afiliado: &Afiliado) -> Result<WriteResult, AppError> {
+    let mut conn = db::open_connection()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let result = repository::save_afiliado(&tx, afiliado)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+/// Guarda un plan de afiliado por registro con control de versión.
+pub fn save_plan_afiliado(plan: &PlanAfiliado) -> Result<WriteResult, AppError> {
+    let mut conn = db::open_connection()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let result = repository::save_plan_afiliado(&tx, plan)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+/// Guarda una cuota de afiliado por registro con control de versión.
+pub fn save_cuota_afiliado(cuota: &CuotaAfiliado) -> Result<WriteResult, AppError> {
+    let mut conn = db::open_connection()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let result = repository::save_cuota_afiliado(&tx, cuota)?;
+    tx.commit()?;
+    Ok(result)
+}
+
 fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppError> {
     let mut conn = db::open_connection()?;
 
