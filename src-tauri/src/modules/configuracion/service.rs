@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 use tauri::Manager;
 use crate::core::error::AppError;
 use crate::core::db;
@@ -15,12 +16,10 @@ pub struct InstanceLock {
 pub fn try_acquire_single_instance_lock(
     _app: &tauri::AppHandle,
 ) -> Result<InstanceLock, String> {
+    use std::fs::OpenOptions;
+
     #[cfg(windows)]
     {
-        if cfg!(debug_assertions) {
-            return Ok(InstanceLock { _file: None });
-        }
-        use std::fs::OpenOptions;
         use std::os::windows::fs::OpenOptionsExt;
 
         const ERROR_SHARING_VIOLATION: i32 = 32;
@@ -165,7 +164,7 @@ fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppE
         None => repository::load_app_module(&conn, "distribucion_os_percentajes").unwrap_or_default(),
     };
 
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
     if replace_all {
         tx.execute_batch(
@@ -265,6 +264,38 @@ pub fn save_app_data(json_str: &str) -> Result<(), AppError> {
     // evita que una restauración reciente choque con filas de la base anterior.
     replace_app_data_direct(&data)?;
     Ok(())
+}
+
+/// Devuelve el estado de write_enabled desde app_settings.
+pub fn get_write_enabled(conn: &Connection) -> Result<bool, AppError> {
+    let settings = repository::load_settings(conn)?;
+    Ok(settings.write_enabled.unwrap_or(false))
+}
+
+/// Establece write_enabled en app_settings (dentro de una transacción).
+pub fn set_write_enabled(tx: &Transaction<'_>, enabled: bool) -> Result<(), AppError> {
+    let mut settings = repository::load_settings_from_tx(tx)?;
+    settings.write_enabled = Some(enabled);
+    repository::save_settings(tx, &settings)?;
+    Ok(())
+}
+
+/// Escribe una entrada de auditoría.
+pub fn write_audit_log(
+    tx: &Transaction<'_>,
+    usuario: &str,
+    rol: &str,
+    accion: &str,
+    entidad: &str,
+    entidad_id: Option<&str>,
+    detalle: Option<&str>,
+) -> Result<(), AppError> {
+    repository::write_audit_log(tx, usuario, rol, accion, entidad, entidad_id, detalle)
+}
+
+/// Carga el log de auditoría completo.
+pub fn load_audit_log(conn: &Connection) -> Result<Vec<AuditLogEntry>, AppError> {
+    repository::load_audit_log(conn)
 }
 
 fn bundled_resource_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {

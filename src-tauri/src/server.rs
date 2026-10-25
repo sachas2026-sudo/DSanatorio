@@ -21,6 +21,7 @@ use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::core::config::settings;
+use crate::core::db;
 use crate::modules::configuracion::service;
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -74,6 +75,16 @@ struct LoginRes {
 
 #[derive(Serialize)]
 struct ApiError { error: String }
+
+#[derive(Deserialize)]
+struct WriteEnabledReq {
+    write_enabled: bool,
+}
+
+#[derive(Serialize)]
+struct WriteEnabledRes {
+    write_enabled: bool,
+}
 
 #[derive(Deserialize)]
 struct ChangePasswordReq {
@@ -194,28 +205,60 @@ async fn health() -> Json<Health> {
 async fn login(State(state): State<AppState>, Json(body): Json<LoginReq>) -> Result<Json<LoginRes>, StatusCode> {
     check_rate_limit(&state, &body.username)?;
     let accounts = state.accounts.lock().unwrap();
-    let account = accounts.iter().find(|a| a.username.eq_ignore_ascii_case(&body.username))
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    if !verify_password(account, &body.password) { 
-        drop(accounts);
+    let account_opt = accounts.iter().find(|a| a.username.eq_ignore_ascii_case(&body.username));
+
+    if let Some(account) = account_opt {
+        if verify_password(account, &body.password) {
+            let username = account.username.clone();
+            let role = account.role.clone();
+            let display_name = account.display_name.clone();
+            let must_change = account.must_change_password;
+            drop(accounts);
+
+            let token = Uuid::new_v4().to_string();
+            let session = Session {
+                username: username.clone(),
+                role: role.clone(),
+                display_name: display_name.clone(),
+                must_change_password: must_change,
+                expiry: Instant::now() + Duration::from_secs(12 * 3600),
+            };
+            state.sessions.lock().unwrap().insert(token.clone(), session);
+
+            // Auditoría LOGIN_OK
+            let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let tx = conn.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            service::write_audit_log(&tx, &username, &role, "LOGIN_OK", "autenticacion", None, Some("login exitoso")).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            return Ok(Json(LoginRes {
+                token,
+                role,
+                display_name,
+                must_change_password: must_change,
+            }));
+        }
+
+        // Contraseña incorrecta
+        let username = account.username.clone();
+        let role = account.role.clone();
         record_failure(&state, &body.username);
-        return Err(StatusCode::UNAUTHORIZED); 
+        drop(accounts);
+        let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let tx = conn.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        service::write_audit_log(&tx, &username, &role, "LOGIN_FAIL", "autenticacion", None, Some("contraseña incorrecta")).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return Err(StatusCode::UNAUTHORIZED);
     }
-    let token = Uuid::new_v4().to_string();
-    let session = Session {
-        username: account.username.clone(),
-        role: account.role.clone(),
-        display_name: account.display_name.clone(),
-        must_change_password: account.must_change_password,
-        expiry: Instant::now() + Duration::from_secs(12 * 3600),
-    };
-    state.sessions.lock().unwrap().insert(token.clone(), session);
-    Ok(Json(LoginRes {
-        token,
-        role: account.role.clone(),
-        display_name: account.display_name.clone(),
-        must_change_password: account.must_change_password,
-    }))
+
+    // Usuario no encontrado
+    record_failure(&state, &body.username);
+    drop(accounts);
+    let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tx = conn.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    service::write_audit_log(&tx, &body.username, "desconocido", "LOGIN_FAIL", "autenticacion", None, Some("usuario no encontrado")).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    return Err(StatusCode::UNAUTHORIZED);
 }
 
 async fn get_pacientes(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
@@ -312,7 +355,80 @@ async fn change_password(State(state): State<AppState>, headers: HeaderMap, Json
     Ok(Json(ChangePasswordRes { ok: true }))
 }
 
+async fn get_write_enabled(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<WriteEnabledRes>, StatusCode> {
+    let _session = authenticate_request(&state, &headers, None)?; // auth requerido
+    let conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let enabled = service::get_write_enabled(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(WriteEnabledRes { write_enabled: enabled }))
+}
+
+async fn post_write_enabled(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<WriteEnabledReq>,
+) -> Result<Json<WriteEnabledRes>, StatusCode> {
+    let session = authenticate_request(&state, &headers, None)?;
+    if session.role != "admin" {
+        // Auditoría PERMISO_DENEGADO
+        let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let tx = conn.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        service::write_audit_log(
+            &tx,
+            &session.username,
+            &session.role,
+            "PERMISO_DENEGADO",
+            "configuracion",
+            None,
+            Some("intento de modificar write_enabled sin rol admin"),
+        ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tx = conn.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    service::set_write_enabled(&tx, body.write_enabled).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    service::write_audit_log(
+        &tx,
+        &session.username,
+        &session.role,
+        "SET_WRITE_ENABLED",
+        "configuracion",
+        None,
+        Some(&format!("write_enabled={}", body.write_enabled)),
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(WriteEnabledRes { write_enabled: body.write_enabled }))
+}
+
+async fn get_audit_log(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<crate::modules::configuracion::dto::AuditLogEntry>>, StatusCode> {
+    let session = authenticate_request(&state, &headers, None)?;
+    if session.role != "admin" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let log = service::load_audit_log(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(log))
+}
+
 pub fn run_server() {
+    // Protección: si la UI local ya está abierta (archivo de bloqueo presente),
+    // el servidor se niega a arrancar para evitar dos escritores simultáneos.
+    let lock_path = settings::data_dir().join("sanatorio.lock");
+    if lock_path.is_file() {
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - UI activa")
+            .set_description("Ya hay una instancia de la UI de escritorio abierta.\nEl servidor no puede arrancar mientras la UI esté activa.\nCierre la UI antes de iniciar el servidor.")
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
+
     let _ = rustls::crypto::ring::default_provider().install_default();
     service::ensure_initialized().expect("init storage");
     let data_dir = settings::data_dir();
@@ -347,6 +463,8 @@ pub fn run_server() {
             .route("/api/health", get(health))
             .route("/api/login", axum::routing::post(login))
             .route("/api/change-password", axum::routing::post(change_password))
+            .route("/api/write-enabled", get(get_write_enabled).post(post_write_enabled))
+            .route("/api/audit-log", get(get_audit_log))
             .route("/api/pacientes", get(get_pacientes))
             .route("/api/medicos", get(get_medicos))
             .route("/api/agenda", get(get_agenda))

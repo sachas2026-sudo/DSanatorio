@@ -525,6 +525,62 @@ pub fn load_settings(conn: &Connection) -> Result<AppSettings, AppError> {
             "mostrar_acciones_en_lista_pagos" | "mostrarAccionesEnListaPagos" => {
                 settings.mostrar_acciones_en_lista_pagos = Some(value == "1" || value == "true");
             }
+            "write_enabled" | "writeEnabled" => {
+                settings.write_enabled = Some(value == "1" || value == "true");
+            }
+            _ => {}
+        }
+    }
+    Ok(settings)
+}
+
+/// Como load_settings pero recibe un Transaction (para usar dentro de transacciones).
+pub fn load_settings_from_tx(tx: &Transaction<'_>) -> Result<AppSettings, AppError> {
+    let mut stmt = tx.prepare("SELECT key, value FROM app_settings")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    let mut settings = AppSettings::default();
+    for r in rows {
+        let (key, value) = r?;
+        match key.as_str() {
+            "email" => settings.email = value,
+            "email_gerente" => settings.email_gerente = value,
+            "telefono_gerente" => settings.telefono_gerente = value,
+            "clave" => settings.clave = value,
+            "telefono" => settings.telefono = value,
+            "cuit" => settings.cuit = value,
+            "carpeta_backup_google_drive" => {
+                settings.carpeta_backup_google_drive = Some(value).filter(|s| !s.is_empty())
+            }
+            "carpeta_exportar_google_drive" => {
+                settings.carpeta_exportar_google_drive = Some(value).filter(|s| !s.is_empty())
+            }
+            "carpeta_pdfs_google_drive" => {
+                settings.carpeta_pdfs_google_drive = Some(value).filter(|s| !s.is_empty())
+            }
+            "ruta_google_drive_custom" => {
+                settings.ruta_google_drive_custom = Some(value).filter(|s| !s.is_empty())
+            }
+            "google_drive_deshabilitado" => {
+                settings.google_drive_deshabilitado = Some(value == "1" || value == "true");
+            }
+            "google_drive_setup_completado" => {
+                settings.google_drive_setup_completado = Some(value == "1" || value == "true");
+            }
+            "secretaria_puede_modificar_mes_actual" => {
+                settings.secretaria_puede_modificar_mes_actual = Some(value == "1" || value == "true");
+            }
+            "secretaria_puede_modificar_turnos_otros_usuarios" => {
+                settings.secretaria_puede_modificar_turnos_otros_usuarios = Some(value == "1" || value == "true");
+            }
+            "mostrar_acciones_en_lista_pagos" | "mostrarAccionesEnListaPagos" => {
+                settings.mostrar_acciones_en_lista_pagos = Some(value == "1" || value == "true");
+            }
+            "write_enabled" | "writeEnabled" => {
+                settings.write_enabled = Some(value == "1" || value == "true");
+            }
             _ => {}
         }
     }
@@ -674,5 +730,61 @@ pub fn save_settings(tx: &Transaction<'_>, settings: &AppSettings) -> Result<(),
         "mostrar_acciones_en_lista_pagos",
         opt_bool(&settings.mostrar_acciones_en_lista_pagos)
     ])?;
+    stmt.execute(params![
+        "write_enabled",
+        opt_bool(&settings.write_enabled)
+    ])?;
     Ok(())
+}
+
+/// Escribe una entrada de auditoría en la tabla audit_log.
+/// No incluye datos sensibles de pacientes ni contraseñas.
+pub fn write_audit_log(
+    tx: &Transaction<'_>,
+    usuario: &str,
+    rol: &str,
+    accion: &str,
+    entidad: &str,
+    entidad_id: Option<&str>,
+    detalle: Option<&str>,
+) -> Result<(), AppError> {
+    tx.execute(
+        "INSERT INTO audit_log (usuario, rol, accion, entidad, entidad_id, fecha_hora, detalle)
+         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), ?6)",
+        params![
+            usuario,
+            rol,
+            accion,
+            entidad,
+            entidad_id,
+            detalle
+        ],
+    )?;
+    Ok(())
+}
+
+/// Carga los registros de auditoría (solo admin debería llamar a esto).
+pub fn load_audit_log(conn: &Connection) -> Result<Vec<AuditLogEntry>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, usuario, rol, accion, entidad, entidad_id, fecha_hora, detalle
+         FROM audit_log
+         ORDER BY fecha_hora DESC"
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(AuditLogEntry {
+            id: row.get(0)?,
+            usuario: row.get(1)?,
+            rol: row.get(2)?,
+            accion: row.get(3)?,
+            entidad: row.get(4)?,
+            entidad_id: row.get(5)?,
+            fecha_hora: row.get(6)?,
+            detalle: row.get(7)?,
+        })
+    })?;
+    let mut result = Vec::new();
+    for r in rows {
+        result.push(r?);
+    }
+    Ok(result)
 }

@@ -8,9 +8,23 @@ mod service_tests;
 
 
 use tauri::Manager;
+use crate::core::config::settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Protección: si ya hay un servidor corriendo (detectado por su archivo de bloqueo),
+    // la UI local no debe abrirse para evitar dos escritores simultáneos.
+    let data_dir = settings::data_dir();
+    let lock_path = data_dir.join("sanatorio.lock");
+    if lock_path.is_file() {
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - Servidor activo")
+            .set_description("Ya hay una instancia del servidor corriendo.\nLa UI local no puede abrirse mientras el servidor esté activo.\nCierre el servidor antes de usar la aplicación de escritorio.")
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())

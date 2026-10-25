@@ -108,4 +108,27 @@ mod tests {
         let exists: bool = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='afiliados'", [], |r| r.get::<_, i32>(0)).unwrap() > 0;
         assert!(exists);
     }
+
+    #[test]
+    fn test_sanatorio_data_dir_no_apunta_a_produccion() {
+        // Los tests nunca deben escribir en C:\Sanatorio\datos.
+        // SANATORIO_DATA_DIR debe estar definido y apuntar a una carpeta temporal.
+        let data_dir = std::env::var("SANATORIO_DATA_DIR")
+            .expect("SANATORIO_DATA_DIR debe estar definido para correr los tests");
+        let path = std::path::PathBuf::from(&data_dir);
+
+        // No debe ser la carpeta de producción
+        let produccion = std::path::PathBuf::from(r"C:\Sanatorio\datos");
+        assert_ne!(
+            path.canonicalize().unwrap_or(path.clone()),
+            produccion.canonicalize().unwrap_or(produccion.clone()),
+            "SANATORIO_DATA_DIR no puede apuntar a la carpeta de producción C:\\Sanatorio\\datos"
+        );
+
+        // Debe ser un directorio que exista (tempdir creado por el test)
+        assert!(
+            path.is_dir(),
+            "SANATORIO_DATA_DIR debe ser un directorio existente: {data_dir}"
+        );
+    }
 }

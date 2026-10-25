@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod real_validation_ignored {
     use std::env;
+    use tempfile::TempDir;
 
     #[test]
     #[ignore = "solo contra la copia real SANATORIO_DATA_DIR"]
@@ -54,5 +55,77 @@ mod real_validation_ignored {
 
         assert_eq!(version1, version2, "La versión de esquema cambió entre aperturas");
         assert!(version1 >= 7, "La migración 0007 debería haberse aplicado");
+    }
+
+    #[test]
+    fn test_write_enabled_sobrevive_a_guardado_local() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let data_dir = temp_dir.path().to_path_buf();
+        std::env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());
+
+        let mut conn = crate::core::db::open_connection().unwrap();
+
+        // Establecer write_enabled = true
+        {
+            let tx = conn.transaction().unwrap();
+            crate::modules::configuracion::service::set_write_enabled(&tx, true).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Verificar que está en true
+        assert!(
+            crate::modules::configuracion::service::get_write_enabled(&conn).unwrap(),
+            "write_enabled debería ser true después de set_write_enabled"
+        );
+
+        // Guardar estado completo (save_app_data_direct)
+        let data = crate::modules::configuracion::service::load_app_data().unwrap();
+        crate::modules::configuracion::service::save_app_data_direct(&data).unwrap();
+
+        // Verificar que write_enabled sigue siendo true
+        assert!(
+            crate::modules::configuracion::service::get_write_enabled(&conn).unwrap(),
+            "write_enabled debería sobrevivir a save_app_data_direct"
+        );
+    }
+
+    #[test]
+    fn test_audit_log_sobrevive_a_restauracion() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let data_dir = temp_dir.path().to_path_buf();
+        std::env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());
+
+        let mut conn = crate::core::db::open_connection().unwrap();
+
+        // Escribir una entrada de auditoría
+        {
+            let tx = conn.transaction().unwrap();
+            crate::modules::configuracion::service::write_audit_log(
+                &tx,
+                "test_user",
+                "admin",
+                "TEST_ENTRY",
+                "test_entidad",
+                Some("test_id"),
+                Some("test_detalle"),
+            ).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Verificar que existe
+        let log_before = crate::modules::configuracion::service::load_audit_log(&conn).unwrap();
+        assert!(!log_before.is_empty(), "debe haber al menos una entrada de auditoría");
+
+        // Restauración (replace_all)
+        let data = crate::modules::configuracion::service::load_app_data().unwrap();
+        crate::modules::configuracion::service::replace_app_data_direct(&data).unwrap();
+
+        // Verificar que la entrada de auditoría sigue existiendo
+        let log_after = crate::modules::configuracion::service::load_audit_log(&conn).unwrap();
+        assert_eq!(
+            log_before.len(),
+            log_after.len(),
+            "audit_log debe sobrevivir a replace_app_data_direct"
+        );
     }
 }

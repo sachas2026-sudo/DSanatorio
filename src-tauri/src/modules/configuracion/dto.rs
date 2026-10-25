@@ -169,6 +169,8 @@ pub struct AppSettings {
     pub secretaria_puede_modificar_mes_actual: Option<bool>,
     pub secretaria_puede_modificar_turnos_otros_usuarios: Option<bool>,
     pub mostrar_acciones_en_lista_pagos: Option<bool>,
+    #[serde(default)]
+    pub write_enabled: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -202,4 +204,17 @@ pub struct AppData {
     pub cuotas_afiliados: Option<Vec<serde_json::Value>>,
     #[serde(default, rename = "distribucionOSPercentajes")]
     pub distribucion_os_percentajes: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLogEntry {
+    pub id: i64,
+    pub usuario: String,
+    pub rol: String,
+    pub accion: String,
+    pub entidad: String,
+    pub entidad_id: Option<String>,
+    pub fecha_hora: String,
+    pub detalle: Option<String>,
 }

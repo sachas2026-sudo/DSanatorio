@@ -49,6 +49,24 @@ pub fn sanatorio_root() -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
+    // Protección en modo test: SANATORIO_DATA_DIR debe apuntar a una carpeta temporal,
+    // nunca a C:\Sanatorio\datos.
+    if cfg!(test) {
+        let dir = env_trim("SANATORIO_DATA_DIR")
+            .or_else(|| config_str("dataDir"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(DATA_DIR_ON_C));
+
+        let produccion = PathBuf::from(r"C:\Sanatorio\datos");
+        if dir == produccion || dir.to_string_lossy().to_lowercase().contains("sanatorio\\datos") {
+            panic!("SANATORIO_DATA_DIR no puede apuntar a C:\\Sanatorio\\datos en modo test. Define una carpeta temporal con SANATORIO_DATA_DIR.");
+        }
+        if !dir.is_dir() {
+            panic!("SANATORIO_DATA_DIR debe ser un directorio temporal existente en modo test (actual: {})", dir.display());
+        }
+        return dir;
+    }
+
     env_trim("SANATORIO_DATA_DIR")
         .or_else(|| config_str("dataDir"))
         .map(PathBuf::from)
@@ -56,6 +74,24 @@ pub fn data_dir() -> PathBuf {
 }
 
 pub fn backup_dir() -> PathBuf {
+    // Protección en modo test: SANATORIO_BACKUP_DIR debe apuntar a una carpeta temporal,
+    // nunca a C:\Sanatorio\respaldo.
+    if cfg!(test) {
+        let dir = env_trim("SANATORIO_BACKUP_DIR")
+            .or_else(|| config_str("backupDir"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(BACKUP_DIR_ON_C));
+
+        let produccion = PathBuf::from(r"C:\Sanatorio\respaldo");
+        if dir == produccion || dir.to_string_lossy().to_lowercase().contains("sanatorio\\respaldo") {
+            panic!("SANATORIO_BACKUP_DIR no puede apuntar a C:\\Sanatorio\\respaldo en modo test. Define una carpeta temporal con SANATORIO_BACKUP_DIR.");
+        }
+        if !dir.is_dir() {
+            panic!("SANATORIO_BACKUP_DIR debe ser un directorio temporal existente en modo test (actual: {})", dir.display());
+        }
+        return dir;
+    }
+
     env_trim("SANATORIO_BACKUP_DIR")
         .or_else(|| config_str("backupDir"))
         .map(PathBuf::from)
