@@ -253,19 +253,19 @@ fn is_valid_role(role: &str) -> bool {
 
 /// Verifica que el usuario no tenga must_change_password pendiente.
 /// Si lo tiene, solo puede acceder a /api/change-password.
-fn check_password_change_required(session: &Session) -> Result<(), StatusCode> {
+fn check_password_change_required(session: &Session) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
     if session.must_change_password {
-        Err(StatusCode::FORBIDDEN)
+        Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"}))))
     } else {
         Ok(())
     }
 }
 
-async fn check_write_enabled(state: &AppState) -> Result<(), StatusCode> {
-    let conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let enabled = service::get_write_enabled(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn check_write_enabled(state: &AppState) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
+    let conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    let enabled = service::get_write_enabled(&conn).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     if !enabled {
-        Err(StatusCode::FORBIDDEN)
+        Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "writes_disabled"}))))
     } else {
         Ok(())
     }
@@ -345,57 +345,57 @@ async fn login(State(state): State<AppState>, Json(body): Json<LoginReq>) -> Res
     return Err(StatusCode::UNAUTHORIZED);
 }
 
-async fn get_pacientes(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+async fn get_pacientes(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
-    if !role_allowed(&session.role, "/api/pacientes") { return Err(StatusCode::FORBIDDEN); }
-    let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !role_allowed(&session.role, "/api/pacientes") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(data.patients))
 }
 
-async fn get_medicos(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+async fn get_medicos(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
-    if !role_allowed(&session.role, "/api/medicos") { return Err(StatusCode::FORBIDDEN); }
-    let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !role_allowed(&session.role, "/api/medicos") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(data.doctors))
 }
 
-async fn get_agenda(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+async fn get_agenda(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
-    if !role_allowed(&session.role, "/api/agenda") { return Err(StatusCode::FORBIDDEN); }
-    let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !role_allowed(&session.role, "/api/agenda") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(data.appointments))
 }
 
-async fn get_pagos(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+async fn get_pagos(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
-    if !role_allowed(&session.role, "/api/pagos") { return Err(StatusCode::FORBIDDEN); }
-    let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !role_allowed(&session.role, "/api/pagos") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(data.payments))
 }
 
-async fn get_afiliados(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+async fn get_afiliados(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
-    if !role_allowed(&session.role, "/api/afiliados") { return Err(StatusCode::FORBIDDEN); }
-    let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !role_allowed(&session.role, "/api/afiliados") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(data.afiliados.unwrap_or_default()))
 }
 
-async fn get_obras_sociales(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+async fn get_obras_sociales(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    if session.must_change_password { return Err(StatusCode::FORBIDDEN); }
-    if !role_allowed(&session.role, "/api/obras-sociales") { return Err(StatusCode::FORBIDDEN); }
-    let data = service::load_app_data().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !role_allowed(&session.role, "/api/obras-sociales") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(data.obras_sociales_custom))
 }
 
@@ -448,11 +448,11 @@ async fn change_password(State(state): State<AppState>, headers: HeaderMap, Json
 async fn get_write_enabled(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<WriteEnabledRes>, StatusCode> {
-    let _session = authenticate_request(&state, &headers, None)?; // auth requerido
+) -> Result<Json<WriteEnabledRes>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let _session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?; // auth requerido
     check_password_change_required(&_session)?;
-    let conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let enabled = service::get_write_enabled(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    let enabled = service::get_write_enabled(&conn).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(WriteEnabledRes { write_enabled: enabled }))
 }
 
@@ -460,13 +460,13 @@ async fn post_write_enabled(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<WriteEnabledReq>,
-) -> Result<Json<WriteEnabledRes>, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+) -> Result<Json<WriteEnabledRes>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
     if session.role != "admin" {
         // Auditoría PERMISO_DENEGADO
-        let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let tx = conn.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         service::write_audit_log(
             &tx,
             &session.username,
@@ -475,13 +475,13 @@ async fn post_write_enabled(
             "configuracion",
             None,
             Some("intento de modificar write_enabled sin rol admin"),
-        ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        return Err(StatusCode::FORBIDDEN);
+        ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
-    let mut conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let tx = conn.transaction().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    service::set_write_enabled(&tx, body.write_enabled).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    service::set_write_enabled(&tx, body.write_enabled).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     service::write_audit_log(
         &tx,
         &session.username,
@@ -490,22 +490,22 @@ async fn post_write_enabled(
         "configuracion",
         None,
         Some(&format!("write_enabled={}", body.write_enabled)),
-    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tx.commit().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(WriteEnabledRes { write_enabled: body.write_enabled }))
 }
 
 async fn get_audit_log(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<crate::modules::configuracion::dto::AuditLogEntry>>, StatusCode> {
-    let session = authenticate_request(&state, &headers, None)?;
+) -> Result<Json<Vec<crate::modules::configuracion::dto::AuditLogEntry>>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
     if session.role != "admin" {
-        return Err(StatusCode::FORBIDDEN);
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
-    let conn = db::open_connection().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let log = service::load_audit_log(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    let log = service::load_audit_log(&conn).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
     Ok(Json(log))
 }
 
@@ -532,8 +532,8 @@ async fn post_afiliado(
     Json(body): Json<AfiliadoReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
         let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
@@ -547,7 +547,7 @@ async fn post_afiliado(
             Some("intento de crear afiliado sin rol afiliado o admin"),
         ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
-        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
 
     let afiliado = Afiliado { id: body.id.clone(), nombre: body.nombre.clone(), version: body.version };
@@ -597,10 +597,10 @@ async fn put_afiliado(
     Json(body): Json<AfiliadoReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
-        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
     let afiliado = Afiliado { id: id.clone(), nombre: body.nombre.clone(), version: body.version };
     match service::save_afiliado(&afiliado).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
@@ -647,10 +647,10 @@ async fn post_plan(
     Json(body): Json<PlanReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
-        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
     let plan = PlanAfiliado { id: body.id.clone(), nombre: body.nombre.clone(), version: body.version };
     match service::save_plan_afiliado(&plan).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
@@ -698,10 +698,10 @@ async fn put_plan(
     Json(body): Json<PlanReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
-        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
     let plan = PlanAfiliado { id: id.clone(), nombre: body.nombre.clone(), version: body.version };
     match service::save_plan_afiliado(&plan).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
@@ -748,10 +748,10 @@ async fn post_cuota(
     Json(body): Json<CuotaReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
-        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
     let cuota = CuotaAfiliado { id: body.id.clone(), monto: body.monto, version: body.version };
     match service::save_cuota_afiliado(&cuota).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
@@ -799,10 +799,10 @@ async fn put_cuota(
     Json(body): Json<CuotaReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_password_change_required(&session).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
-    check_write_enabled(&state).await.map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
-        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "forbidden"}))));
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
     let cuota = CuotaAfiliado { id: id.clone(), monto: body.monto, version: body.version };
     match service::save_cuota_afiliado(&cuota).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
@@ -939,7 +939,8 @@ mod tests {
     /// Construye un router de prueba con las cuentas dadas y SANATORIO_DATA_DIR
     /// apuntando a un directorio temporal. Retorna (Router, temp_dir).
     fn build_test_router(accounts: Vec<Account>) -> (Router, std::path::PathBuf) {
-        let temp_dir = std::env::temp_dir().join(format!("sanatorio_it_{}", std::process::id()));
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join(format!("sanatorio_it_{}", COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
         fs::create_dir_all(&temp_dir).unwrap();
 
         // Escribir auth-accounts.json con las cuentas dadas
@@ -968,14 +969,34 @@ mod tests {
         (app, temp_dir)
     }
 
-    /// Hace una petición POST con body JSON y retorna (status, body_text)
-    async fn post_json(app: &Router, uri: &str, body: &str) -> (StatusCode, String) {
-        let request = Request::builder()
+    /// Helper que crea cuentas, hace login y retorna (token, must_change_password_bool)
+    async fn login_as(app: &Router, username: &str, password: &str, must_change: bool) -> (String, bool) {
+        let (status, body) = post_json(app, "/api/login", &format!(r#"{{"username":"{}","password":"{}"}}"#, username, password), None).await;
+        assert_eq!(status, StatusCode::OK, "login debe funcionar para {}", username);
+        let res: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let token = res["token"].as_str().unwrap().to_string();
+        let must_change_password = res.get("must_change_password").and_then(|v| v.as_bool()).unwrap_or(false);
+        (token, must_change_password)
+    }
+
+    async fn enable_writes(app: &Router, token_admin: &str) -> StatusCode {
+        let (status, _) = post_json(app, "/api/write-enabled", r#"{"write_enabled":true}"#, Some(token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "enable_writes debe ser 200: {}", status);
+        status
+    }
+
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+    async fn post_json(app: &Router, uri: &str, body: &str, auth: Option<&str>) -> (StatusCode, String) {
+        let mut request = Request::builder()
             .method(Method::POST)
             .uri(uri)
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body.to_string()))
             .unwrap();
+        if let Some(token) = auth {
+            request.headers_mut().insert(header::AUTHORIZATION, format!("Bearer {}", token).parse().unwrap());
+        }
         let response = app.clone().oneshot(request).await.unwrap();
         let status = response.status();
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -984,13 +1005,16 @@ mod tests {
     }
 
     /// Hace una petición PUT con body JSON y retorna (status, body_text)
-    async fn put_json(app: &Router, uri: &str, body: &str) -> (StatusCode, String) {
-        let request = Request::builder()
+    async fn put_json(app: &Router, uri: &str, body: &str, auth: Option<&str>) -> (StatusCode, String) {
+        let mut request = Request::builder()
             .method(Method::PUT)
             .uri(uri)
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body.to_string()))
             .unwrap();
+        if let Some(token) = auth {
+            request.headers_mut().insert(header::AUTHORIZATION, format!("Bearer {}", token).parse().unwrap());
+        }
         let response = app.clone().oneshot(request).await.unwrap();
         let status = response.status();
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -999,12 +1023,14 @@ mod tests {
     }
 
     /// Hace una petición GET y retorna (status, body_text)
-    async fn get(app: &Router, uri: &str) -> (StatusCode, String) {
-        let request = Request::builder()
+    async fn get(app: &Router, uri: &str, auth: Option<&str>) -> (StatusCode, String) {
+        let mut builder = Request::builder()
             .method(Method::GET)
-            .uri(uri)
-            .body(Body::empty())
-            .unwrap();
+            .uri(uri);
+        if let Some(token) = auth {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {}", token));
+        }
+        let request = builder.body(Body::empty()).unwrap();
         let response = app.clone().oneshot(request).await.unwrap();
         let status = response.status();
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -1043,7 +1069,7 @@ mod tests {
         };
 
         // Login con Admin (debe funcionar, devuelve token)
-        let (status, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#).await;
+        let (status, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         assert_eq!(status, StatusCode::OK);
         let login_res: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(login_res["must_change_password"], true);
@@ -1054,13 +1080,14 @@ mod tests {
             &app,
             "/api/afiliados",
             &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#),
+            Some(&token),
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Debe ser 403 por must_change_password: {}", body);
     }
 
     #[tokio::test]
     async fn test_write_enabled_apagado_retorna_403_en_escritura() {
-        let (app, _temp_dir) = {
+        let (app, temp_dir) = {
             let accounts = vec![
                 Account {
                     username: "Admin".to_string(),
@@ -1075,9 +1102,11 @@ mod tests {
             ];
             build_test_router(accounts)
         };
+        // Asegurar base aislada (SANATORIO_DATA_DIR puede haberse contaminado de tests previos)
+        env::set_var("SANATORIO_DATA_DIR", temp_dir.to_str().unwrap());
 
         // Login
-        let (status, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#).await;
+        let (status, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         assert_eq!(status, StatusCode::OK);
         let login_res: serde_json::Value = serde_json::from_str(&body).unwrap();
         let token = login_res["token"].as_str().unwrap();
@@ -1087,6 +1116,7 @@ mod tests {
             &app,
             "/api/afiliados",
             &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#),
+            Some(&token),
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Debe ser 403 con write_enabled apagado: {}", body);
 
@@ -1095,6 +1125,7 @@ mod tests {
             &app,
             "/api/write-enabled",
             &format!(r#"{{"write_enabled":true}}"#),
+            Some(token),
         ).await;
         assert_eq!(status, StatusCode::OK, "write_enabled=true debe ser 200: {}", status);
 
@@ -1103,6 +1134,7 @@ mod tests {
             &app,
             "/api/afiliados",
             &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#),
+            Some(&token),
         ).await;
         assert_eq!(status, StatusCode::OK, "Debe ser 200 con write_enabled encendido: {}", body);
     }
@@ -1130,6 +1162,7 @@ mod tests {
             &app,
             "/api/login",
             r#"{"username":"Mary","password":"mary123"}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::OK);
         let login_res: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -1142,11 +1175,12 @@ mod tests {
             &format!(
                 r#"{{"id":"afil-1","nombre":"Test","version":1}}"#
             ),
+            Some(&token),
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Secretaria no puede escribir afiliados: {}", body);
 
         // Verificar entrada PERMISO_DENEGADO en audit-log
-        let (status, body) = get(&app, "/api/audit-log").await;
+        let (status, body) = get(&app, "/api/audit-log", None).await;
         assert_eq!(status, StatusCode::OK, "audit-log debe ser accesible por admin: {}", status);
         let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
         let entries = audit.as_array().unwrap();
@@ -1162,8 +1196,74 @@ mod tests {
 
     #[tokio::test]
     async fn test_afiliado_y_admin_pueden_escribir_afiliados() {
-        // Admin puede escribir
+        let (app, temp_dir) = {
+            let accounts = vec![
+                Account {
+                    username: "Admin".to_string(),
+                    role: "admin".to_string(),
+                    display_name: "Admin".to_string(),
+                    turno: None,
+                    password: Some("admin123".to_string()),
+                    password_hash: None,
+                    password_salt: None,
+                    must_change_password: false,
+                },
+                Account {
+                    username: "Afiliado1".to_string(),
+                    role: "afiliado".to_string(),
+                    display_name: "Afiliado1".to_string(),
+                    turno: None,
+                    password: Some("afi123".to_string()),
+                    password_hash: None,
+                    password_salt: None,
+                    must_change_password: false,
+                },
+            ];
+            build_test_router(accounts)
+        };
+
+        let (token_admin, _) = login_as(&app, "Admin", "admin123", false).await;
+        enable_writes(&app, &token_admin).await;
+
+        let (status, body) = post_json(&app, "/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Juan","version":1}}"#), Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "Admin puede escribir afiliados: {} body={}", status, body);
+
+        let (token_afiliado, _) = login_as(&app, "Afiliado1", "afi123", false).await;
+        let (status, _) = post_json(&app, "/api/afiliados", &format!(r#"{{"id":"afil-2","nombre":"Ana","version":1}}"#), Some(&token_afiliado)).await;
+        assert_eq!(status, StatusCode::OK, "Afiliado puede escribir afiliados: {}", status);
+
+        let (status, _) = post_json(&app, "/api/afiliados", &format!(r#"{{"id":"afil-3","nombre":"Pedro","version":1}}"#), Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "Admin puede escribir afiliados tras afiliado: {}", status);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        env::remove_var("SANATORIO_DATA_DIR");
+    }
+
+    #[tokio::test]
+    async fn test_afiliado_no_puede_cambiar_write_enabled() {
         let (app, _temp_dir) = {
+            let accounts = vec![
+                Account {
+                    username: "AfiliadoNoPermiso".to_string(),
+                    role: "afiliado".to_string(),
+                    display_name: "AfiliadoNoPermiso".to_string(),
+                    turno: None,
+                    password: Some("afi123".to_string()),
+                    password_hash: None,
+                    password_salt: None,
+                    must_change_password: false,
+                },
+            ];
+            build_test_router(accounts)
+        };
+        let (token, _) = login_as(&app, "AfiliadoNoPermiso", "afi123", false).await;
+        let (status, body) = post_json(&app, "/api/write-enabled", r#"{"write_enabled":true}"#, Some(&token)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "Afiliado no debe cambiar write_enabled: {}", body);
+    }
+
+    #[tokio::test]
+    async fn test_write_enabled_persistencia_minima() {
+        let (app, temp_dir) = {
             let accounts = vec![
                 Account {
                     username: "Admin".to_string(),
@@ -1179,56 +1279,20 @@ mod tests {
             build_test_router(accounts)
         };
 
-        let (status, body) = post_json(
-            &app,
-            "/api/login",
-            r#"{"username":"Admin","password":"admin123"}"#,
-        ).await;
-        assert_eq!(status, StatusCode::OK);
-        let token: String = serde_json::from_str::<serde_json::Value>(&body)
-            .unwrap()["token"].as_str().unwrap().to_string();
+        let (token, _) = login_as(&app, "Admin", "admin123", false).await;
 
-        let (status, _) = post_json(
-            &app,
-            "/api/afiliados",
-            &format!(
-                r#"{{"id":"afil-1","nombre":"Juan","version":1}}"#
-            ),
-        ).await;
-        assert_eq!(status, StatusCode::OK, "Admin puede escribir afiliados: {}", status);
+        // 1. POST write_enabled {true}
+        let (status, body) = post_json(&app, "/api/write-enabled", r#"{"write_enabled":true}"#, Some(&token)).await;
+        assert_eq!(status, StatusCode::OK, "POST write_enabled: {}", body);
 
-        // Afiliado puede escribir afiliados
-        let (app2, _temp_dir2) = {
-            let accounts = vec![
-                Account {
-                    username: "Afiliado1".to_string(),
-                    role: "afiliado".to_string(),
-                    display_name: "Afiliado1".to_string(),
-                    turno: None,
-                    password: Some("afi123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        // 2. GET write_enabled -> debe ser true
+        let (status, body) = get(&app, "/api/write-enabled", Some(&token)).await;
+        assert_eq!(status, StatusCode::OK, "GET write_enabled debe ser 200: {}", body);
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["write_enabled"], true, "write_enabled debe persistir como true");
 
-        let (status, _) = post_json(
-            &app2,
-            "/api/login",
-            r#"{"username":"Afiliado1","password":"afi123"}"#,
-        ).await;
-        assert_eq!(status, StatusCode::OK);
-
-        let (status, _) = post_json(
-            &app2,
-            "/api/afiliados",
-            &format!(
-                r#"{{"id":"afil-2","nombre":"Ana","version":1}}"#
-            ),
-        ).await;
-        assert_eq!(status, StatusCode::OK, "Afiliado puede escribir afiliados: {}", status);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        env::remove_var("SANATORIO_DATA_DIR");
     }
 
     #[tokio::test]
@@ -1249,16 +1313,15 @@ mod tests {
             build_test_router(accounts)
         };
 
-        // Login
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#).await;
-        let token: String = serde_json::from_str::<serde_json::Value>(&body)
-            .unwrap()["token"].as_str().unwrap().to_string();
+        // Login usando helper
+        let (login_token, _) = login_as(&app, "Admin", "admin123", false).await;
 
         // Crear afiliado con versión 1
         let (status, _) = post_json(
             &app,
             "/api/afiliados",
             r#"{"id":"afil-1","nombre":"Juan","version":1}"#,
+            Some(&login_token),
         ).await;
         assert_eq!(status, StatusCode::OK);
 
@@ -1267,6 +1330,7 @@ mod tests {
             &app,
             "/api/afiliados/afil-1",
             r#"{"id":"afil-1","nombre":"Juan Modificado","version":1}"#,
+            Some(&login_token),
         ).await;
         assert_eq!(status, StatusCode::OK, "PUT con versión correcta debe ser 200: {}", body);
 
@@ -1275,6 +1339,7 @@ mod tests {
             &app,
             "/api/afiliados/afil-1",
             r#"{"id":"afil-1","nombre":"Juan Conflicto","version":1}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::CONFLICT, "PUT con versión vieja debe ser 409: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -1300,7 +1365,7 @@ mod tests {
             build_test_router(accounts)
         };
 
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#).await;
+        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         let _token: String = serde_json::from_str::<serde_json::Value>(&body)
             .unwrap()["token"].as_str().unwrap().to_string();
 
@@ -1309,6 +1374,7 @@ mod tests {
             &app,
             "/api/planes",
             r#"{"id":"plan-1","nombre":"Plan Oro","version":1}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::OK);
 
@@ -1317,6 +1383,7 @@ mod tests {
             &app,
             "/api/planes/plan-1",
             r#"{"id":"plan-1","nombre":"Plan Oro Conflicto","version":1}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::CONFLICT, "PUT plan con versión vieja debe ser 409: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -1342,15 +1409,19 @@ mod tests {
             build_test_router(accounts)
         };
 
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#).await;
+        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         let _token: String = serde_json::from_str::<serde_json::Value>(&body)
             .unwrap()["token"].as_str().unwrap().to_string();
+
+        // Login usando helper
+        let (login_token, _) = login_as(&app, "Admin", "admin123", false).await;
 
         // Crear cuota con versión 1
         let (status, _) = post_json(
             &app,
             "/api/cuotas",
             r#"{"id":"cuota-1","monto":100.0,"version":1}"#,
+            Some(&login_token),
         ).await;
         assert_eq!(status, StatusCode::OK);
 
@@ -1359,6 +1430,7 @@ mod tests {
             &app,
             "/api/cuotas/cuota-1",
             r#"{"id":"cuota-1","monto":200.0,"version":1}"#,
+            Some(&login_token),
         ).await;
         assert_eq!(status, StatusCode::CONFLICT, "PUT cuota con versión vieja debe ser 409: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -1384,7 +1456,7 @@ mod tests {
             build_test_router(accounts)
         };
 
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#).await;
+        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         let _token: String = serde_json::from_str::<serde_json::Value>(&body)
             .unwrap()["token"].as_str().unwrap().to_string();
 
@@ -1393,6 +1465,7 @@ mod tests {
             &app,
             "/api/afiliados",
             r#"{"id":"afil-1","nombre":"Juan","version":1}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::OK);
 
@@ -1401,6 +1474,7 @@ mod tests {
             &app,
             "/api/afiliados",
             r#"{"id":"afil-1","nombre":"Duplicado","version":1}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::CONFLICT, "POST con id existente y versión vieja debe ser 409: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -1426,7 +1500,7 @@ mod tests {
             build_test_router(accounts)
         };
 
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#).await;
+        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         let token: String = serde_json::from_str::<serde_json::Value>(&body)
             .unwrap()["token"].as_str().unwrap().to_string();
 
@@ -1435,6 +1509,7 @@ mod tests {
             &app,
             "/api/afiliados",
             "esto no es json",
+        None,
         ).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "Cuerpo mal formado debe ser 400");
     }
@@ -1466,6 +1541,7 @@ mod tests {
             &app,
             "/api/login",
             r#"{"username":"Invalido","password":"inv123"}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Rol inválido no debe poder iniciar sesión: {}", body);
 
@@ -1502,12 +1578,12 @@ mod tests {
         };
 
         // Login admin
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#).await;
+        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         let token_admin: String = serde_json::from_str::<serde_json::Value>(&body)
             .unwrap()["token"].as_str().unwrap().to_string();
 
         // Login afiliado
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Afiliado1","password":"afi123"}"#).await;
+        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Afiliado1","password":"afi123"}"#, None).await;
         let token_afiliado: String = serde_json::from_str::<serde_json::Value>(&body)
             .unwrap()["token"].as_str().unwrap().to_string();
 
@@ -1516,6 +1592,7 @@ mod tests {
             &app,
             "/api/afiliados",
             r#"{"id":"afil-1","nombre":"Test","version":1}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::OK);
 
@@ -1524,11 +1601,12 @@ mod tests {
             &app,
             "/api/write-enabled",
             r#"{"write_enabled":true}"#,
+        None,
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
 
         // Admin obtiene audit-log
-        let (status, body) = get(&app, "/api/audit-log").await;
+        let (status, body) = get(&app, "/api/audit-log", None).await;
         assert_eq!(status, StatusCode::OK, "admin debe leer audit-log: {}", status);
         let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
         let entries = audit.as_array().unwrap();
@@ -1551,12 +1629,131 @@ mod tests {
         );
 
         // Afiliado NO puede leer audit-log
-        let (status, _) = get(&app, "/api/audit-log").await;
+        let (status, _) = get(&app, "/api/audit-log", None).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Afiliado no puede leer audit-log: {}", status);
     }
 
     fn entradas_contienen(entries: &[serde_json::Value], accion: &str) -> bool {
         entries.iter().any(|e| e.get("accion").and_then(|v| v.as_str()) == Some(accion))
+    }
+
+    /// Struct de ayuda que encapsula: Mutex global, carpeta temporal única con
+    /// contador atómico, router de prueba y métodos de helper con auth Bearer.
+    /// Se usa así:
+    ///   let test = TestApp::new().await;
+    ///   let token = test.login("admin").await;
+    ///   test.enable_writes(&token).await;
+    ///   let (status, body) = test.post("/api/afiliados", &json!, &token).await;
+    ///   drop(test); // restaura SANATORIO_DATA_DIR y borra la carpeta
+    pub struct TestApp {
+        mutex: Arc<Mutex<()>>,
+        counter: AtomicUsize,
+        data_dir: std::path::PathBuf,
+        router: Router,
+        _phantom: std::marker::PhantomData<()>,
+    }
+
+    impl TestApp {
+        pub async fn new() -> Result<Self, String> {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let data_dir = std::env::temp_dir().join(format!("sanatorio_it_{}", counter));
+            fs::create_dir_all(&data_dir).map_err(|e| format!("No se pudo crear temp dir: {e}"))?;
+
+            // Configurar SANATORIO_DATA_DIR para este test
+            let _orig = env::var("SANATORIO_DATA_DIR").ok();
+            env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());
+
+            // Inicializar SQLite
+            service::ensure_initialized().map_err(|e| format!("init SQLite: {e}"))?;
+
+            // Cargar cuentas
+            let loaded = load_accounts(&data_dir);
+
+            let state = AppState {
+                accounts: Arc::new(Mutex::new(loaded)),
+                data_dir: data_dir.clone(),
+                sessions: Arc::new(Mutex::new(HashMap::new())),
+                login_attempts: Arc::new(Mutex::new(HashMap::new())),
+            };
+
+            let router = build_router(state);
+
+            Ok(TestApp {
+                mutex: TEST_MUTEX.clone(),
+                counter,
+                data_dir,
+                router,
+                _phantom: std::marker::PhantomData,
+            })
+        }
+
+        pub async fn login_as(&self, rol: &str) -> String {
+            let accounts = self.router.state().accounts.lock().unwrap();
+            let account = accounts.iter().find(|a| a.role.eq_ignore_ascii_case(rol));
+            drop(accounts);
+
+            let account = match account {
+                Some(a) => a,
+                None => {
+                    eprintln!("[TestApp] Account role='{}' not found", rol);
+                    return String::new();
+                }
+            };
+
+            // Credenciales según rol
+            let (username, password): (&str, &str) = match rol {
+                "admin" => ("Admin", "admin123"),
+                "afiliado" => ("Afiliado1", "afi123"),
+                "secretaria" => ("Mary", "mary123"),
+                _ => ("", ""),
+            };
+
+            let (status, body) = super::post_json(
+                &self.router,
+                "/api/login",
+                &format!(r#"{{"username":"{}","password":"{}"}}"#, username, password),
+                None,
+            )
+            .await;
+
+            if status == StatusCode::OK {
+                let res: serde_json::Value = serde_json::from_str(&body).unwrap();
+                res["token"].as_str().unwrap_or("").to_string()
+            } else {
+                String::new()
+            }
+        }
+
+        pub async fn enable_writes(&self, token: &str) -> StatusCode {
+            let (status, _) = super::post_json(
+                &self.router,
+                "/api/write-enabled",
+                r#"{"write_enabled":true}"#,
+                Some(token),
+            )
+            .await;
+            status
+        }
+
+        pub async fn get(&self, uri: &str, token: &str) -> (StatusCode, String) {
+            super::get(&self.router, uri, Some(token)).await
+        }
+
+        pub async fn post(&self, uri: &str, body: &str, token: &str) -> (StatusCode, String) {
+            super::post_json(&self.router, uri, body, Some(token)).await
+        }
+
+        pub async fn put(&self, uri: &str, body: &str, token: &str) -> (StatusCode, String) {
+            super::put_json(&self.router, uri, body, Some(token)).await
+        }
+    }
+
+    impl Drop for TestApp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.data_dir);
+            let _ = env::remove_var("SANATORIO_DATA_DIR");
+        }
     }
 }
 
