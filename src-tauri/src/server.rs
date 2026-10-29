@@ -533,7 +533,6 @@ async fn post_afiliado(
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
         let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
@@ -549,6 +548,7 @@ async fn post_afiliado(
         tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
+    check_write_enabled(&state).await?;
 
     let afiliado = Afiliado { id: body.id.clone(), nombre: body.nombre.clone(), version: body.version };
     match service::save_afiliado(&afiliado).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
@@ -598,10 +598,22 @@ async fn put_afiliado(
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
+        let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        service::write_audit_log(
+            &tx,
+            &session.username,
+            &session.role,
+            "PERMISO_DENEGADO",
+            "afiliados",
+            None,
+            Some("intento de escritura sin rol afiliado o admin"),
+        ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
+    check_write_enabled(&state).await?;
     let afiliado = Afiliado { id: id.clone(), nombre: body.nombre.clone(), version: body.version };
     match service::save_afiliado(&afiliado).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
         WriteResult::Saved => {
@@ -648,10 +660,22 @@ async fn post_plan(
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
+        let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        service::write_audit_log(
+            &tx,
+            &session.username,
+            &session.role,
+            "PERMISO_DENEGADO",
+            "afiliados",
+            None,
+            Some("intento de escritura sin rol afiliado o admin"),
+        ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
+    check_write_enabled(&state).await?;
     let plan = PlanAfiliado { id: body.id.clone(), nombre: body.nombre.clone(), version: body.version };
     match service::save_plan_afiliado(&plan).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
         WriteResult::Saved => {
@@ -699,10 +723,22 @@ async fn put_plan(
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
+        let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        service::write_audit_log(
+            &tx,
+            &session.username,
+            &session.role,
+            "PERMISO_DENEGADO",
+            "afiliados",
+            None,
+            Some("intento de escritura sin rol afiliado o admin"),
+        ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
+    check_write_enabled(&state).await?;
     let plan = PlanAfiliado { id: id.clone(), nombre: body.nombre.clone(), version: body.version };
     match service::save_plan_afiliado(&plan).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
         WriteResult::Saved => {
@@ -749,10 +785,22 @@ async fn post_cuota(
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
+        let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        service::write_audit_log(
+            &tx,
+            &session.username,
+            &session.role,
+            "PERMISO_DENEGADO",
+            "afiliados",
+            None,
+            Some("intento de escritura sin rol afiliado o admin"),
+        ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
+    check_write_enabled(&state).await?;
     let cuota = CuotaAfiliado { id: body.id.clone(), monto: body.monto, version: body.version };
     match service::save_cuota_afiliado(&cuota).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
         WriteResult::Saved => {
@@ -800,10 +848,22 @@ async fn put_cuota(
 ) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
     let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
     check_password_change_required(&session)?;
-    check_write_enabled(&state).await?;
     if !can_write_afiliados(&session.role) {
+        let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        service::write_audit_log(
+            &tx,
+            &session.username,
+            &session.role,
+            "PERMISO_DENEGADO",
+            "afiliados",
+            None,
+            Some("intento de escritura sin rol afiliado o admin"),
+        ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
         return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
     }
+    check_write_enabled(&state).await?;
     let cuota = CuotaAfiliado { id: id.clone(), monto: body.monto, version: body.version };
     match service::save_cuota_afiliado(&cuota).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))? {
         WriteResult::Saved => {
@@ -1473,6 +1533,81 @@ mod tests {
         // Afiliado NO puede leer audit-log
         let (status, _) = test.get("/api/audit-log", Some(&token_afiliado)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Afiliado no puede leer audit-log: {}", status);
+
+        drop(test);
+    }
+
+#[tokio::test]
+    async fn test_secretaria_post_afiliados_write_disabled_retorna_role_forbidden() {
+        let test = TestApp::new(Some(vec![
+            Account {
+                username: "Admin".to_string(),
+                role: "admin".to_string(),
+                display_name: "Admin".to_string(),
+                turno: None,
+                password: Some("admin123".to_string()),
+                password_hash: None,
+                password_salt: None,
+                must_change_password: false,
+            },
+            Account {
+                username: "Mary".to_string(),
+                role: "secretaria".to_string(),
+                display_name: "Mary".to_string(),
+                turno: None,
+                password: Some("mary123".to_string()),
+                password_hash: None,
+                password_salt: None,
+                must_change_password: false,
+            },
+        ])).await.unwrap();
+
+        let token_mary = test.login_as("secretaria").await;
+        let token_admin = test.login_as("admin").await;
+
+        // POST /api/afiliados como secretaria con write_enabled APAGADO -> 403 role_forbidden
+        let (status, body) = test.post("/api/afiliados", r#"{"id":"afil-1","nombre":"Test","version":1}"#, Some(&token_mary)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "Secretaria no puede escribir afiliados: {}", body);
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["error"], "role_forbidden");
+
+        // Verificar entrada PERMISO_DENEGADO en audit-log
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "audit-log debe ser accesible por admin: {}", status);
+        let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let entries = audit.as_array().unwrap();
+        let tiene_permiso_denegado = entries.iter().any(|e| {
+            e.get("accion").and_then(|v| v.as_str()) == Some("PERMISO_DENEGADO")
+                && e.get("usuario").and_then(|v| v.as_str()) == Some("Mary")
+        });
+        assert!(
+            tiene_permiso_denegado,
+            "Debe haber entrada PERMISO_DENEGADO para Mary en audit-log"
+        );
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_admin_post_afiliados_write_disabled_retorna_writes_disabled() {
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
+
+        let token_admin = test.login_as("admin").await;
+
+        // POST /api/afiliados como admin con write_enabled APAGADO -> 403 writes_disabled
+        let (status, body) = test.post("/api/afiliados", r#"{"id":"afil-1","nombre":"Test","version":1}"#, Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "Admin no puede escribir con write_enabled apagado: {}", body);
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["error"], "writes_disabled");
 
         drop(test);
     }
