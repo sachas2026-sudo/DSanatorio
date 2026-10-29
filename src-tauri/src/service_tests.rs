@@ -6,7 +6,8 @@ mod tests {
     use crate::core::config::settings;
     use std::fs;
 
-    fn setup_temp_db() -> (rusqlite::Connection, std::path::PathBuf) {
+    fn setup_temp_db() -> (rusqlite::Connection, std::path::PathBuf, std::sync::MutexGuard<'static, ()>) {
+        let guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
         std::env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());
@@ -16,12 +17,12 @@ mod tests {
         conn.execute("INSERT OR REPLACE INTO app_modules (key, json) VALUES (?1, ?2)", 
             params!["afiliados", r#"[{"id":"a1","nombre":"Afiliado 1"}]"#]).unwrap();
         
-        (conn, data_dir)
+        (conn, data_dir, guard)
     }
 
     #[test]
     fn test_migracion_afiliados_idempotente() {
-        let (conn, _) = setup_temp_db();
+        let (conn, _, _guard) = setup_temp_db();
         conn.execute("CREATE TABLE IF NOT EXISTS afiliados (id TEXT PRIMARY KEY, nombre TEXT, version INTEGER DEFAULT 1)", []).unwrap();
         let json: String = conn.query_row("SELECT json FROM app_modules WHERE key='afiliados'", [], |r| r.get(0)).unwrap();
         let data: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
@@ -42,7 +43,7 @@ mod tests {
 
     #[test]
     fn test_marca_migrado_bloquea_fallback() {
-        let (conn, _) = setup_temp_db();
+        let (conn, _, _guard) = setup_temp_db();
         conn.execute("CREATE TABLE IF NOT EXISTS afiliados (id TEXT PRIMARY KEY, nombre TEXT, version INTEGER DEFAULT 1)", []).unwrap();
         conn.execute("INSERT OR REPLACE INTO app_modules (key, json) VALUES ('migrado_tablas', 'true')", []).unwrap();
         conn.execute("DELETE FROM afiliados", []).unwrap();
@@ -57,7 +58,7 @@ mod tests {
 
     #[test]
     fn test_transaccion_migracion_atomica() {
-        let (conn, _) = setup_temp_db();
+        let (conn, _, _guard) = setup_temp_db();
         conn.execute("CREATE TABLE IF NOT EXISTS afiliados (id TEXT PRIMARY KEY, nombre TEXT, version INTEGER DEFAULT 1)", []).unwrap();
         let res = (|| -> Result<(), rusqlite::Error> {
             let tx = conn.unchecked_transaction()?;
@@ -75,7 +76,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_afiliados_version() {
-        let (conn, _) = setup_temp_db();
+        let (conn, _, _guard) = setup_temp_db();
         conn.execute("CREATE TABLE IF NOT EXISTS afiliados (id TEXT PRIMARY KEY, nombre TEXT, version INTEGER DEFAULT 1)", []).unwrap();
         
         // Guardar

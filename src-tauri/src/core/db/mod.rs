@@ -6,6 +6,9 @@ pub use connection::{open_connection, db_file_path, json_export_path, DB_FILE, b
 use rusqlite::Transaction;
 use crate::core::error::AppError;
 
+#[cfg(test)]
+pub static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn delete_orphans(
     tx: &Transaction<'_>,
     table: &str,

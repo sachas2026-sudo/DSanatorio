@@ -59,6 +59,7 @@ mod real_validation_ignored {
 
     #[test]
     fn test_write_enabled_sobrevive_a_guardado_local() {
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = tempfile::TempDir::new().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
         std::env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());

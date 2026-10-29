@@ -928,6 +928,7 @@ mod tests {
     use std::env;
     use std::fs;
     use std::sync::{Arc, Mutex};
+    use std::sync::atomic::AtomicUsize;
     use serde_json;
 
     use tower::ServiceExt;
@@ -939,7 +940,7 @@ mod tests {
     /// Construye un router de prueba con las cuentas dadas y SANATORIO_DATA_DIR
     /// apuntando a un directorio temporal. Retorna (Router, temp_dir).
     fn build_test_router(accounts: Vec<Account>) -> (Router, std::path::PathBuf) {
-        let _guard = TEST_MUTEX.lock().unwrap();
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap();
         let temp_dir = std::env::temp_dir().join(format!("sanatorio_it_{}", COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
         fs::create_dir_all(&temp_dir).unwrap();
 
@@ -970,14 +971,7 @@ mod tests {
     }
 
     /// Helper que crea cuentas, hace login y retorna (token, must_change_password_bool)
-    async fn login_as(app: &Router, username: &str, password: &str, must_change: bool) -> (String, bool) {
-        let (status, body) = post_json(app, "/api/login", &format!(r#"{{"username":"{}","password":"{}"}}"#, username, password), None).await;
-        assert_eq!(status, StatusCode::OK, "login debe funcionar para {}", username);
-        let res: serde_json::Value = serde_json::from_str(&body).unwrap();
-        let token = res["token"].as_str().unwrap().to_string();
-        let must_change_password = res.get("must_change_password").and_then(|v| v.as_bool()).unwrap_or(false);
-        (token, must_change_password)
-    }
+
 
     async fn enable_writes(app: &Router, token_admin: &str) -> StatusCode {
         let (status, _) = post_json(app, "/api/write-enabled", r#"{"write_enabled":true}"#, Some(token_admin)).await;
@@ -985,7 +979,6 @@ mod tests {
         status
     }
 
-    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
     async fn post_json(app: &Router, uri: &str, body: &str, auth: Option<&str>) -> (StatusCode, String) {
         let mut request = Request::builder()
@@ -1052,32 +1045,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_admin_must_change_password_bloquea_escritura() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: true,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: true,
+        }])).await.unwrap();
 
         // Login con Admin (debe funcionar, devuelve token)
-        let (status, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
+        let (status, body) = test.post("/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         assert_eq!(status, StatusCode::OK);
         let login_res: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(login_res["must_change_password"], true);
         let token = login_res["token"].as_str().unwrap();
 
         // POST /api/afiliados con must_change_password=true -> 403
-        let (status, body) = post_json(
-            &app,
+        let (status, body) = test.post(
             "/api/afiliados",
             &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#),
             Some(&token),
@@ -1087,100 +1074,72 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_enabled_apagado_retorna_403_en_escritura() {
-        let (app, temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
-        // Asegurar base aislada (SANATORIO_DATA_DIR puede haberse contaminado de tests previos)
-        env::set_var("SANATORIO_DATA_DIR", temp_dir.to_str().unwrap());
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
 
         // Login
-        let (status, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
+        let (status, body) = test.post("/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         assert_eq!(status, StatusCode::OK);
         let login_res: serde_json::Value = serde_json::from_str(&body).unwrap();
         let token = login_res["token"].as_str().unwrap();
 
         // write_enabled debe ser false por defecto -> POST /api/afiliados = 403
-        let (status, body) = post_json(
-            &app,
-            "/api/afiliados",
-            &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#),
-            Some(&token),
-        ).await;
+        let (status, body) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#), Some(token)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Debe ser 403 con write_enabled apagado: {}", body);
 
         // Encender write_enabled
-        let (status, _) = post_json(
-            &app,
-            "/api/write-enabled",
-            &format!(r#"{{"write_enabled":true}}"#),
-            Some(token),
-        ).await;
+        let status = test.enable_writes(token).await;
         assert_eq!(status, StatusCode::OK, "write_enabled=true debe ser 200: {}", status);
 
         // Ahora POST /api/afiliados = 200
-        let (status, body) = post_json(
-            &app,
-            "/api/afiliados",
-            &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#),
-            Some(&token),
-        ).await;
+        let (status, body) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#), Some(token)).await;
         assert_eq!(status, StatusCode::OK, "Debe ser 200 con write_enabled encendido: {}", body);
     }
 
     #[tokio::test]
     async fn test_secretaria_no_puede_escribir_afiliados() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Mary".to_string(),
-                    role: "secretaria".to_string(),
-                    display_name: "Mary".to_string(),
-                    turno: None,
-                    password: Some("mary123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![
+            Account {
+                username: "Admin".to_string(),
+                role: "admin".to_string(),
+                display_name: "Admin".to_string(),
+                turno: None,
+                password: Some("admin123".to_string()),
+                password_hash: None,
+                password_salt: None,
+                must_change_password: false,
+            },
+            Account {
+                username: "Mary".to_string(),
+                role: "secretaria".to_string(),
+                display_name: "Mary".to_string(),
+                turno: None,
+                password: Some("mary123".to_string()),
+                password_hash: None,
+                password_salt: None,
+                must_change_password: false,
+            },
+        ])).await.unwrap();
 
         // Login como secretaria
-        let (status, body) = post_json(
-            &app,
-            "/api/login",
-            r#"{"username":"Mary","password":"mary123"}"#,
-        None,
-        ).await;
-        assert_eq!(status, StatusCode::OK);
-        let login_res: serde_json::Value = serde_json::from_str(&body).unwrap();
-        let token = login_res["token"].as_str().unwrap();
+        let token_mary = test.login_as("secretaria").await;
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
 
-        // POST /api/afiliados como secretaria -> 403
-        let (status, body) = post_json(
-            &app,
-            "/api/afiliados",
-            &format!(
-                r#"{{"id":"afil-1","nombre":"Test","version":1}}"#
-            ),
-            Some(&token),
-        ).await;
+        // POST /api/afiliados como secretaria -> 403 (el rol se chequea antes que write_enabled)
+        let (status, body) = test.post("/api/afiliados", r#"{"id":"afil-1","nombre":"Test","version":1}"#, Some(&token_mary)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Secretaria no puede escribir afiliados: {}", body);
 
         // Verificar entrada PERMISO_DENEGADO en audit-log
-        let (status, body) = get(&app, "/api/audit-log", None).await;
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
         assert_eq!(status, StatusCode::OK, "audit-log debe ser accesible por admin: {}", status);
         let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
         let entries = audit.as_array().unwrap();
@@ -1196,424 +1155,307 @@ mod tests {
 
     #[tokio::test]
     async fn test_afiliado_y_admin_pueden_escribir_afiliados() {
-        let (app, temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-                Account {
-                    username: "Afiliado1".to_string(),
-                    role: "afiliado".to_string(),
-                    display_name: "Afiliado1".to_string(),
-                    turno: None,
-                    password: Some("afi123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![
+            Account {
+                username: "Admin".to_string(),
+                role: "admin".to_string(),
+                display_name: "Admin".to_string(),
+                turno: None,
+                password: Some("admin123".to_string()),
+                password_hash: None,
+                password_salt: None,
+                must_change_password: false,
+            },
+            Account {
+                username: "Afiliado1".to_string(),
+                role: "afiliado".to_string(),
+                display_name: "Afiliado1".to_string(),
+                turno: None,
+                password: Some("afi123".to_string()),
+                password_hash: None,
+                password_salt: None,
+                must_change_password: false,
+            },
+        ])).await.unwrap();
 
-        let (token_admin, _) = login_as(&app, "Admin", "admin123", false).await;
-        enable_writes(&app, &token_admin).await;
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
 
-        let (status, body) = post_json(&app, "/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Juan","version":1}}"#), Some(&token_admin)).await;
+        let (status, body) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Juan","version":1}}"#), Some(&token_admin)).await;
         assert_eq!(status, StatusCode::OK, "Admin puede escribir afiliados: {} body={}", status, body);
 
-        let (token_afiliado, _) = login_as(&app, "Afiliado1", "afi123", false).await;
-        let (status, _) = post_json(&app, "/api/afiliados", &format!(r#"{{"id":"afil-2","nombre":"Ana","version":1}}"#), Some(&token_afiliado)).await;
+        let token_afiliado = test.login_as("afiliado").await;
+        let (status, _) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-2","nombre":"Ana","version":1}}"#), Some(&token_afiliado)).await;
         assert_eq!(status, StatusCode::OK, "Afiliado puede escribir afiliados: {}", status);
 
-        let (status, _) = post_json(&app, "/api/afiliados", &format!(r#"{{"id":"afil-3","nombre":"Pedro","version":1}}"#), Some(&token_admin)).await;
+        let (status, _) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-3","nombre":"Pedro","version":1}}"#), Some(&token_admin)).await;
         assert_eq!(status, StatusCode::OK, "Admin puede escribir afiliados tras afiliado: {}", status);
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        env::remove_var("SANATORIO_DATA_DIR");
     }
 
     #[tokio::test]
     async fn test_afiliado_no_puede_cambiar_write_enabled() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "AfiliadoNoPermiso".to_string(),
-                    role: "afiliado".to_string(),
-                    display_name: "AfiliadoNoPermiso".to_string(),
-                    turno: None,
-                    password: Some("afi123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
-        let (token, _) = login_as(&app, "AfiliadoNoPermiso", "afi123", false).await;
-        let (status, body) = post_json(&app, "/api/write-enabled", r#"{"write_enabled":true}"#, Some(&token)).await;
+        let test = TestApp::new(Some(vec![Account {
+            username: "Afiliado1".to_string(),
+            role: "afiliado".to_string(),
+            display_name: "Afiliado1".to_string(),
+            turno: None,
+            password: Some("afi123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
+
+        let token = test.login_as("afiliado").await;
+        let (status, body) = test.post("/api/write-enabled", r#"{"write_enabled":true}"#, Some(&token)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Afiliado no debe cambiar write_enabled: {}", body);
     }
 
     #[tokio::test]
     async fn test_write_enabled_persistencia_minima() {
-        let (app, temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
 
-        let (token, _) = login_as(&app, "Admin", "admin123", false).await;
+        let token = test.login_as("admin").await;
 
         // 1. POST write_enabled {true}
-        let (status, body) = post_json(&app, "/api/write-enabled", r#"{"write_enabled":true}"#, Some(&token)).await;
+        let (status, body) = test.post("/api/write-enabled", r#"{"write_enabled":true}"#, Some(&token)).await;
         assert_eq!(status, StatusCode::OK, "POST write_enabled: {}", body);
 
         // 2. GET write_enabled -> debe ser true
-        let (status, body) = get(&app, "/api/write-enabled", Some(&token)).await;
+        let (status, body) = test.get("/api/write-enabled", Some(&token)).await;
         assert_eq!(status, StatusCode::OK, "GET write_enabled debe ser 200: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(resp["write_enabled"], true, "write_enabled debe persistir como true");
 
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        env::remove_var("SANATORIO_DATA_DIR");
+        drop(test);
     }
 
     #[tokio::test]
     async fn test_put_afiliado_version_vieja_retorna_409() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
 
-        // Login usando helper
-        let (login_token, _) = login_as(&app, "Admin", "admin123", false).await;
+        let login_token = test.login_as("admin").await;
+        test.enable_writes(&login_token).await;
 
         // Crear afiliado con versión 1
-        let (status, _) = post_json(
-            &app,
-            "/api/afiliados",
-            r#"{"id":"afil-1","nombre":"Juan","version":1}"#,
-            Some(&login_token),
-        ).await;
+        let (status, _) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Juan","version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::OK);
 
-        // PUT con versión 1 (correcto) -> debería actualizar a versión 2
-        let (status, body) = put_json(
-            &app,
-            "/api/afiliados/afil-1",
-            r#"{"id":"afil-1","nombre":"Juan Modificado","version":1}"#,
-            Some(&login_token),
-        ).await;
+        // PUT con versión correcta -> debería actualizar a versión 2
+        let (status, body) = test.put("/api/afiliados/afil-1", &format!(r#"{{"id":"afil-1","nombre":"Juan Modificado","version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::OK, "PUT con versión correcta debe ser 200: {}", body);
 
         // PUT con versión 1 (ya es 2) -> 409
-        let (status, body) = put_json(
-            &app,
-            "/api/afiliados/afil-1",
-            r#"{"id":"afil-1","nombre":"Juan Conflicto","version":1}"#,
-        None,
-        ).await;
+        let (status, body) = test.put("/api/afiliados/afil-1", &format!(r#"{{"id":"afil-1","nombre":"Juan Conflicto","version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::CONFLICT, "PUT con versión vieja debe ser 409: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(resp["error"], "conflict");
         assert_eq!(resp["current"]["version"], 2);
+
+        drop(test);
     }
 
     #[tokio::test]
     async fn test_put_plan_version_vieja_retorna_409() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
 
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
-        let _token: String = serde_json::from_str::<serde_json::Value>(&body)
-            .unwrap()["token"].as_str().unwrap().to_string();
+        let login_token = test.login_as("admin").await;
+        test.enable_writes(&login_token).await;
 
         // Crear plan con versión 1
-        let (status, _) = post_json(
-            &app,
-            "/api/planes",
-            r#"{"id":"plan-1","nombre":"Plan Oro","version":1}"#,
-        None,
-        ).await;
+        let (status, _) = test.post("/api/planes", &format!(r#"{{"id":"plan-1","nombre":"Plan Oro","version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::OK);
 
+        // PUT con versión 1 (correcto) -> debería actualizar a versión 2
+        let (status, body) = test.put("/api/planes/plan-1", &format!(r#"{{"id":"plan-1","nombre":"Plan Oro Modificado","version":1}}"#), Some(&login_token)).await;
+        assert_eq!(status, StatusCode::OK, "PUT con versión correcta debe ser 200: {}", body);
+
         // PUT con versión 1 (ya es 2) -> 409
-        let (status, body) = put_json(
-            &app,
-            "/api/planes/plan-1",
-            r#"{"id":"plan-1","nombre":"Plan Oro Conflicto","version":1}"#,
-        None,
-        ).await;
+        let (status, body) = test.put("/api/planes/plan-1", &format!(r#"{{"id":"plan-1","nombre":"Plan Oro Conflicto","version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::CONFLICT, "PUT plan con versión vieja debe ser 409: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(resp["error"], "conflict");
         assert_eq!(resp["current"]["version"], 2);
+
+        drop(test);
     }
 
     #[tokio::test]
     async fn test_put_cuota_version_vieja_retorna_409() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
 
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
-        let _token: String = serde_json::from_str::<serde_json::Value>(&body)
-            .unwrap()["token"].as_str().unwrap().to_string();
-
-        // Login usando helper
-        let (login_token, _) = login_as(&app, "Admin", "admin123", false).await;
+        let login_token = test.login_as("admin").await;
+        test.enable_writes(&login_token).await;
 
         // Crear cuota con versión 1
-        let (status, _) = post_json(
-            &app,
-            "/api/cuotas",
-            r#"{"id":"cuota-1","monto":100.0,"version":1}"#,
-            Some(&login_token),
-        ).await;
+        let (status, _) = test.post("/api/cuotas", &format!(r#"{{"id":"cuota-1","monto":100.0,"version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::OK);
 
+        // PUT con versión 1 (correcto) -> debería actualizar a versión 2
+        let (status, body) = test.put("/api/cuotas/cuota-1", &format!(r#"{{"id":"cuota-1","monto":150.0,"version":1}}"#), Some(&login_token)).await;
+        assert_eq!(status, StatusCode::OK, "PUT con versión correcta debe ser 200: {}", body);
+
         // PUT con versión 1 (ya es 2) -> 409
-        let (status, body) = put_json(
-            &app,
-            "/api/cuotas/cuota-1",
-            r#"{"id":"cuota-1","monto":200.0,"version":1}"#,
-            Some(&login_token),
-        ).await;
+        let (status, body) = test.put("/api/cuotas/cuota-1", &format!(r#"{{"id":"cuota-1","monto":200.0,"version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::CONFLICT, "PUT cuota con versión vieja debe ser 409: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(resp["error"], "conflict");
         assert_eq!(resp["current"]["version"], 2);
+
+        drop(test);
     }
 
     #[tokio::test]
     async fn test_post_afiliado_id_existente_no_pisa() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
 
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
-        let _token: String = serde_json::from_str::<serde_json::Value>(&body)
-            .unwrap()["token"].as_str().unwrap().to_string();
+        let login_token = test.login_as("admin").await;
+        test.enable_writes(&login_token).await;
 
         // Crear afiliado con versión 1
-        let (status, _) = post_json(
-            &app,
-            "/api/afiliados",
-            r#"{"id":"afil-1","nombre":"Juan","version":1}"#,
-        None,
-        ).await;
+        let (status, _) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Juan","version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::OK);
 
+        // PUT con versión 1 (correcto) -> debería actualizar a versión 2
+        let (status, body) = test.put("/api/afiliados/afil-1", &format!(r#"{{"id":"afil-1","nombre":"Juan Modificado","version":1}}"#), Some(&login_token)).await;
+        assert_eq!(status, StatusCode::OK, "PUT con versión correcta debe ser 200: {}", body);
+
         // POST con mismo id y versión 1 (no coincide con versión actual 2) -> 409
-        let (status, body) = post_json(
-            &app,
-            "/api/afiliados",
-            r#"{"id":"afil-1","nombre":"Duplicado","version":1}"#,
-        None,
-        ).await;
+        let (status, body) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Duplicado","version":1}}"#), Some(&login_token)).await;
         assert_eq!(status, StatusCode::CONFLICT, "POST con id existente y versión vieja debe ser 409: {}", body);
         let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(resp["error"], "conflict");
         assert_eq!(resp["current"]["id"], "afil-1");
+
+        drop(test);
     }
 
     #[tokio::test]
     async fn test_cuerpo_mal_formado_retorna_400() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![Account {
+            username: "Admin".to_string(),
+            role: "admin".to_string(),
+            display_name: "Admin".to_string(),
+            turno: None,
+            password: Some("admin123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
 
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
+        let (_, body) = test.post("/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
         let token: String = serde_json::from_str::<serde_json::Value>(&body)
             .unwrap()["token"].as_str().unwrap().to_string();
 
         // Cuerpo no es JSON válido
-        let (status, _) = post_json(
-            &app,
-            "/api/afiliados",
-            "esto no es json",
-        None,
-        ).await;
+        let (status, _) = test.post("/api/afiliados", "esto no es json", Some(&token)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "Cuerpo mal formado debe ser 400");
     }
 
     #[tokio::test]
     async fn test_rol_invalido_no_tiene_acceso() {
-        let temp_dir = std::env::temp_dir().join(format!("sanatorio_it_inv_{}", std::process::id()));
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        let accounts_json = r#"[
-            {"username":"Invalido","role":"invitado","displayName":"Invitado","password":"inv123","mustChangePassword":false}
-        ]"#;
-        let accounts_path = temp_dir.join("auth-accounts.json");
-        fs::write(&accounts_path, accounts_json).unwrap();
-
-        env::set_var("SANATORIO_DATA_DIR", temp_dir.to_str().unwrap());
-        service::ensure_initialized().unwrap();
-        let loaded = load_accounts(&temp_dir);
-        let state = AppState {
-            accounts: Arc::new(Mutex::new(loaded)),
-            data_dir: temp_dir.clone(),
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-            login_attempts: Arc::new(Mutex::new(HashMap::new())),
-        };
-        let app = build_router(state);
+        let test = TestApp::new(Some(vec![Account {
+            username: "Invalido".to_string(),
+            role: "invitado".to_string(),
+            display_name: "Invitado".to_string(),
+            turno: None,
+            password: Some("inv123".to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }])).await.unwrap();
 
         // Login con rol invitado -> 403
-        let (status, body) = post_json(
-            &app,
-            "/api/login",
-            r#"{"username":"Invalido","password":"inv123"}"#,
-        None,
-        ).await;
+        let (status, body) = test.post("/api/login", r#"{"username":"Invalido","password":"inv123"}"#, None).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Rol inválido no debe poder iniciar sesión: {}", body);
-
-        env::remove_var("SANATORIO_DATA_DIR");
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_audit_log_solo_admin_y_con_entradas() {
-        let (app, _temp_dir) = {
-            let accounts = vec![
-                Account {
-                    username: "Admin".to_string(),
-                    role: "admin".to_string(),
-                    display_name: "Admin".to_string(),
-                    turno: None,
-                    password: Some("admin123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-                Account {
-                    username: "Afiliado1".to_string(),
-                    role: "afiliado".to_string(),
-                    display_name: "Afiliado1".to_string(),
-                    turno: None,
-                    password: Some("afi123".to_string()),
-                    password_hash: None,
-                    password_salt: None,
-                    must_change_password: false,
-                },
-            ];
-            build_test_router(accounts)
-        };
+        let test = TestApp::new(Some(vec![
+            Account {
+                username: "Admin".to_string(),
+                role: "admin".to_string(),
+                display_name: "Admin".to_string(),
+                turno: None,
+                password: Some("admin123".to_string()),
+                password_hash: None,
+                password_salt: None,
+                must_change_password: false,
+            },
+            Account {
+                username: "Afiliado1".to_string(),
+                role: "afiliado".to_string(),
+                display_name: "Afiliado1".to_string(),
+                turno: None,
+                password: Some("afi123".to_string()),
+                password_hash: None,
+                password_salt: None,
+                must_change_password: false,
+            },
+        ])).await.unwrap();
 
-        // Login admin
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Admin","password":"admin123"}"#, None).await;
-        let token_admin: String = serde_json::from_str::<serde_json::Value>(&body)
-            .unwrap()["token"].as_str().unwrap().to_string();
+        let token_admin = test.login_as("admin").await;
+        let token_afiliado = test.login_as("afiliado").await;
+        test.enable_writes(&token_admin).await;
 
-        // Login afiliado
-        let (_, body) = post_json(&app, "/api/login", r#"{"username":"Afiliado1","password":"afi123"}"#, None).await;
-        let token_afiliado: String = serde_json::from_str::<serde_json::Value>(&body)
-            .unwrap()["token"].as_str().unwrap().to_string();
+        // Afiliado escribe afiliados (tiene permiso) -> crea entrada en auditoría
+        let (status, _) = test.post("/api/afiliados", &format!(r#"{{"id":"afil-1","nombre":"Test","version":1}}"#), Some(&token_afiliado)).await;
+        assert_eq!(status, StatusCode::OK, "afiliado crea afiliado: {}", status);
 
-        // Afiliado intenta escribir afiliados (tiene permiso) -> crea entrada en auditoría
-        let (status, _) = post_json(
-            &app,
-            "/api/afiliados",
-            r#"{"id":"afil-1","nombre":"Test","version":1}"#,
-        None,
-        ).await;
-        assert_eq!(status, StatusCode::OK);
-
-        // Afiliado intenta escribir write-enabled (no tiene permiso) -> PERMISO_DENEGADO
-        let (status, _) = post_json(
-            &app,
-            "/api/write-enabled",
-            r#"{"write_enabled":true}"#,
-        None,
-        ).await;
+        // Afiliado intenta cambiar write-enabled (no tiene permiso) -> PERMISO_DENEGADO
+        let (status, _) = test.post("/api/write-enabled", r#"{"write_enabled":true}"#, Some(&token_afiliado)).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
 
         // Admin obtiene audit-log
-        let (status, body) = get(&app, "/api/audit-log", None).await;
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
         assert_eq!(status, StatusCode::OK, "admin debe leer audit-log: {}", status);
         let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
         let entries = audit.as_array().unwrap();
-
-        let acciones: Vec<String> = entries.iter()
-            .filter_map(|e| e.get("accion").and_then(|v| v.as_str().map(String::from)))
-            .collect();
 
         assert!(
             entradas_contienen(&entries, "LOGIN_OK"),
@@ -1629,8 +1471,10 @@ mod tests {
         );
 
         // Afiliado NO puede leer audit-log
-        let (status, _) = get(&app, "/api/audit-log", None).await;
+        let (status, _) = test.get("/api/audit-log", Some(&token_afiliado)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "Afiliado no puede leer audit-log: {}", status);
+
+        drop(test);
     }
 
     fn entradas_contienen(entries: &[serde_json::Value], accion: &str) -> bool {
@@ -1643,22 +1487,30 @@ mod tests {
     ///   let test = TestApp::new().await;
     ///   let token = test.login("admin").await;
     ///   test.enable_writes(&token).await;
-    ///   let (status, body) = test.post("/api/afiliados", &json!, &token).await;
+    ///   let (status, body) = test.post("/api/afiliados", &json!, Some(&token)).await;
     ///   drop(test); // restaura SANATORIO_DATA_DIR y borra la carpeta
     pub struct TestApp {
         mutex: Arc<Mutex<()>>,
-        counter: AtomicUsize,
+        _guard: std::sync::MutexGuard<'static, ()>,
+        counter: usize,
         data_dir: std::path::PathBuf,
         router: Router,
+        accounts: Arc<Mutex<Vec<Account>>>,
         _phantom: std::marker::PhantomData<()>,
     }
 
     impl TestApp {
-        pub async fn new() -> Result<Self, String> {
-            let _guard = TEST_MUTEX.lock().unwrap();
+        pub async fn new(accounts: Option<Vec<Account>>) -> Result<Self, String> {
+            let guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let data_dir = std::env::temp_dir().join(format!("sanatorio_it_{}", counter));
             fs::create_dir_all(&data_dir).map_err(|e| format!("No se pudo crear temp dir: {e}"))?;
+
+            // Si se proporcionaron cuentas, escribirlas en el archivo de configuración
+            if let Some(ref accounts) = accounts {
+                let raw = serde_json::to_string_pretty(accounts).unwrap();
+                let _ = fs::write(data_dir.join("auth-accounts.json"), raw);
+            }
 
             // Configurar SANATORIO_DATA_DIR para este test
             let _orig = env::var("SANATORIO_DATA_DIR").ok();
@@ -1669,9 +1521,10 @@ mod tests {
 
             // Cargar cuentas
             let loaded = load_accounts(&data_dir);
+            let accounts = Arc::new(Mutex::new(loaded));
 
             let state = AppState {
-                accounts: Arc::new(Mutex::new(loaded)),
+                accounts: accounts.clone(),
                 data_dir: data_dir.clone(),
                 sessions: Arc::new(Mutex::new(HashMap::new())),
                 login_attempts: Arc::new(Mutex::new(HashMap::new())),
@@ -1680,26 +1533,25 @@ mod tests {
             let router = build_router(state);
 
             Ok(TestApp {
-                mutex: TEST_MUTEX.clone(),
+                mutex: Arc::new(std::sync::Mutex::new(())),
+                _guard: guard,
                 counter,
                 data_dir,
                 router,
+                accounts,
                 _phantom: std::marker::PhantomData,
             })
         }
 
         pub async fn login_as(&self, rol: &str) -> String {
-            let accounts = self.router.state().accounts.lock().unwrap();
-            let account = accounts.iter().find(|a| a.role.eq_ignore_ascii_case(rol));
+            let accounts = self.accounts.lock().unwrap();
+            let account_exists = accounts.iter().any(|a| a.role.eq_ignore_ascii_case(rol));
             drop(accounts);
 
-            let account = match account {
-                Some(a) => a,
-                None => {
-                    eprintln!("[TestApp] Account role='{}' not found", rol);
-                    return String::new();
-                }
-            };
+            if !account_exists {
+                eprintln!("[TestApp] Account role='{}' not found", rol);
+                return String::new();
+            }
 
             // Credenciales según rol
             let (username, password): (&str, &str) = match rol {
@@ -1709,7 +1561,7 @@ mod tests {
                 _ => ("", ""),
             };
 
-            let (status, body) = super::post_json(
+            let (status, body) = post_json(
                 &self.router,
                 "/api/login",
                 &format!(r#"{{"username":"{}","password":"{}"}}"#, username, password),
@@ -1726,7 +1578,7 @@ mod tests {
         }
 
         pub async fn enable_writes(&self, token: &str) -> StatusCode {
-            let (status, _) = super::post_json(
+            let (status, _) = post_json(
                 &self.router,
                 "/api/write-enabled",
                 r#"{"write_enabled":true}"#,
@@ -1736,16 +1588,16 @@ mod tests {
             status
         }
 
-        pub async fn get(&self, uri: &str, token: &str) -> (StatusCode, String) {
-            super::get(&self.router, uri, Some(token)).await
+        pub async fn get(&self, uri: &str, token: Option<&str>) -> (StatusCode, String) {
+            get(&self.router, uri, token).await
         }
 
-        pub async fn post(&self, uri: &str, body: &str, token: &str) -> (StatusCode, String) {
-            super::post_json(&self.router, uri, body, Some(token)).await
+        pub async fn post(&self, uri: &str, body: &str, token: Option<&str>) -> (StatusCode, String) {
+            post_json(&self.router, uri, body, token).await
         }
 
-        pub async fn put(&self, uri: &str, body: &str, token: &str) -> (StatusCode, String) {
-            super::put_json(&self.router, uri, body, Some(token)).await
+        pub async fn put(&self, uri: &str, body: &str, token: Option<&str>) -> (StatusCode, String) {
+            put_json(&self.router, uri, body, token).await
         }
     }
 
@@ -1755,5 +1607,5 @@ mod tests {
             let _ = env::remove_var("SANATORIO_DATA_DIR");
         }
     }
-}
 
+}
