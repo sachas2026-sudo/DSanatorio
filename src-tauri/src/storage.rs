@@ -699,49 +699,6 @@ fn apply_data_backup_restore_inner(
     }
 }
 
-/// Impide dos instancias en producción (Windows). En dev se omite.
-pub struct InstanceLock {
-    #[cfg(windows)]
-    _file: Option<std::fs::File>,
-}
-
-pub fn try_acquire_single_instance_lock(
-    app: &tauri::AppHandle,
-) -> Result<InstanceLock, String> {
-    #[cfg(windows)]
-    {
-        if cfg!(debug_assertions) {
-            return Ok(InstanceLock { _file: None });
-        }
-        use std::fs::OpenOptions;
-        use std::os::windows::fs::OpenOptionsExt;
-
-        const ERROR_SHARING_VIOLATION: i32 = 32;
-
-        let dir = ensure_app_data_dir(app)?;
-        let lock_path = dir.join("sanatorio.lock");
-        match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .share_mode(0)
-            .open(&lock_path)
-        {
-            Ok(file) => Ok(InstanceLock { _file: Some(file) }),
-            Err(err) if err.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => Err(
-                "Ya hay otra ventana de Sanatorio abierta.\nCierre la otra antes de volver a abrir."
-                    .into(),
-            ),
-            Err(err) => Err(format!("No se pudo bloquear instancia única: {err}")),
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = app;
-        Ok(InstanceLock {})
-    }
-}
-
 fn dated_fragment_in_filename(name: &str) -> Option<String> {
     for part in name.split('.') {
         if is_valid_backup_date(part) {

@@ -1221,17 +1221,28 @@ pub fn build_router(state: AppState) -> Router {
 }
 
 pub fn run_server() {
-    // Protección: si la UI local ya está abierta (archivo de bloqueo presente),
+    // Protección: si la UI local ya está abierta (lock adquirido),
     // el servidor se niega a arrancar para evitar dos escritores simultáneos.
-    let lock_path = settings::data_dir().join("sanatorio.lock");
-    if lock_path.is_file() {
-        rfd::MessageDialog::new()
-            .set_title("Sanatorio - UI activa")
-            .set_description("Ya hay una instancia de la UI de escritorio abierta.\nEl servidor no puede arrancar mientras la UI esté activa.\nCierre la UI antes de iniciar el servidor.")
-            .set_buttons(rfd::MessageButtons::Ok)
-            .show();
-        std::process::exit(1);
-    }
+    let data_dir = settings::data_dir();
+    let _lock_guard = match crate::instance_lock::try_lock(&data_dir) {
+        Ok(guard) => guard,
+        Err(crate::instance_lock::LockError::Busy) => {
+            rfd::MessageDialog::new()
+                .set_title("Sanatorio - UI activa")
+                .set_description("Ya hay otra instancia (UI o servidor) usando los datos.")
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+            std::process::exit(1);
+        }
+        Err(crate::instance_lock::LockError::Io(e)) => {
+            rfd::MessageDialog::new()
+                .set_title("Sanatorio - Error")
+                .set_description(&e)
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+            std::process::exit(1);
+        }
+    };
 
     let _ = rustls::crypto::ring::default_provider().install_default();
     service::ensure_initialized().expect("init storage");

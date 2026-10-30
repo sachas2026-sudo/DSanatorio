@@ -8,45 +8,7 @@ use crate::core::config::settings;
 use super::dto::*;
 use super::repository;
 
-pub struct InstanceLock {
-    #[cfg(windows)]
-    _file: Option<std::fs::File>,
-}
 
-pub fn try_acquire_single_instance_lock(
-    _app: &tauri::AppHandle,
-) -> Result<InstanceLock, String> {
-    use std::fs::OpenOptions;
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-
-        const ERROR_SHARING_VIOLATION: i32 = 32;
-
-        let dir = settings::data_dir();
-        let _ = fs::create_dir_all(&dir);
-        let lock_path = dir.join("sanatorio.lock");
-        match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .share_mode(0)
-            .open(&lock_path)
-        {
-            Ok(file) => Ok(InstanceLock { _file: Some(file) }),
-            Err(err) if err.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => Err(
-                "Ya hay otra ventana de Sanatorio abierta.\nCierre la otra antes de volver a abrir."
-                    .into(),
-            ),
-            Err(err) => Err(format!("No se pudo bloquear instancia única: {err}")),
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(InstanceLock {})
-    }
-}
 
 pub fn ensure_initialized() -> Result<(), AppError> {
     let db_path = db::db_file_path()?;

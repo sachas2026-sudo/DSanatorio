@@ -1,6 +1,8 @@
 mod core;
 mod modules;
 mod server;
+mod client_mode;
+mod instance_lock;
 mod whatsapp;
 
 #[cfg(test)]
@@ -12,18 +14,50 @@ use crate::core::config::settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Protección: si ya hay un servidor corriendo (detectado por su archivo de bloqueo),
-    // la UI local no debe abrirse para evitar dos escritores simultáneos.
-    let data_dir = settings::data_dir();
-    let lock_path = data_dir.join("sanatorio.lock");
-    if lock_path.is_file() {
+    use crate::client_mode::{load_config, StartupPlan};
+
+    let config = match load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            rfd::MessageDialog::new()
+                .set_title("Sanatorio - Configuración inválida")
+                .set_description(&e)
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+            std::process::exit(1);
+        }
+    };
+
+    let plan = StartupPlan::for_mode(config.mode);
+    let prepare_local = plan.prepare_local_storage;
+
+    // Adquirir lock una sola vez (si aplica)
+    let lock_result = if plan.check_server_lock {
+        let data_dir = settings::data_dir();
+        Some(crate::instance_lock::try_lock(&data_dir))
+    } else {
+        None
+    };
+
+    // Verificar resultado antes de continuar
+    if let Some(Err(crate::instance_lock::LockError::Busy)) = lock_result {
         rfd::MessageDialog::new()
             .set_title("Sanatorio - Servidor activo")
-            .set_description("Ya hay una instancia del servidor corriendo.\nLa UI local no puede abrirse mientras el servidor esté activo.\nCierre el servidor antes de usar la aplicación de escritorio.")
+            .set_description("Ya hay otra instancia (UI o servidor) usando los datos.")
             .set_buttons(rfd::MessageButtons::Ok)
             .show();
         std::process::exit(1);
     }
+    if let Some(Err(crate::instance_lock::LockError::Io(e))) = &lock_result {
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - Error")
+            .set_description(e)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
+
+    let lock_guard = lock_result.map(|r| r.unwrap());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -49,6 +83,7 @@ pub fn run() {
             modules::configuracion::commands::is_google_drive_installed,
             modules::configuracion::commands::get_google_drive_status,
             modules::configuracion::commands::pick_google_drive_folder,
+            modules::configuracion::commands::get_app_mode,
             
             modules::backups::commands::get_backup_dir,
             modules::backups::commands::get_backup_locations,
@@ -71,19 +106,11 @@ pub fn run() {
             modules::reportes::commands::export_distribucion_pdf,
             modules::reportes::commands::abrir_archivo,
         ])
-        .setup(|app| {
-            modules::configuracion::service::prepare_storage_on_startup(app.handle());
-            match modules::configuracion::service::try_acquire_single_instance_lock(app.handle()) {
-                Ok(lock) => {
-                    app.manage(lock);
-                }
-                Err(msg) => {
-                    rfd::MessageDialog::new()
-                        .set_title("Sanatorio")
-                        .set_description(&msg)
-                        .set_buttons(rfd::MessageButtons::Ok)
-                        .show();
-                    std::process::exit(1);
+        .setup(move |app| {
+            if prepare_local {
+                modules::configuracion::service::prepare_storage_on_startup(app.handle());
+                if let Some(guard) = lock_guard {
+                    app.manage(guard);
                 }
             }
             if cfg!(debug_assertions) {

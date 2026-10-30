@@ -302,3 +302,22 @@ pub fn pick_google_drive_folder() -> Option<String> {
         .pick_folder()
         .map(|p| p.to_string_lossy().into_owned())
 }
+
+
+#[tauri::command]
+pub fn get_app_mode() -> serde_json::Value {
+    use crate::client_mode;
+    match client_mode::load_config() {
+        Ok(cfg) => serde_json::json!({
+            "mode": match cfg.mode {
+                client_mode::AppMode::Local => "local",
+                client_mode::AppMode::Client => "client",
+            },
+            "serverUrl": cfg.server_url,
+        }),
+        Err(_) => serde_json::json!({
+            "mode": "local",
+            "serverUrl": null,
+        }),
+    }
+}
