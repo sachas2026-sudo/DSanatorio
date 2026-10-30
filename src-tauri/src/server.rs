@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::get,
@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::core::config::settings;
 use crate::core::db;
-use crate::modules::configuracion::dto::{Afiliado, CuotaAfiliado, PlanAfiliado, WriteResult};
+use crate::modules::configuracion::dto::{Afiliado, CuotaAfiliado, Patient, PatientWriteResult, PlanAfiliado, WriteResult};
 use crate::modules::configuracion::service;
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -128,6 +128,45 @@ struct CuotaRes {
     id: String,
     monto: f64,
     version: i32,
+}
+
+/// Body de POST/PUT de pacientes. Todos los campos editables de la tabla.
+/// `version` es Option para poder exigirla explícitamente en PUT y baja (400 si falta).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PatientReq {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    nombre: String,
+    #[serde(default)]
+    apellido: String,
+    #[serde(default)]
+    dni: String,
+    #[serde(default)]
+    telefono: String,
+    #[serde(default)]
+    email: String,
+    #[serde(default)]
+    domicilio: String,
+    #[serde(default)]
+    localidad: String,
+    #[serde(default)]
+    fecha_nacimiento: String,
+    #[serde(default)]
+    obra_social: String,
+    #[serde(default)]
+    notas: String,
+    #[serde(default)]
+    activo: Option<bool>,
+    #[serde(default)]
+    version: Option<i32>,
+}
+
+#[derive(Deserialize)]
+struct BajaPacienteReq {
+    #[serde(default)]
+    version: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -351,7 +390,14 @@ async fn get_pacientes(State(state): State<AppState>, headers: HeaderMap) -> Res
     if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
     if !role_allowed(&session.role, "/api/pacientes") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
     let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
-    Ok(Json(data.patients))
+    // Los dados de baja no se exponen por la API (load_patients ya los filtra en SQL;
+    // se deja el filtro explícito como defensa).
+    let activos: Vec<Patient> = data
+        .patients
+        .into_iter()
+        .filter(|p| p.deleted_at.is_none())
+        .collect();
+    Ok(Json(activos))
 }
 
 async fn get_medicos(State(state): State<AppState>, headers: HeaderMap) -> Result<impl IntoResponse, (StatusCode, axum::Json<serde_json::Value>)> {
@@ -524,6 +570,246 @@ fn conflict_response(current: Option<serde_json::Value>) -> (StatusCode, axum::J
             "current": current
         })),
     )
+}
+
+/// Crear y editar pacientes: admin y secretaria.
+fn can_write_pacientes(role: &str) -> bool {
+    matches!(role, "admin" | "secretaria")
+}
+
+/// Baja lógica de pacientes: solo admin.
+fn can_baja_pacientes(role: &str) -> bool {
+    matches!(role, "admin")
+}
+
+fn validation_response(message: &str) -> (StatusCode, axum::Json<serde_json::Value>) {
+    (
+        StatusCode::BAD_REQUEST,
+        axum::Json(serde_json::json!({"error": "validation", "message": message})),
+    )
+}
+
+fn internal_error_response() -> (StatusCode, axum::Json<serde_json::Value>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        axum::Json(serde_json::json!({"error": "internal"})),
+    )
+}
+
+fn not_found_response() -> (StatusCode, axum::Json<serde_json::Value>) {
+    (
+        StatusCode::NOT_FOUND,
+        axum::Json(serde_json::json!({"error": "not_found"})),
+    )
+}
+
+/// 409 con el paciente completo (camelCase, incluye version y deletedAt) o null.
+fn conflict_paciente_response(
+    current: Option<Patient>,
+) -> (StatusCode, axum::Json<serde_json::Value>) {
+    let current = current
+        .map(|p| serde_json::to_value(&p).unwrap_or(serde_json::Value::Null))
+        .unwrap_or(serde_json::Value::Null);
+    (
+        StatusCode::CONFLICT,
+        axum::Json(serde_json::json!({"error": "conflict", "current": current})),
+    )
+}
+
+/// Parsea el body ya autenticado. Cualquier error de JSON es 400 (no 422).
+fn parse_patient_req(
+    body: &[u8],
+) -> Result<PatientReq, (StatusCode, axum::Json<serde_json::Value>)> {
+    serde_json::from_slice(body).map_err(|_| validation_response("JSON inválido"))
+}
+
+fn patient_from_req(req: PatientReq, id: String, version: i32) -> Patient {
+    Patient {
+        id,
+        nombre: req.nombre,
+        apellido: req.apellido,
+        dni: req.dni,
+        telefono: req.telefono,
+        email: req.email,
+        domicilio: req.domicilio,
+        localidad: req.localidad,
+        fecha_nacimiento: req.fecha_nacimiento,
+        obra_social: req.obra_social,
+        notas: req.notas,
+        activo: req.activo,
+        version,
+        deleted_at: None,
+    }
+}
+
+/// Audita PERMISO_DENEGADO en su propia transacción corta y devuelve el 403.
+fn denegar_permiso_pacientes(
+    session: &Session,
+    entidad_id: Option<&str>,
+    detalle: &str,
+) -> (StatusCode, axum::Json<serde_json::Value>) {
+    let mut conn = match db::open_connection() {
+        Ok(c) => c,
+        Err(_) => return internal_error_response(),
+    };
+    let tx = match conn.transaction() {
+        Ok(t) => t,
+        Err(_) => return internal_error_response(),
+    };
+    if service::write_audit_log(
+        &tx,
+        &session.username,
+        &session.role,
+        "PERMISO_DENEGADO",
+        "pacientes",
+        entidad_id,
+        Some(detalle),
+    )
+    .is_err()
+    {
+        return internal_error_response();
+    }
+    if tx.commit().is_err() {
+        return internal_error_response();
+    }
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({"error": "role_forbidden"})),
+    )
+}
+
+async fn post_paciente(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if !can_write_pacientes(&session.role) {
+        return Err(denegar_permiso_pacientes(
+            &session,
+            None,
+            "intento de crear paciente sin rol admin o secretaria",
+        ));
+    }
+    check_write_enabled(&state).await?;
+
+    let req = parse_patient_req(&body)?;
+    let id = req.id.clone().unwrap_or_default();
+    if id.trim().is_empty() {
+        return Err(validation_response("id es requerido"));
+    }
+    if req.nombre.trim().is_empty() {
+        return Err(validation_response("nombre es requerido"));
+    }
+    if req.apellido.trim().is_empty() {
+        return Err(validation_response("apellido es requerido"));
+    }
+
+    // POST ignora la versión del body y fuerza 1.
+    let patient = patient_from_req(req, id.clone(), 1);
+    match service::create_paciente(&patient, &session.username, &session.role) {
+        Ok((PatientWriteResult::Saved, _)) => {
+            Ok(Json(serde_json::json!({"id": id, "version": 1})))
+        }
+        Ok((PatientWriteResult::Conflict { .. }, current)) => {
+            Err(conflict_paciente_response(current))
+        }
+        Ok((PatientWriteResult::NotFound, _)) => Err(not_found_response()),
+        Err(_) => Err(internal_error_response()),
+    }
+}
+
+/// PUT con reemplazo total salvo `activo` ausente = conservar el valor actual.
+async fn put_paciente(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if !can_write_pacientes(&session.role) {
+        return Err(denegar_permiso_pacientes(
+            &session,
+            Some(&id),
+            "intento de editar paciente sin rol admin o secretaria",
+        ));
+    }
+    check_write_enabled(&state).await?;
+
+    let req = parse_patient_req(&body)?;
+    let body_id = req.id.clone().unwrap_or_default();
+    if body_id.trim().is_empty() {
+        return Err(validation_response("id es requerido"));
+    }
+    if body_id != id {
+        return Err(validation_response(
+            "id del body no coincide con el id de la ruta",
+        ));
+    }
+    if req.nombre.trim().is_empty() {
+        return Err(validation_response("nombre es requerido"));
+    }
+    if req.apellido.trim().is_empty() {
+        return Err(validation_response("apellido es requerido"));
+    }
+    let version = match req.version {
+        Some(v) => v,
+        None => return Err(validation_response("version es requerida")),
+    };
+
+    let patient = patient_from_req(req, id.clone(), version);
+    match service::update_paciente(&patient, &session.username, &session.role) {
+        Ok((PatientWriteResult::Saved, _)) => Ok(Json(
+            serde_json::json!({"id": id, "version": version + 1}),
+        )),
+        Ok((PatientWriteResult::Conflict { .. }, current)) => {
+            Err(conflict_paciente_response(current))
+        }
+        Ok((PatientWriteResult::NotFound, _)) => Err(not_found_response()),
+        Err(_) => Err(internal_error_response()),
+    }
+}
+
+/// Baja lógica: setea deleted_at, nunca borra físicamente. Solo admin.
+async fn baja_paciente(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if !can_baja_pacientes(&session.role) {
+        return Err(denegar_permiso_pacientes(
+            &session,
+            Some(&id),
+            "intento de dar de baja paciente sin rol admin",
+        ));
+    }
+    check_write_enabled(&state).await?;
+
+    let req: BajaPacienteReq = serde_json::from_slice(&body)
+        .map_err(|_| validation_response("JSON inválido"))?;
+    let version = match req.version {
+        Some(v) => v,
+        None => return Err(validation_response("version es requerida")),
+    };
+
+    match service::baja_paciente(&id, version, &session.username, &session.role) {
+        Ok((PatientWriteResult::Saved, _)) => Ok(Json(
+            serde_json::json!({"id": id, "version": version + 1}),
+        )),
+        Ok((PatientWriteResult::Conflict { .. }, current)) => {
+            Err(conflict_paciente_response(current))
+        }
+        Ok((PatientWriteResult::NotFound, _)) => Err(not_found_response()),
+        Err(_) => Err(internal_error_response()),
+    }
 }
 
 async fn post_afiliado(
@@ -911,6 +1197,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/write-enabled", get(get_write_enabled).post(post_write_enabled))
         .route("/api/audit-log", get(get_audit_log))
         .route("/api/pacientes", get(get_pacientes))
+        .route("/api/pacientes", axum::routing::post(post_paciente).layer(DefaultBodyLimit::max(64 * 1024)))
+        .route("/api/pacientes/:id", axum::routing::put(put_paciente).layer(DefaultBodyLimit::max(64 * 1024)))
+        .route("/api/pacientes/:id/baja", axum::routing::post(baja_paciente).layer(DefaultBodyLimit::max(64 * 1024)))
         .route("/api/medicos", get(get_medicos))
         .route("/api/agenda", get(get_agenda))
         .route("/api/pagos", get(get_pagos))
