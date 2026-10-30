@@ -140,4 +140,163 @@ mod tests {
             path.display()
         );
     }
+
+    /// Base temporal con el esquema completo (migraciones reales) y el lock compartido.
+    fn setup_schema_temp_db() -> (
+        Connection,
+        tempfile::TempDir,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
+        let guard = crate::core::db::TEST_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::env::set_var("SANATORIO_DATA_DIR", temp_dir.path().to_str().unwrap());
+        let conn = open_connection().unwrap();
+        (conn, temp_dir, guard)
+    }
+
+    fn patient_de_prueba(id: &str, nombre: &str) -> crate::modules::configuracion::dto::Patient {
+        crate::modules::configuracion::dto::Patient {
+            id: id.to_string(),
+            nombre: nombre.to_string(),
+            apellido: "Perez".to_string(),
+            dni: "12345678".to_string(),
+            telefono: String::new(),
+            email: String::new(),
+            domicilio: String::new(),
+            localidad: String::new(),
+            fecha_nacimiento: String::new(),
+            obra_social: String::new(),
+            notas: String::new(),
+            activo: Some(true),
+            version: 1,
+            deleted_at: None,
+        }
+    }
+
+    #[test]
+    fn test_save_app_data_no_borra_paciente_dado_de_baja() {
+        use rusqlite::OptionalExtension;
+        use crate::modules::configuracion::{dto::PatientWriteResult, repository, service};
+
+        let (mut conn, _tmp, _guard) = setup_schema_temp_db();
+
+        let patient = patient_de_prueba("p-baja", "Ana");
+        {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            repository::create_patient(&tx, &patient, "admin", "admin").unwrap();
+            tx.commit().unwrap();
+        }
+
+        conn.execute(
+            "INSERT INTO doctors (id, nombre, apellido, especialidad) VALUES ('d1', 'Doc', 'Tor', 'Clinica')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO appointments (id, patient_id, doctor_id, fecha_hora) VALUES ('c1', 'p-baja', 'd1', '2026-01-01T10:00:00')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO payments (id, patient_id, doctor_id, monto, fecha) VALUES ('pay1', 'p-baja', 'd1', 1000, '2026-01-01T10:00:00')",
+            [],
+        )
+        .unwrap();
+
+        {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            let res = repository::baja_patient(&tx, "p-baja", 1, "admin", "admin").unwrap();
+            assert!(matches!(res, PatientWriteResult::Saved));
+            tx.commit().unwrap();
+        }
+
+        let data = service::load_app_data().unwrap();
+        assert!(
+            data.patients.is_empty(),
+            "load_app_data no debe devolver pacientes dados de baja"
+        );
+        assert_eq!(data.appointments.len(), 1);
+        assert_eq!(data.payments.len(), 1);
+
+        // Guardado de estado completo tal como lo hace la UI.
+        let json = serde_json::to_string(&data).unwrap();
+        service::save_app_data(&json).unwrap();
+
+        // (a) la fila sigue existiendo y deleted_at sigue no nulo
+        let deleted_at: Option<Option<String>> = conn
+            .query_row(
+                "SELECT deleted_at FROM patients WHERE id = 'p-baja'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap();
+        let deleted_at = deleted_at.expect("la fila del paciente debe seguir existiendo");
+        assert!(deleted_at.is_some(), "deleted_at debe seguir no nulo");
+
+        // (b) turno y pago siguen existiendo
+        let citas: i64 = conn
+            .query_row("SELECT COUNT(*) FROM appointments WHERE id = 'c1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(citas, 1, "el turno debe seguir existiendo");
+        let pagos: i64 = conn
+            .query_row("SELECT COUNT(*) FROM payments WHERE id = 'pay1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(pagos, 1, "el pago debe seguir existiendo");
+
+        // (c) load_app_data sigue sin devolverlo
+        let after = service::load_app_data().unwrap();
+        assert!(after.patients.is_empty());
+        assert_eq!(after.appointments.len(), 1);
+        assert_eq!(after.payments.len(), 1);
+    }
+
+    #[test]
+    fn test_save_app_data_edita_paciente_activo() {
+        use crate::modules::configuracion::{repository, service};
+
+        let (mut conn, _tmp, _guard) = setup_schema_temp_db();
+
+        let patient = patient_de_prueba("p-activo", "Ana");
+        {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .unwrap();
+            repository::create_patient(&tx, &patient, "admin", "admin").unwrap();
+            tx.commit().unwrap();
+        }
+
+        let data = service::load_app_data().unwrap();
+        assert_eq!(data.patients.len(), 1);
+        assert_eq!(data.patients[0].nombre, "Ana");
+
+        let json = serde_json::to_string(&data).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value["patients"][0]["nombre"] = serde_json::json!("Ana Editada");
+        let edited = serde_json::to_string(&value).unwrap();
+
+        service::save_app_data(&edited).unwrap();
+
+        let after = service::load_app_data().unwrap();
+        assert_eq!(after.patients.len(), 1);
+        assert_eq!(after.patients[0].nombre, "Ana Editada");
+        assert!(after.patients[0].deleted_at.is_none());
+
+        let en_base: String = conn
+            .query_row("SELECT nombre FROM patients WHERE id = 'p-activo'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(en_base, "Ana Editada");
+    }
 }

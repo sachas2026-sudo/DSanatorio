@@ -203,7 +203,7 @@ fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppE
              DELETE FROM dias_libres;
              DELETE FROM atenciones_mensuales;
              DELETE FROM pagos_cancelados;
-             DELETE FROM patients;
+             DELETE FROM patients WHERE deleted_at IS NULL;
              DELETE FROM doctors;
              DELETE FROM especialidades_custom;
              DELETE FROM obras_sociales_custom;
