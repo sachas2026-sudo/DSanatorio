@@ -3,7 +3,7 @@ use crate::core::error::AppError;
 use super::dto::*;
 
 pub fn load_patients(conn: &Connection) -> Result<Vec<Patient>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version, deleted_at FROM patients WHERE deleted_at IS NULL")?;
+    let mut stmt = conn.prepare("SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, COALESCE(version, 1), deleted_at FROM patients WHERE deleted_at IS NULL")?;
     let rows = stmt.query_map([], |row| {
         Ok(Patient {
             id: row.get(0)?,
@@ -850,6 +850,183 @@ pub fn write_audit_log(
         ],
     )?;
     Ok(())
+}
+
+/// Crea un paciente nuevo. Si el id ya existe (aunque esté dado de baja) devuelve
+/// Conflict y nunca lo resucita. La auditoría se escribe en la MISMA transacción.
+pub fn create_patient(
+    tx: &Transaction<'_>,
+    patient: &super::dto::Patient,
+    usuario: &str,
+    rol: &str,
+) -> Result<super::dto::PatientWriteResult, AppError> {
+    let existing: Option<i32> = tx.query_row(
+        "SELECT COALESCE(version, 1) FROM patients WHERE id = ?1",
+        params![&patient.id],
+        |row| row.get(0),
+    ).optional()?;
+
+    match existing {
+        Some(v) => {
+            Ok(super::dto::PatientWriteResult::Conflict { current_version: v })
+        }
+        None => {
+            tx.execute(
+                "INSERT INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 1, NULL)",
+                params![
+                    &patient.id,
+                    &patient.nombre,
+                    &patient.apellido,
+                    &patient.dni,
+                    &patient.telefono,
+                    &patient.email,
+                    &patient.domicilio,
+                    &patient.localidad,
+                    &patient.fecha_nacimiento,
+                    &patient.obra_social,
+                    &patient.notas,
+                    if patient.activo.unwrap_or(true) { 1 } else { 0 },
+                ],
+            )?;
+            write_audit_log(
+                tx,
+                usuario,
+                rol,
+                "CREATE_PACIENTE",
+                "patient",
+                Some(&patient.id),
+                Some("Alta de paciente por API"),
+            )?;
+            Ok(super::dto::PatientWriteResult::Saved)
+        }
+    }
+}
+
+/// Actualiza un paciente existente. Reemplazo total de las 12 columnas editables;
+/// si `activo` viene None se conserva el valor actual de la base.
+/// Un paciente dado de baja no se edita (Conflict).
+pub fn update_patient(
+    tx: &Transaction<'_>,
+    patient: &super::dto::Patient,
+    usuario: &str,
+    rol: &str,
+) -> Result<super::dto::PatientWriteResult, AppError> {
+    let row: Option<(i32, Option<String>, i32)> = tx.query_row(
+        "SELECT COALESCE(version, 1), deleted_at, activo FROM patients WHERE id = ?1",
+        params![&patient.id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).optional()?;
+
+    match row {
+        None => {
+            Ok(super::dto::PatientWriteResult::NotFound)
+        }
+        Some((v, deleted_at, activo_actual)) => {
+            if deleted_at.is_some() {
+                return Ok(super::dto::PatientWriteResult::Conflict { current_version: v });
+            }
+            if v != patient.version {
+                return Ok(super::dto::PatientWriteResult::Conflict { current_version: v });
+            }
+            // activo: si viene None, conservar el valor actual de la base
+            let activo_val = match patient.activo {
+                Some(b) => if b { 1 } else { 0 },
+                None => activo_actual,
+            };
+            let affected = tx.execute(
+                "UPDATE patients SET nombre=?1, apellido=?2, dni=?3, telefono=?4, email=?5, domicilio=?6, localidad=?7, fecha_nacimiento=?8, obra_social=?9, notas=?10, activo=?11, version=COALESCE(version,1)+1 WHERE id=?12 AND COALESCE(version,1)=?13",
+                params![
+                    &patient.nombre,
+                    &patient.apellido,
+                    &patient.dni,
+                    &patient.telefono,
+                    &patient.email,
+                    &patient.domicilio,
+                    &patient.localidad,
+                    &patient.fecha_nacimiento,
+                    &patient.obra_social,
+                    &patient.notas,
+                    activo_val,
+                    &patient.id,
+                    &patient.version,
+                ],
+            )?;
+            if affected == 0 {
+                // Re-read current version in case of conflict
+                let current: i32 = tx.query_row(
+                    "SELECT COALESCE(version, 1) FROM patients WHERE id = ?1",
+                    params![&patient.id],
+                    |row| row.get(0),
+                ).unwrap_or(1);
+                Ok(super::dto::PatientWriteResult::Conflict { current_version: current })
+            } else {
+                write_audit_log(
+                    tx,
+                    usuario,
+                    rol,
+                    "UPDATE_PACIENTE",
+                    "patient",
+                    Some(&patient.id),
+                    Some("Edición de paciente por API"),
+                )?;
+                Ok(super::dto::PatientWriteResult::Saved)
+            }
+        }
+    }
+}
+
+/// Baja lógica de un paciente (setea deleted_at). Nunca borra físicamente.
+/// La auditoría BAJA_PACIENTE se escribe en la MISMA transacción.
+pub fn baja_patient(
+    tx: &Transaction<'_>,
+    id: &str,
+    version: i32,
+    usuario: &str,
+    rol: &str,
+) -> Result<super::dto::PatientWriteResult, AppError> {
+    let row: Option<(i32, Option<String>)> = tx.query_row(
+        "SELECT COALESCE(version, 1), deleted_at FROM patients WHERE id = ?1",
+        params![id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional()?;
+
+    match row {
+        None => {
+            Ok(super::dto::PatientWriteResult::NotFound)
+        }
+        Some((v, deleted_at)) => {
+            if deleted_at.is_some() {
+                return Ok(super::dto::PatientWriteResult::Conflict { current_version: v });
+            }
+            if v != version {
+                return Ok(super::dto::PatientWriteResult::Conflict { current_version: v });
+            }
+            let affected = tx.execute(
+                "UPDATE patients SET deleted_at = datetime('now'), version = COALESCE(version,1)+1 WHERE id = ?1 AND COALESCE(version,1) = ?2",
+                params![id, version],
+            )?;
+            if affected == 0 {
+                let current: i32 = tx.query_row(
+                    "SELECT COALESCE(version, 1) FROM patients WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                ).unwrap_or(1);
+                Ok(super::dto::PatientWriteResult::Conflict { current_version: current })
+            } else {
+                write_audit_log(
+                    tx,
+                    usuario,
+                    rol,
+                    "BAJA_PACIENTE",
+                    "patient",
+                    Some(id),
+                    Some("Baja lógica de paciente por API"),
+                )?;
+                Ok(super::dto::PatientWriteResult::Saved)
+            }
+        }
+    }
 }
 
 /// Carga los registros de auditoría (solo admin debería llamar a esto).

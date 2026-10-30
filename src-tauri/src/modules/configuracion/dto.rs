@@ -250,3 +250,10 @@ pub enum WriteResult {
     Saved,
     Conflict { current_version: i32 },
 }
+
+#[derive(Debug)]
+pub enum PatientWriteResult {
+    Saved,
+    Conflict { current_version: i32 },
+    NotFound,
+}
