@@ -1,11 +1,29 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+static RUNTIME_MODE: AtomicU8 = AtomicU8::new(0); // 0 = Local, 1 = Client
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AppMode {
     Local,
     Client,
+}
+
+impl AppMode {
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => AppMode::Client,
+            _ => AppMode::Local,
+        }
+    }
+    pub fn to_u8(self) -> u8 {
+        match self {
+            AppMode::Local => 0,
+            AppMode::Client => 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,10 +103,44 @@ pub fn load_config() -> Result<ClientConfig, String> {
     load_config_from(&config_path())
 }
 
+// --- Runtime mode (global, set once at startup) ---
+
+pub fn set_runtime_mode(mode: AppMode) {
+    RUNTIME_MODE.store(mode.to_u8(), Ordering::SeqCst);
+}
+
+pub fn is_client() -> bool {
+    AppMode::from_u8(RUNTIME_MODE.load(Ordering::SeqCst)) == AppMode::Client
+}
+
+pub fn current_mode() -> AppMode {
+    AppMode::from_u8(RUNTIME_MODE.load(Ordering::SeqCst))
+}
+
+pub fn ensure_local() -> Result<(), String> {
+    ensure_local_for(current_mode())
+}
+
+pub fn ensure_local_for(mode: AppMode) -> Result<(), String> {
+    match mode {
+        AppMode::Local => Ok(()),
+        AppMode::Client => Err("Modo cliente: operación no disponible".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    struct ModeGuard {
+        original: AppMode,
+    }
+    impl Drop for ModeGuard {
+        fn drop(&mut self) {
+            set_runtime_mode(self.original);
+        }
+    }
 
     #[test]
     fn inexistente_retorna_local() {
@@ -169,5 +221,78 @@ mod tests {
         assert!(!plan.check_server_lock);
         assert!(!plan.prepare_local_storage);
         assert!(!plan.acquire_instance_lock);
+    }
+
+    #[test]
+    fn ensure_local_for_local_ok() {
+        assert!(ensure_local_for(AppMode::Local).is_ok());
+    }
+
+    #[test]
+    fn ensure_local_for_client_err() {
+        let result = ensure_local_for(AppMode::Client);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Modo cliente: operación no disponible");
+    }
+
+    #[test]
+    fn runtime_mode_global() {
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _mode_guard = ModeGuard { original: current_mode() };
+        set_runtime_mode(AppMode::Client);
+        assert!(is_client());
+        assert_eq!(current_mode(), AppMode::Client);
+        assert!(ensure_local().is_err());
+        set_runtime_mode(AppMode::Local);
+        assert!(!is_client());
+        assert!(ensure_local().is_ok());
+    }
+
+    #[test]
+    fn client_mode_save_app_data_err_sin_archivos() {
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _mode_guard = ModeGuard { original: current_mode() };
+        set_runtime_mode(AppMode::Client);
+        let tmp = TempDir::new().unwrap();
+        std::env::set_var("SANATORIO_DATA_DIR", tmp.path().to_str().unwrap());
+        let result = crate::modules::configuracion::commands::save_app_data("{}".into());
+        assert!(result.is_err());
+        let entries: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().collect();
+        assert!(entries.is_empty(), "No debe crear archivos en modo Client");
+    }
+
+    #[test]
+    fn client_mode_load_app_data_err() {
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _mode_guard = ModeGuard { original: current_mode() };
+        set_runtime_mode(AppMode::Client);
+        let tmp = TempDir::new().unwrap();
+        std::env::set_var("SANATORIO_DATA_DIR", tmp.path().to_str().unwrap());
+        let result = crate::modules::configuracion::commands::load_app_data();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn client_mode_finalize_exit_ok_sin_escribir() {
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _mode_guard = ModeGuard { original: current_mode() };
+        set_runtime_mode(AppMode::Client);
+        let tmp = TempDir::new().unwrap();
+        std::env::set_var("SANATORIO_DATA_DIR", tmp.path().to_str().unwrap());
+        let result = crate::modules::backups::commands::finalize_exit("{}".into());
+        assert!(result.is_ok(), "finalize_exit debe retornar Ok en modo Client");
+        let entries: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().collect();
+        assert!(entries.is_empty(), "finalize_exit no debe escribir nada en modo Client");
+    }
+
+    #[test]
+    fn local_mode_comando_funciona() {
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _mode_guard = ModeGuard { original: current_mode() };
+        set_runtime_mode(AppMode::Local);
+        let tmp = TempDir::new().unwrap();
+        std::env::set_var("SANATORIO_DATA_DIR", tmp.path().to_str().unwrap());
+        let result = crate::modules::configuracion::commands::get_app_data_file_path();
+        assert!(result.is_ok(), "get_app_data_file_path debe funcionar en modo Local");
     }
 }

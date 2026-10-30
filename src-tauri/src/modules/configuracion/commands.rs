@@ -95,6 +95,7 @@ fn historico_dir() -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub fn load_app_data() -> Result<Option<String>, String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     match service::load_app_data() {
         Ok(data) => {
             let json = serde_json::to_string(&data).map_err(|e| e.to_string())?;
@@ -106,11 +107,13 @@ pub fn load_app_data() -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub fn save_app_data(json: String) -> Result<(), String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     service::save_app_data(&json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn get_app_data_file_path() -> Result<String, String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     Ok(settings::data_dir().join(db::DB_FILE).to_string_lossy().into_owned())
 }
 
@@ -139,6 +142,7 @@ pub fn get_install_info(app: tauri::AppHandle) -> Result<InstallInfo, String> {
 
 #[tauri::command]
 pub fn load_smtp_secret() -> Result<String, String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     let path = settings::data_dir().join(SMTP_SECRET_FILE);
     if !path.is_file() {
         return Ok(String::new());
@@ -148,6 +152,7 @@ pub fn load_smtp_secret() -> Result<String, String> {
 
 #[tauri::command]
 pub fn save_smtp_secret(secret: String) -> Result<(), String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     let path = settings::data_dir().join(SMTP_SECRET_FILE);
     if secret.trim().is_empty() {
         if path.is_file() {
@@ -163,6 +168,7 @@ pub fn save_smtp_secret(secret: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn load_auth_accounts() -> Result<String, String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     let path = settings::data_dir().join(AUTH_ACCOUNTS_FILE);
     if !path.is_file() {
         return Ok(String::new());
@@ -172,6 +178,7 @@ pub fn load_auth_accounts() -> Result<String, String> {
 
 #[tauri::command]
 pub fn save_auth_accounts(json: String) -> Result<(), String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     let path = settings::data_dir().join(AUTH_ACCOUNTS_FILE);
     if json.trim().is_empty() {
         if path.is_file() {
@@ -187,6 +194,7 @@ pub fn save_auth_accounts(json: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn save_historico_archive(filename: String, json: String) -> Result<String, String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     if !is_valid_historico_filename(&filename) {
         return Err("Nombre de archivo histórico inválido.".into());
     }
@@ -199,6 +207,7 @@ pub fn save_historico_archive(filename: String, json: String) -> Result<String, 
 
 #[tauri::command]
 pub fn read_historico_archive(filename: String) -> Result<String, String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     if !is_valid_historico_filename(&filename) {
         return Err("Nombre de archivo histórico inválido.".into());
     }
@@ -211,6 +220,7 @@ pub fn read_historico_archive(filename: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn list_historico_archives() -> Result<Vec<HistoricoArchiveEntry>, String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
     let dir = historico_dir()?;
     let mut out: Vec<HistoricoArchiveEntry> = Vec::new();
     let entries = fs::read_dir(&dir).map_err(|e| e.to_string())?;

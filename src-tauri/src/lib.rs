@@ -30,6 +30,7 @@ pub fn run() {
 
     let plan = StartupPlan::for_mode(config.mode);
     let prepare_local = plan.prepare_local_storage;
+    crate::client_mode::set_runtime_mode(config.mode);
 
     // Adquirir lock una sola vez (si aplica)
     let lock_result = if plan.check_server_lock {
