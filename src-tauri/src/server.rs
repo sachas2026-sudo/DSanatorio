@@ -2643,5 +2643,280 @@ mod tests {
 
         drop(test);
     }
+    #[tokio::test]
+    async fn test_put_feliz_200_version_y_audita() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"pac-test11","nombre":"Maria","apellido":"Lopez","dni":"12345678","telefono":"444","email":"maria@test.com","domicilio":"Calle Falsa 123","localidad":"Madrid","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota inicial","activo":true,"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "POST inicial");
+
+        let (status, body) = test.put(
+            "/api/pacientes/pac-test11",
+            r#"{"id":"pac-test11","nombre":"Maria Actualizada","apellido":"Lopez Diaz","dni":"12345678","telefono":"444","email":"maria@nuevo.com","domicilio":"Calle Real 456","localidad":"Barcelona","fechaNacimiento":"1985-05-15","obraSocial":"IOMA","notas":"nota actualizada","activo":false,"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "PUT feliz");
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["version"], 2);
+        assert_eq!(resp["id"], "pac-test11");
+
+        // Verificar en GET
+        let (_, body) = test.get("/api/pacientes", Some(&token_admin)).await;
+        let lista: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let p = lista.as_array().unwrap().iter().find(|p| p["id"] == "pac-test11").expect("pac-test11");
+        assert_eq!(p["nombre"], "Maria Actualizada");
+        assert_eq!(p["apellido"], "Lopez Diaz");
+        assert_eq!(p["activo"], false);
+
+        // Verificar audit log
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "audit-log");
+        let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            entradas_contienen(audit.as_array().unwrap(), "UPDATE_PACIENTE"),
+            "debe quedar UPDATE_PACIENTE en audit_log"
+        );
+
+        drop(test);
+    }
+    #[tokio::test]
+    async fn test_baja_con_admin_retorna_200_y_filtra_get() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"pac-baja-admin","nombre":"Luis","apellido":"Martinez","dni":"44444444","telefono":"444","email":"luis@test.com","domicilio":"Dir 4","localidad":"Ciudad D","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota inicial","activo":true,"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "POST inicial");
+
+        let (status, body) = test.post(
+            "/api/pacientes/pac-baja-admin/baja",
+            r#"{"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "baja admin");
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["version"], 2);
+        assert_eq!(resp["id"], "pac-baja-admin");
+
+        // Desaparece del GET
+        let (_, body) = test.get("/api/pacientes", Some(&token_admin)).await;
+        let lista: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            !lista.as_array().unwrap().iter().any(|p| p["id"] == "pac-baja-admin"),
+            "paciente dado de baja no debe aparecer en GET"
+        );
+
+        // Audit log - BAJA_PACIENTE
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "audit-log");
+        let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            entradas_contienen(audit.as_array().unwrap(), "BAJA_PACIENTE"),
+            "debe quedar BAJA_PACIENTE en audit_log"
+        );
+
+        // Verificar en base: fila sigue existiendo con deleted_at no nulo y version = 2
+        let conn = db::open_connection().unwrap();
+        let deleted_at: Option<String> = conn.query_row(
+            "SELECT deleted_at FROM patients WHERE id = 'pac-baja-admin'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert!(deleted_at.is_some(), "deleted_at debe ser no nulo");
+        let version: i32 = conn.query_row(
+            "SELECT version FROM patients WHERE id = 'pac-baja-admin'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(version, 2, "version debe ser 2 (anterior+1)");
+        drop(conn);
+
+        drop(test);
+    }
+    #[tokio::test]
+    async fn test_baja_con_secretaria_retorna_403() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_secretaria = test.login_as("secretaria").await;
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"pac-baja-secretaria","nombre":"Laura","apellido":"Gomez","dni":"55555555","telefono":"555","email":"laura@test.com","domicilio":"Dir 5","localidad":"Ciudad E","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota inicial","activo":true,"version":1}"#,
+            Some(&token_secretaria),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "secretaria crea");
+
+        let (status, body) = test.post(
+            "/api/pacientes/pac-baja-secretaria/baja",
+            r#"{"version":1}"#,
+            Some(&token_secretaria),
+        ).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "baja secretaria");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "role_forbidden");
+
+        // Verificar PERMISO_DENEGADO en audit
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "audit-log");
+        let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            entradas_contienen(audit.as_array().unwrap(), "PERMISO_DENEGADO"),
+            "debe quedar PERMISO_DENEGADO en audit_log"
+        );
+
+        drop(test);
+    }
+    #[tokio::test]
+    async fn test_baja_sin_version_retorna_400_y_404_y_409() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"pac-baja-sv","nombre":"Test","apellido":"User","dni":"66666666","telefono":"666","email":"test@test.com","domicilio":"Dir 6","localidad":"Ciudad F","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota"}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "POST");
+
+        let (status, body) = test.post(
+            "/api/pacientes/pac-baja-sv/baja",
+            r#"{"dummy":true}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "baja sin version");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+        assert_eq!(json["message"], "version es requerida");
+
+        let (status, body) = test.post(
+            "/api/pacientes/pac-inexistente/baja",
+            r#"{"version":99}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "baja id inexistente");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "not_found");
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"pac-version-vieja","nombre":"Version","apellido":"Vieja","dni":"99999999","telefono":"999","email":"vv@test.com","domicilio":"Dir 9","localidad":"Ciudad I","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota version vieja","activo":true,"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "POST pac-version-vieja");
+
+        let (status, body) = test.post(
+            "/api/pacientes/pac-version-vieja/baja",
+            r#"{"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "baja version 1 inicial");
+
+        let (status, body) = test.post(
+            "/api/pacientes/pac-version-vieja/baja",
+            r#"{"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::CONFLICT, "baja version vieja segunda vez");
+
+        drop(test);
+    }
+    #[tokio::test]
+    async fn test_sobre_paciente_dado_de_baja_put_y_post_y_segunda_baja() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, _body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"pac-baja-final","nombre":"Pedro","apellido":"Sanchez","dni":"88888888","telefono":"888","email":"pedro@test.com","domicilio":"Dir 8","localidad":"Ciudad H","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota","activo":true,"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "POST inicial");
+
+        let (status, _body) = test.post(
+            "/api/pacientes/pac-baja-final/baja",
+            r#"{"version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "primera baja");
+
+        let (status, body) = test.put(
+            "/api/pacientes/pac-baja-final",
+            r#"{"id":"pac-baja-final","nombre":"Editado","apellido":"Sanchez","version":2}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::CONFLICT, "PUT sobre dado de baja");
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["error"], "conflict", "PUT error debe ser conflict");
+        assert!(resp["current"]["deletedAt"].is_string(), "PUT current.deletedAt debe ser string");
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"pac-baja-final","nombre":"Otro","apellido":"Perez"}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::CONFLICT, "POST id dado de baja");
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["error"], "conflict", "POST error debe ser conflict");
+        assert!(resp["current"]["deletedAt"].is_string(), "POST current.deletedAt debe ser string");
+        assert_eq!(resp["current"]["version"], 2, "POST current.version debe ser 2");
+        assert_eq!(resp["current"]["nombre"], "Pedro", "POST current.nombre debe ser Pedro");
+
+        let (status, body) = test.post(
+            "/api/pacientes/pac-baja-final/baja",
+            r#"{"version":2}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::CONFLICT, "segunda baja");
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["error"], "conflict", "segunda baja error debe ser conflict");
+        if let Some(current) = resp.get("current") {
+            assert!(current["deletedAt"].is_string(), "segunda baja current.deletedAt debe ser string");
+        }
+
+        // Verificar en base: nombre sigue "Pedro", version == 2
+        let conn = db::open_connection().unwrap();
+        let nombre: String = conn.query_row(
+            "SELECT nombre FROM patients WHERE id = 'pac-baja-final'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(nombre, "Pedro", "nombre debe seguir siendo Pedro");
+        let version: i32 = conn.query_row(
+            "SELECT version FROM patients WHERE id = 'pac-baja-final'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(version, 2, "version debe ser 2");
+
+        // Verificar audit_log: exactamente 1 BAJA_PACIENTE y 0 UPDATE_PACIENTE para pac-baja-final
+        let baja_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE accion = 'BAJA_PACIENTE' AND entidad_id = 'pac-baja-final'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(baja_count, 1, "debe haber exactamente 1 BAJA_PACIENTE");
+        let update_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE accion = 'UPDATE_PACIENTE' AND entidad_id = 'pac-baja-final'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(update_count, 0, "no debe haber UPDATE_PACIENTE para pac-baja-final");
+        drop(conn);
+
+        drop(test);
+    }
 
 }
