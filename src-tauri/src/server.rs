@@ -700,6 +700,12 @@ async fn post_paciente(
     if id.trim().is_empty() {
         return Err(validation_response("id es requerido"));
     }
+    if id != id.trim()
+        || id.chars().any(|c| matches!(c, '/' | '\\' | '?' | '#' | '%'))
+        || id.len() > 64
+    {
+        return Err(validation_response("id inválido"));
+    }
     if req.nombre.trim().is_empty() {
         return Err(validation_response("nombre es requerido"));
     }
@@ -764,7 +770,7 @@ async fn put_paciente(
     let patient = patient_from_req(req, id.clone(), version);
     match service::update_paciente(&patient, &session.username, &session.role) {
         Ok((PatientWriteResult::Saved, _)) => Ok(Json(
-            serde_json::json!({"id": id, "version": version + 1}),
+            serde_json::json!({"id": id, "version": version.saturating_add(1)}),
         )),
         Ok((PatientWriteResult::Conflict { .. }, current)) => {
             Err(conflict_paciente_response(current))
@@ -802,7 +808,7 @@ async fn baja_paciente(
 
     match service::baja_paciente(&id, version, &session.username, &session.role) {
         Ok((PatientWriteResult::Saved, _)) => Ok(Json(
-            serde_json::json!({"id": id, "version": version + 1}),
+            serde_json::json!({"id": id, "version": version.saturating_add(1)}),
         )),
         Ok((PatientWriteResult::Conflict { .. }, current)) => {
             Err(conflict_paciente_response(current))
@@ -2915,6 +2921,89 @@ mod tests {
         ).unwrap();
         assert_eq!(update_count, 0, "no debe haber UPDATE_PACIENTE para pac-baja-final");
         drop(conn);
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_post_paciente_id_con_slash_retorna_400() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"a/b","nombre":"Test","apellido":"User"}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "id con slash");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+        assert_eq!(json["message"], "id inválido");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_post_paciente_id_con_espacios_retorna_400() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":" x ","nombre":"Test","apellido":"User"}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "id con espacios");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+        assert_eq!(json["message"], "id inválido");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_post_paciente_id_largo_retorna_400() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nombre":"Test","apellido":"User"}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "id largo");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+        assert_eq!(json["message"], "id inválido");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_put_paciente_id_raro_existente_funciona() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        // Insertar paciente con id raro directamente en la base
+        let conn = db::open_connection().unwrap();
+        conn.execute(
+            "INSERT INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, 1, NULL)",
+            params!["x y", "Raro", "Id", "12345678", "123", "raro@test.com", "Dir", "Ciudad", "1980-01-01", "OSDE", "nota"],
+        ).unwrap();
+        drop(conn);
+
+        let (status, body) = test.put(
+            "/api/pacientes/x%20y",
+            r#"{"id":"x y","nombre":"Raro Editado","apellido":"Id","version":1}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "PUT con id raro");
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["version"], 2);
 
         drop(test);
     }

@@ -922,7 +922,7 @@ pub fn create_patient(
                 usuario,
                 rol,
                 "CREATE_PACIENTE",
-                "patient",
+                "pacientes",
                 Some(&patient.id),
                 Some("Alta de paciente por API"),
             )?;
@@ -994,7 +994,7 @@ pub fn update_patient(
                     usuario,
                     rol,
                     "UPDATE_PACIENTE",
-                    "patient",
+                    "pacientes",
                     Some(&patient.id),
                     Some("Edición de paciente por API"),
                 )?;
@@ -1047,7 +1047,7 @@ pub fn baja_patient(
                     usuario,
                     rol,
                     "BAJA_PACIENTE",
-                    "patient",
+                    "pacientes",
                     Some(id),
                     Some("Baja lógica de paciente por API"),
                 )?;
