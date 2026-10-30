@@ -30,6 +30,34 @@ pub fn load_patients(conn: &Connection) -> Result<Vec<Patient>, AppError> {
     Ok(result)
 }
 
+/// Lee un paciente directo de la tabla por id, INCLUYENDO los dados de baja.
+/// No usa load_patients (esa filtra deleted_at IS NULL). Se usa para el cuerpo 409.
+pub fn get_patient_by_id(conn: &Connection, id: &str) -> Result<Option<Patient>, AppError> {
+    let patient = conn.query_row(
+        "SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, COALESCE(version, 1), deleted_at FROM patients WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(Patient {
+                id: row.get(0)?,
+                nombre: row.get(1)?,
+                apellido: row.get(2)?,
+                dni: row.get(3)?,
+                telefono: row.get(4)?,
+                email: row.get(5)?,
+                domicilio: row.get(6)?,
+                localidad: row.get(7)?,
+                fecha_nacimiento: row.get(8)?,
+                obra_social: row.get(9)?,
+                notas: row.get(10)?,
+                activo: Some(row.get::<_, i32>(11)? != 0),
+                version: row.get(12)?,
+                deleted_at: row.get(13)?,
+            })
+        },
+    ).optional()?;
+    Ok(patient)
+}
+
 pub fn save_patients(tx: &Transaction<'_>, patients: &[Patient]) -> Result<(), AppError> {
     for p in patients {
         let activo_val = if p.activo.unwrap_or(true) { 1 } else { 0 };

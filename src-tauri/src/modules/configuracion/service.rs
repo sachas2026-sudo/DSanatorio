@@ -170,6 +170,88 @@ pub fn save_cuota_afiliado(cuota: &CuotaAfiliado) -> Result<WriteResult, AppErro
     Ok(result)
 }
 
+/// Crea un paciente por registro con BEGIN IMMEDIATE.
+/// Commit solo si Saved; en Conflict se lee el paciente actual (incluido dado de
+/// baja) antes de soltar la transacción y se devuelve para el cuerpo 409.
+pub fn create_paciente(
+    patient: &Patient,
+    usuario: &str,
+    rol: &str,
+) -> Result<(PatientWriteResult, Option<Patient>), AppError> {
+    let mut conn = db::open_connection()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    match repository::create_patient(&tx, patient, usuario, rol)? {
+        PatientWriteResult::Saved => {
+            tx.commit()?;
+            Ok((PatientWriteResult::Saved, None))
+        }
+        PatientWriteResult::Conflict { current_version } => {
+            let current = repository::get_patient_by_id(&tx, &patient.id)?;
+            drop(tx); // rollback: no se escribió nada
+            Ok((PatientWriteResult::Conflict { current_version }, current))
+        }
+        PatientWriteResult::NotFound => {
+            drop(tx);
+            Ok((PatientWriteResult::NotFound, None))
+        }
+    }
+}
+
+/// Edita un paciente por registro con BEGIN IMMEDIATE.
+/// Commit solo si Saved; en Conflict se lee el paciente actual antes de soltar la
+/// transacción y se devuelve para el cuerpo 409.
+pub fn update_paciente(
+    patient: &Patient,
+    usuario: &str,
+    rol: &str,
+) -> Result<(PatientWriteResult, Option<Patient>), AppError> {
+    let mut conn = db::open_connection()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    match repository::update_patient(&tx, patient, usuario, rol)? {
+        PatientWriteResult::Saved => {
+            tx.commit()?;
+            Ok((PatientWriteResult::Saved, None))
+        }
+        PatientWriteResult::Conflict { current_version } => {
+            let current = repository::get_patient_by_id(&tx, &patient.id)?;
+            drop(tx); // rollback: no se escribió nada
+            Ok((PatientWriteResult::Conflict { current_version }, current))
+        }
+        PatientWriteResult::NotFound => {
+            drop(tx);
+            Ok((PatientWriteResult::NotFound, None))
+        }
+    }
+}
+
+/// Baja lógica de un paciente por registro con BEGIN IMMEDIATE.
+/// Commit solo si Saved; en Conflict se lee el paciente actual (incluido dado de
+/// baja) antes de soltar la transacción y se devuelve para el cuerpo 409.
+pub fn baja_paciente(
+    id: &str,
+    version: i32,
+    usuario: &str,
+    rol: &str,
+) -> Result<(PatientWriteResult, Option<Patient>), AppError> {
+    let mut conn = db::open_connection()?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    match repository::baja_patient(&tx, id, version, usuario, rol)? {
+        PatientWriteResult::Saved => {
+            tx.commit()?;
+            Ok((PatientWriteResult::Saved, None))
+        }
+        PatientWriteResult::Conflict { current_version } => {
+            let current = repository::get_patient_by_id(&tx, id)?;
+            drop(tx); // rollback: no se escribió nada
+            Ok((PatientWriteResult::Conflict { current_version }, current))
+        }
+        PatientWriteResult::NotFound => {
+            drop(tx);
+            Ok((PatientWriteResult::NotFound, None))
+        }
+    }
+}
+
 fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppError> {
     let mut conn = db::open_connection()?;
 
