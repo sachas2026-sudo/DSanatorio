@@ -2443,4 +2443,205 @@ mod tests {
         drop(test);
     }
 
+    #[tokio::test]
+    async fn test_put_paciente_reemplaza_columnas_y_audita() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        let token_mary = test.login_as("secretaria").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-put","nombre":"Ana","apellido":"Perez","dni":"11111111","telefono":"111","email":"ana@old.com","domicilio":"Calle 1","localidad":"La Plata","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota vieja","activo":true}"#,
+                Some(&token_admin),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "POST inicial: {}", body);
+
+        let (status, body) = test
+            .put(
+                "/api/pacientes/pac-put",
+                r#"{"id":"pac-put","nombre":"Ana Maria","apellido":"Perez Diaz","dni":"22222222","telefono":"222","email":"ana@new.com","domicilio":"Calle 2","localidad":"Berisso","fechaNacimiento":"1990-02-02","obraSocial":"IOMA","notas":"nota nueva","activo":false,"version":1}"#,
+                Some(&token_mary),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "PUT: {}", body);
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["id"], "pac-put");
+        assert_eq!(resp["version"], 2);
+
+        let (_, body) = test.get("/api/pacientes", Some(&token_admin)).await;
+        let lista: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let p = lista
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == "pac-put")
+            .expect("pac-put debe seguir existiendo");
+        assert_eq!(p["nombre"], "Ana Maria");
+        assert_eq!(p["apellido"], "Perez Diaz");
+        assert_eq!(p["dni"], "22222222");
+        assert_eq!(p["telefono"], "222");
+        assert_eq!(p["email"], "ana@new.com");
+        assert_eq!(p["domicilio"], "Calle 2");
+        assert_eq!(p["localidad"], "Berisso");
+        assert_eq!(p["fechaNacimiento"], "1990-02-02");
+        assert_eq!(p["obraSocial"], "IOMA");
+        assert_eq!(p["notas"], "nota nueva");
+        assert_eq!(p["activo"], false);
+        assert_eq!(p["version"], 2);
+
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "audit-log: {}", body);
+        let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            entradas_contienen(audit.as_array().unwrap(), "UPDATE_PACIENTE"),
+            "debe quedar UPDATE_PACIENTE en audit_log"
+        );
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_put_siguiente_mismo_version_retorna_409() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        // Crear paciente primero
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-version","nombre":"Primera","apellido":"Versión","dni":"99999999","telefono":"999","email":"v1@test.com","domicilio":"Dir 1","localidad":"Ciudad A","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota 1","activo":true,"version":1}"#,
+                Some(&token_admin),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "POST inicial: {}", body);
+
+        // PUT con versión correcta -> debería actualizar a versión 2
+        let (status, body) = test
+            .put(
+                "/api/pacientes/pac-version",
+                r#"{"id":"pac-version","nombre":"Editado","apellido":"Versión","dni":"99999999","telefono":"999","email":"v1@test.com","domicilio":"Dir 1","localidad":"Ciudad A","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota editada","activo":true,"version":1}"#,
+                Some(&token_admin),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "primer PUT: {}", body);
+
+        // PUT con misma versión (ya es 2) -> 409
+        let (status, body) = test
+            .put(
+                "/api/pacientes/pac-version",
+                r#"{"id":"pac-version","nombre":"Editado","apellido":"Versión","dni":"99999999","telefono":"999","email":"v1@test.com","domicilio":"Dir 1","localidad":"Ciudad A","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota editada","activo":true,"version":1}"#,
+                Some(&token_admin),
+            )
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "segundo PUT misma versión debe ser 409"
+        );
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["error"], "conflict");
+        assert_eq!(resp["current"]["version"], 2);
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_put_sin_version_retorna_400() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.put("/api/pacientes/pac-sin-ver", r#"{"id":"pac-sin-ver","nombre":"Sin","apellido":"Version","dni":"55555555","telefono":"555","email":"sin@test.com","domicilio":"Dir 5","localidad":"Ciudad E","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"sin ver"}"#, Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "PUT sin version");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+        assert_eq!(json["message"], "version es requerida");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_put_id_body_distinto_ruta_retorna_400() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        // Crear paciente primero con POST
+        let (status, body) = test.post(
+            "/api/pacientes",
+            r#"{"id":"pac-distinto","nombre":"Otro","apellido":"Perez","dni":"55555555","telefono":"555","email":"otro@test.com","domicilio":"Dir 5","localidad":"Ciudad E","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota inicial"}"#,
+            Some(&token_admin),
+        ).await;
+        assert_eq!(status, StatusCode::OK, "POST inicial");
+
+        let (status, body) = test.put("/api/pacientes/pac-distinto", r#"{"id":"pac-distinto","nombre":"Otro","apellido":"Perez","version":1}"#, Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "PUT inicial");
+
+        let (status, body) = test.put("/api/pacientes/pac-distinto", r#"{"id":"pac-otro","nombre":"Edita","apellido":"Perez","version":1}"#, Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "PUT id!=ruta");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+        assert_eq!(json["message"], "id del body no coincide con el id de la ruta");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_put_sobre_id_inexistente_retorna_404() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.put("/api/pacientes/pac-inexistente", r#"{"id":"pac-inexistente","nombre":"Nadie","apellido":"Nadie","version":1}"#, Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "PUT id inexistente");
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "not_found");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_put_sin_activo_conserva_activo_falso() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test.post("/api/pacientes", r#"{"id":"pac-activo","nombre":"Juan","apellido":"Perez","dni":"77777777","telefono":"777","email":"juan@test.com","domicilio":"Dir 7","localidad":"Ciudad G","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota inicial","activo":true,"version":1}"#, Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "POST inicial");
+
+        let (status, body) = test.put("/api/pacientes/pac-activo", r#"{"id":"pac-activo","nombre":"Juan","apellido":"Perez","version":1}"#, Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "PUT sin activo");
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["version"], 2);
+
+        let (_, body) = test.get("/api/pacientes", Some(&token_admin)).await;
+        let lista: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let p = lista.as_array().unwrap().iter().find(|p| p["id"] == "pac-activo").expect("pac-activo");
+        assert_eq!(p["activo"], true);
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_put_sobre_paciente_version_null_version1_200() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        test.enable_writes(&token_admin).await;
+
+        let mut conn = db::open_connection().unwrap();
+        conn.execute("INSERT INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, NULL, NULL)", params!["pac-version-null", "VersionNull", "Apellido", "88888888", "888", "vn@test.com", "Dir 8", "Ciudad H", "1980-01-01", "OSDE", "nota inicial"]).unwrap();
+        drop(conn);
+
+        let (status, body) = test.put("/api/pacientes/pac-version-null", r#"{"id":"pac-version-null","nombre":"VersionNull","apellido":"Actualizada","dni":"88888888","telefono":"888","email":"vn@test.com","domicilio":"Dir 8","localidad":"Ciudad H","fechaNacimiento":"1980-01-01","obraSocial":"OSDE","notas":"nota actualizada","version":1}"#, Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "PUT sobre version NULL");
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["version"], 2);
+
+        drop(test);
+    }
+
 }
