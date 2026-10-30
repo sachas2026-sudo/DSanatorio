@@ -1905,6 +1905,29 @@ mod tests {
         entries.iter().any(|e| e.get("accion").and_then(|v| v.as_str()) == Some(accion))
     }
 
+    /// Cuenta de prueba con los datos que espera `login_as`.
+    fn account(username: &str, role: &str, password: &str) -> Account {
+        Account {
+            username: username.to_string(),
+            role: role.to_string(),
+            display_name: username.to_string(),
+            turno: None,
+            password: Some(password.to_string()),
+            password_hash: None,
+            password_salt: None,
+            must_change_password: false,
+        }
+    }
+
+    /// Admin + secretaria + afiliado con las credenciales estándar de `login_as`.
+    fn cuentas_estandar() -> Vec<Account> {
+        vec![
+            account("Admin", "admin", "admin123"),
+            account("Mary", "secretaria", "mary123"),
+            account("Afiliado1", "afiliado", "afi123"),
+        ]
+    }
+
     /// Struct de ayuda que encapsula: Mutex global, carpeta temporal única con
     /// contador atómico, router de prueba y métodos de helper con auth Bearer.
     /// Se usa así:
@@ -2030,6 +2053,394 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.data_dir);
             let _ = env::remove_var("SANATORIO_DATA_DIR");
         }
+    }
+
+    #[tokio::test]
+    async fn test_post_paciente_secretaria_crea_y_get_lo_lista() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        let token_mary = test.login_as("secretaria").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-1","nombre":"Ana","apellido":"Perez","dni":"12345678"}"#,
+                Some(&token_mary),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "secretaria crea paciente: {}", body);
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["id"], "pac-1");
+        assert_eq!(resp["version"], 1);
+
+        let (status, body) = test.get("/api/pacientes", Some(&token_mary)).await;
+        assert_eq!(status, StatusCode::OK, "GET pacientes: {}", body);
+        let lista: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            lista.as_array().unwrap().iter().any(|p| p["id"] == "pac-1"),
+            "el paciente creado debe aparecer en el GET"
+        );
+
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "audit-log: {}", body);
+        let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            entradas_contienen(audit.as_array().unwrap(), "CREATE_PACIENTE"),
+            "debe quedar CREATE_PACIENTE en audit_log"
+        );
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_post_paciente_id_repetido_retorna_409() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token = test.login_as("admin").await;
+        test.enable_writes(&token).await;
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-dup","nombre":"Ana","apellido":"Perez"}"#,
+                Some(&token),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "primer POST: {}", body);
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-dup","nombre":"Otra","apellido":"Persona"}"#,
+                Some(&token),
+            )
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "id repetido debe ser 409: {}",
+            body
+        );
+        let resp: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(resp["error"], "conflict");
+        assert_eq!(resp["current"]["id"], "pac-dup");
+        assert_eq!(resp["current"]["nombre"], "Ana");
+        assert_eq!(resp["current"]["version"], 1);
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_post_paciente_campos_vacios_retorna_400() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token = test.login_as("admin").await;
+        test.enable_writes(&token).await;
+
+        let casos = [
+            r#"{"id":"   ","nombre":"Ana","apellido":"Perez"}"#,
+            r#"{"id":"pac-x","nombre":"   ","apellido":"Perez"}"#,
+            r#"{"id":"pac-y","nombre":"Ana","apellido":"   "}"#,
+        ];
+        for body in casos {
+            let (status, resp) = test.post("/api/pacientes", body, Some(&token)).await;
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "campos vacíos deben ser 400. body={} resp={}",
+                body,
+                resp
+            );
+            let json: serde_json::Value = serde_json::from_str(&resp).unwrap();
+            assert_eq!(json["error"], "validation", "body={} resp={}", body, resp);
+        }
+
+        // Ninguno de los tres casos debe haber creado un paciente.
+        let (_, body) = test.get("/api/pacientes", Some(&token)).await;
+        let lista: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            lista.as_array().unwrap().is_empty(),
+            "no debe crearse ningún paciente: {}",
+            body
+        );
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_afiliado_post_put_baja_pacientes_role_forbidden() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        let token_afiliado = test.login_as("afiliado").await;
+        test.enable_writes(&token_admin).await;
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-1","nombre":"Ana","apellido":"Perez"}"#,
+                Some(&token_admin),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "admin crea paciente: {}", body);
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-2","nombre":"Beto","apellido":"Gomez"}"#,
+                Some(&token_afiliado),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "afiliado POST: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "role_forbidden");
+
+        let (status, body) = test
+            .put(
+                "/api/pacientes/pac-1",
+                r#"{"id":"pac-1","nombre":"Editado","apellido":"Perez","version":1}"#,
+                Some(&token_afiliado),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "afiliado PUT: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "role_forbidden");
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes/pac-1/baja",
+                r#"{"version":1}"#,
+                Some(&token_afiliado),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "afiliado baja: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "role_forbidden");
+
+        let (status, body) = test.get("/api/audit-log", Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "audit-log: {}", body);
+        let audit: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            entradas_contienen(audit.as_array().unwrap(), "PERMISO_DENEGADO"),
+            "debe quedar PERMISO_DENEGADO en audit_log"
+        );
+
+        // El paciente no se modificó ni se dio de baja.
+        let (_, body) = test.get("/api/pacientes", Some(&token_admin)).await;
+        let lista: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let p = lista
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == "pac-1")
+            .expect("pac-1 debe seguir existiendo");
+        assert_eq!(p["nombre"], "Ana");
+        assert!(p["deletedAt"].is_null());
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_afiliado_write_disabled_sigue_role_forbidden() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_afiliado = test.login_as("afiliado").await;
+        // A propósito NO se habilitan las escrituras: el rol debe chequearse primero.
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-1","nombre":"Ana","apellido":"Perez"}"#,
+                Some(&token_afiliado),
+            )
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "afiliado con writes off debe ser 403: {}",
+            body
+        );
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            json["error"], "role_forbidden",
+            "el rol se chequea antes que write_enabled: {}",
+            body
+        );
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_sin_token_body_invalido_retorna_401() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+
+        let (status, body) = test.post("/api/pacientes", "esto no es json", None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "POST sin token: {}", body);
+        let (status, body) = test
+            .put("/api/pacientes/pac-1", "esto no es json", None)
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "PUT sin token: {}", body);
+        let (status, body) = test
+            .post("/api/pacientes/pac-1/baja", "esto no es json", None)
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "baja sin token: {}", body);
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_secretaria_write_disabled_retorna_writes_disabled() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token = test.login_as("secretaria").await;
+        // writes desactivadas por defecto.
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-1","nombre":"Ana","apellido":"Perez"}"#,
+                Some(&token),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "POST: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "writes_disabled");
+
+        let (status, body) = test
+            .put(
+                "/api/pacientes/pac-1",
+                r#"{"id":"pac-1","nombre":"Ana","apellido":"Perez","version":1}"#,
+                Some(&token),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "PUT: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "writes_disabled");
+
+        // El rol se chequea antes que write_enabled: secretaria no puede dar de baja.
+        let (status, body) = test
+            .post("/api/pacientes/pac-1/baja", r#"{"version":1}"#, Some(&token))
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "baja secretaria: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "role_forbidden");
+
+        // Admin sí puede dar de baja: con writes apagadas da writes_disabled.
+        let token_admin = test.login_as("admin").await;
+        let (status, body) = test
+            .post(
+                "/api/pacientes/pac-1/baja",
+                r#"{"version":1}"#,
+                Some(&token_admin),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "baja admin: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "writes_disabled");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_must_change_password_bloquea_pacientes() {
+        let mut admin = account("Admin", "admin", "admin123");
+        admin.must_change_password = true;
+        let test = TestApp::new(Some(vec![admin])).await.unwrap();
+        let token = test.login_as("admin").await;
+
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"id":"pac-1","nombre":"Ana","apellido":"Perez"}"#,
+                Some(&token),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "POST: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "must_change_password");
+
+        let (status, body) = test
+            .put(
+                "/api/pacientes/pac-1",
+                r#"{"id":"pac-1","nombre":"Ana","apellido":"Perez","version":1}"#,
+                Some(&token),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "PUT: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "must_change_password");
+
+        let (status, body) = test
+            .post("/api/pacientes/pac-1/baja", r#"{"version":1}"#, Some(&token))
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "baja: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "must_change_password");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_body_invalido_retorna_400_nunca_422() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token = test.login_as("admin").await;
+        test.enable_writes(&token).await;
+
+        let (status, body) = test
+            .post("/api/pacientes", "esto no es json", Some(&token))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "POST JSON inválido: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+
+        let (status, body) = test
+            .put("/api/pacientes/pac-1", "esto no es json", Some(&token))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "PUT JSON inválido: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+
+        let (status, body) = test
+            .post("/api/pacientes/pac-1/baja", "esto no es json", Some(&token))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "baja JSON inválido: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+
+        // Body válido pero sin "id" -> 400 (nunca 422).
+        let (status, body) = test
+            .post(
+                "/api/pacientes",
+                r#"{"nombre":"Ana","apellido":"Perez"}"#,
+                Some(&token),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "POST sin id: {}", body);
+        assert_ne!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "validation");
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_post_paciente_body_grande_retorna_413() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token = test.login_as("admin").await;
+        test.enable_writes(&token).await;
+
+        let grande = "a".repeat(70 * 1024);
+        let body = format!(
+            r#"{{"id":"pac-big","nombre":"{}","apellido":"Perez"}}"#,
+            grande
+        );
+        assert!(body.len() > 64 * 1024);
+
+        let (status, resp) = test.post("/api/pacientes", &body, Some(&token)).await;
+        assert_eq!(
+            status,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "un body > 64 KB debe dar 413: {}",
+            resp
+        );
+
+        drop(test);
     }
 
 }
