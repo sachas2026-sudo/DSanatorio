@@ -95,6 +95,7 @@ mod tests {
 
     #[test]
     fn test_base_anterior_actualiza_sola() {
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir = temp_dir.path().to_path_buf();
         std::env::set_var("SANATORIO_DATA_DIR", data_dir.to_str().unwrap());
@@ -112,6 +113,7 @@ mod tests {
 
     #[test]
     fn test_sanatorio_data_dir_no_apunta_a_produccion() {
+        let _guard = crate::core::db::TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         // Los tests nunca deben escribir en C:\Sanatorio\datos.
         // SANATORIO_DATA_DIR debe apuntar a una carpeta temporal. Si no está definido,
         // se crea uno temporal automáticamente para que el test no falle.
