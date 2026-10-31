@@ -44,4 +44,7 @@ google_drive_config.json
 scripts/_tmp-probe.mjs
 eslint_out*.txt
 old_agenda*.tsx
-backups/
+/backups/
+
+# Copias de la base real para pruebas locales (datos de pacientes)
+test_copy/
