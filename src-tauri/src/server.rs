@@ -1254,13 +1254,31 @@ pub fn run_server() {
     let _ = std::fs::create_dir_all(&tls_dir);
     let cert_path = tls_dir.join("server-cert.pem");
     let key_path = tls_dir.join("server-key.pem");
-    if !cert_path.exists() || !key_path.exists() {
-        let key_pair = rcgen::KeyPair::generate().expect("key");
-        let mut params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).expect("params");
-        params.not_after = time::OffsetDateTime::now_utc() + time::Duration::days(3650);
-        let cert = params.self_signed(&key_pair).expect("cert");
-        std::fs::write(&cert_path, cert.pem()).expect("write cert");
-        std::fs::write(&key_path, key_pair.serialize_pem()).expect("write key");
+    let extra_names = match crate::tls_files::load_extra_names(&tls_dir) {
+        Ok(v) => v,
+        Err(e) => {
+            rfd::MessageDialog::new()
+                .set_title("Sanatorio - Error de certificado")
+                .set_description(&e)
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+            std::process::exit(1);
+        }
+    };
+    let cert_names = crate::tls_cert::desired_names(&extra_names);
+    match crate::tls_files::ensure_server_cert(&tls_dir, &cert_names) {
+        Ok(crate::tls_files::CertOutcome::Regenerated) => {
+            eprintln!("[tls] certificado generado para: {}", cert_names.join(", "));
+        }
+        Ok(crate::tls_files::CertOutcome::Unchanged) => {}
+        Err(e) => {
+            rfd::MessageDialog::new()
+                .set_title("Sanatorio - Error de certificado")
+                .set_description(&e)
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+            std::process::exit(1);
+        }
     }
 
     let accounts = load_accounts(&data_dir);
