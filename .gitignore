@@ -48,3 +48,5 @@ old_agenda*.tsx
 
 # Copias de la base real para pruebas locales (datos de pacientes)
 test_copy/
+
+opencode.json
