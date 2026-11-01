@@ -2,7 +2,6 @@
 //!
 //! Paso 4.3-A: solo funciones puras (sin disco ni red). La generación del
 //! certificado llega en el paso 4.3-B.
-#![allow(dead_code)] // temporal: se usa a partir del paso 4.3-B
 
 const MAX_NAME_LEN: usize = 253;
 

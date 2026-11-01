@@ -2,7 +2,6 @@
 //!
 //! Paso 4.3-B1: solo el módulo y sus tests. La conexión con `run_server()`
 //! llega en el paso 4.3-B2.
-#![allow(dead_code)] // temporal: se usa desde el paso 4.3-B2
 
 use std::net::IpAddr;
 use std::path::Path;
