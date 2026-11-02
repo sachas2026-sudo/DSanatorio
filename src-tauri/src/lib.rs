@@ -6,6 +6,7 @@ mod instance_lock;
 mod whatsapp;
 mod tls_cert;
 mod tls_files;
+mod api_client;
 
 #[cfg(test)]
 mod service_tests;
