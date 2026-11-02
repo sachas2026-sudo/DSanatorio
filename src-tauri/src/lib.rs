@@ -9,6 +9,9 @@ mod tls_files;
 mod api_client;
 mod client_session;
 mod client_commands;
+mod client_request;
+#[cfg(test)]
+mod test_support;
 
 #[cfg(test)]
 mod service_tests;
@@ -115,6 +118,7 @@ pub fn run() {
             client_commands::client_login,
             client_commands::client_logout,
             client_commands::client_session_info,
+            client_request::client_api,
         ])
         .setup(move |app| {
             if prepare_local {

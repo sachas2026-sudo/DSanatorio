@@ -4,8 +4,6 @@
 //! La interfaz recibe únicamente `SessionInfo`, nunca el token.
 //!
 //! Paso 4.4-B2. Los pedidos genéricos a la API llegan en 4.4-C.
-#![allow(dead_code)] // temporal: `conn()` se usa desde el paso 4.4-C
-
 use crate::api_client::build_http_client;
 use crate::client_mode::{self, AppMode, ClientConfig};
 use crate::client_session::{ClientSession, SessionInfo};
