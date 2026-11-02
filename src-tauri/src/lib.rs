@@ -8,6 +8,7 @@ mod tls_cert;
 mod tls_files;
 mod api_client;
 mod client_session;
+mod client_commands;
 
 #[cfg(test)]
 mod service_tests;
@@ -67,6 +68,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(client_commands::ClientState::new())
         .invoke_handler(tauri::generate_handler![
             modules::comunicacion::commands::send_email_gmail,
             modules::comunicacion::commands::send_agenda_email,
@@ -110,6 +112,9 @@ pub fn run() {
             modules::reportes::commands::save_to_local_google_drive,
             modules::reportes::commands::export_distribucion_pdf,
             modules::reportes::commands::abrir_archivo,
+            client_commands::client_login,
+            client_commands::client_logout,
+            client_commands::client_session_info,
         ])
         .setup(move |app| {
             if prepare_local {
