@@ -7,6 +7,7 @@ mod whatsapp;
 mod tls_cert;
 mod tls_files;
 mod api_client;
+mod client_session;
 
 #[cfg(test)]
 mod service_tests;
