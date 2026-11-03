@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { format } from 'date-fns'
+import { pushResumenDiarioToSupabase } from '../lib/supabaseSync'
 import { LoadErrorScreen } from '../shared/components/LoadErrorScreen'
 import { LoadingScreen } from '../shared/components/LoadingScreen'
 import { useConfirm } from './ConfirmContext'
@@ -322,6 +323,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       saveChainRef.current = saveChainRef.current
         .catch(() => undefined)
         .then(() => saveAppData(snapshot))
+        .then(() => {
+          if (snapshot.settings?.supabaseUrl && snapshot.settings?.supabaseAnonKey && snapshot.settings?.supabaseAutoSync !== false) {
+            void pushResumenDiarioToSupabase(snapshot).catch(() => {})
+          }
+        })
         .catch((err) => {
           console.error('No se pudieron guardar los datos en disco:', err)
           reportPersistError(
@@ -355,6 +361,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           setData(enriched)
         }
         setLastSyncTime(new Date())
+        if (enriched.settings?.supabaseUrl && enriched.settings?.supabaseAnonKey && enriched.settings?.supabaseAutoSync !== false) {
+          void pushResumenDiarioToSupabase(enriched).catch(() => {})
+        }
         return true
       }
       return false

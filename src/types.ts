@@ -250,6 +250,10 @@ export interface AppSettings {
   secretariaPuedeModificarTurnosOtrosUsuarios?: boolean
   /** Mostrar columna de acciones (editar/eliminar) en el listado de pagos */
   mostrarAccionesEnListaPagos?: boolean
+  supabaseUrl?: string
+  supabaseAnonKey?: string
+  supabaseAutoSync?: boolean
+  supabaseUltimaSync?: string
 }
 
 // ── Módulo Distribución por médico · Obras Sociales ─────────────────────────

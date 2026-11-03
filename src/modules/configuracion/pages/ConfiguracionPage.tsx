@@ -37,6 +37,7 @@ import {
   type GoogleDriveStatus,
 } from '../../../lib/googleDrive'
 import { canAccessBackup, canAccessConfiguracion } from '../../../lib/exportPermissions'
+import { testSupabaseConnection, pushHistorialResumenesToSupabase } from '../../../lib/supabaseSync'
 import { PermisosUsuariosHelpModal } from '../components/PermisosUsuariosHelpModal'
 import '../../../shared/components/google-drive-setup-modal.css'
 import '../../../shared/styles/pages.css'
@@ -83,6 +84,36 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
   const [permisosSaved, setPermisosSaved] = useState(false)
   const [permisosBusy, setPermisosBusy] = useState(false)
   const [showClave, setShowClave] = useState(false)
+  const [supabaseTestMsg, setSupabaseTestMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [supabaseTesting, setSupabaseTesting] = useState(false)
+  const [supabaseSyncingHistory, setSupabaseSyncingHistory] = useState(false)
+
+  async function handleTestSupabase() {
+    setSupabaseTesting(true)
+    setSupabaseTestMsg(null)
+    const res = await testSupabaseConnection(form.supabaseUrl || '', form.supabaseAnonKey || '')
+    setSupabaseTesting(false)
+    if (res.success) {
+      setSupabaseTestMsg({ type: 'ok', text: res.message })
+    } else {
+      setSupabaseTestMsg({ type: 'err', text: res.message })
+    }
+  }
+
+  async function handleSyncHistorySupabase() {
+    setSupabaseSyncingHistory(true)
+    setSupabaseTestMsg(null)
+    const res = await pushHistorialResumenesToSupabase(data, 30, {
+      url: form.supabaseUrl || '',
+      anonKey: form.supabaseAnonKey || '',
+    })
+    setSupabaseSyncingHistory(false)
+    if (res.success) {
+      setSupabaseTestMsg({ type: 'ok', text: `¡Se subieron ${res.subidos} días de historial a Supabase exitosamente!` })
+    } else {
+      setSupabaseTestMsg({ type: 'err', text: res.errores.join(', ') || 'Error al subir historial.' })
+    }
+  }
   const [dataFilePath, setDataFilePath] = useState<string | null>(null)
   const [backupLocations, setBackupLocations] = useState<string[]>([])
   const [installInfo, setInstallInfo] = useState<InstallInfo | null>(null)
@@ -240,6 +271,9 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
       secretariaPuedeModificarMesActual: form.secretariaPuedeModificarMesActual === true,
       secretariaPuedeModificarTurnosOtrosUsuarios: form.secretariaPuedeModificarTurnosOtrosUsuarios === true,
       mostrarAccionesEnListaPagos: form.mostrarAccionesEnListaPagos === true,
+      supabaseUrl: form.supabaseUrl?.trim(),
+      supabaseAnonKey: form.supabaseAnonKey?.trim(),
+      supabaseAutoSync: form.supabaseAutoSync !== false,
     })
     await new Promise((r) => window.setTimeout(r, 400))
     setSaving(false)
