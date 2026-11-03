@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import type { AppSettings } from '../types'
+import { isClientMode } from './appMode'
 
 const SMTP_SECRET_KEY = 'sanatorio-smtp-clave-v1'
 
@@ -17,6 +18,8 @@ export async function loadSmtpSecret(): Promise<string> {
 export async function saveSmtpSecret(secret: string): Promise<void> {
   const trimmed = secret.trim()
   if (isTauri()) {
+    // La clave SMTP es un archivo local de la PC servidor: en clientes no se guarda.
+    if (await isClientMode()) return
     await invoke('save_smtp_secret', { secret: trimmed })
     return
   }

@@ -22,7 +22,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     watch: {
-      ignored: ['**/src-tauri/**', '**/*.zip'],
+      ignored: ['**/src-tauri/**', '**/*.zip', '**/*.exe'],
     },
   },
   test: {

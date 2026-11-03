@@ -641,67 +641,156 @@ pub fn load_app_module(conn: &Connection, key: &str) -> Result<Vec<serde_json::V
 }
 
 /// Guarda un módulo como JSON en app_modules.
-pub fn load_afiliados_table(conn: &Connection) -> Result<Vec<serde_json::Value>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, nombre, version FROM afiliados")?;
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?}))
+// ---- Afiliados, planes y cuotas: tablas con el objeto JSON completo ----
+// Cada fila guarda el objeto entero en `data` (los campos reales de la UI) y
+// `version` como columna propia para la concurrencia por registro. Las filas
+// viejas (data NULL) se leen con la forma minima anterior.
+
+fn row_version(v: &serde_json::Value) -> i64 {
+    v.get("version")
+        .and_then(|x| x.as_i64())
+        .filter(|n| *n >= 1)
+        .unwrap_or(1)
+}
+
+fn load_json_table(conn: &Connection, table: &str, legacy_col: &str) -> Result<Vec<serde_json::Value>, AppError> {
+    let sql = format!("SELECT id, {legacy_col}, version, data FROM {table} ORDER BY rowid");
+    let mut stmt = conn.prepare(&sql)?;
+    let raw = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let legacy = match row.get_ref(1)? {
+            rusqlite::types::ValueRef::Text(t) => {
+                serde_json::Value::String(String::from_utf8_lossy(t).into_owned())
+            }
+            rusqlite::types::ValueRef::Real(f) => serde_json::json!(f),
+            rusqlite::types::ValueRef::Integer(i) => serde_json::json!(i),
+            _ => serde_json::Value::Null,
+        };
+        let version: Option<i64> = row.get(2)?;
+        let data: Option<String> = row.get(3)?;
+        Ok((id, legacy, version, data))
     })?;
     let mut res = Vec::new();
-    for r in rows { res.push(r?); }
+    for r in raw {
+        let (id, legacy, version, data) = r?;
+        match data {
+            Some(text) => {
+                let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+                    AppError::Database(format!("{table}: dato JSON invalido en '{id}': {e}"))
+                })?;
+                res.push(v);
+            }
+            None => {
+                let mut m = serde_json::Map::new();
+                m.insert("id".to_string(), serde_json::Value::String(id));
+                m.insert(legacy_col.to_string(), legacy);
+                m.insert("version".to_string(), serde_json::json!(version.unwrap_or(1)));
+                res.push(serde_json::Value::Object(m));
+            }
+        }
+    }
     Ok(res)
+}
+
+
+
+fn save_json_table(
+    tx: &Transaction<'_>,
+    table: &str,
+    legacy_col: &str,
+    values: &[serde_json::Value],
+) -> Result<(), AppError> {
+    tx.execute(&format!("DELETE FROM {table}"), [])?;
+ 
+
+
+
+
+
+
+
+
+   let sql = format!("INSERT INTO {table} (id, {legacy_col}, version, data) VALUES (?1, ?2, ?3, ?4)");
+    let mut stmt = tx.prepare(&sql)?;
+    for v in values {
+        let id = v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+ 
+
+
+
+
+
+
+           .ok_or_else(|| AppError::Database(format!("{table}: falta el id en un registro")))?;
+        let legacy = match v.get(legacy_col) {
+            Some(serde_json::Value::String(s)) => rusqlite::types::Value::Text(s.clone()),
+            Some(n) if n.is_number() => rusqlite::types::Value::Real(n.as_f64().unwrap_or(0.0)),
+            _ => rusqlite::types::Value::Null,
+ 
+
+
+
+
+       };
+        let data = serde_json::to_string(v).map_err(|e| {
+            AppError::Database(format!("{table}: no se pudo serializar '{id}': {e}"))
+        })?;
+        stmt.execute(params![id, legacy, row_version(v), data])?;
+ 
+
+
+
+
+   }
+    Ok(())
+}
+
+pub fn load_afiliados_table(conn: &Connection) -> Result<Vec<serde_json::Value>, AppError> {
+ 
+
+
+
+
+   load_json_table(conn, "afiliados", "nombre")
 }
 
 pub fn load_planes_table(conn: &Connection) -> Result<Vec<serde_json::Value>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, nombre, version FROM planes_afiliados")?;
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?}))
-    })?;
-    let mut res = Vec::new();
-    for r in rows { res.push(r?); }
-    Ok(res)
+ 
+
+
+
+   load_json_table(conn, "planes_afiliados", "nombre")
 }
 
 pub fn load_cuotas_table(conn: &Connection) -> Result<Vec<serde_json::Value>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, monto, version FROM cuotas_afiliados")?;
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "monto": row.get::<_, f64>(1)?}))
-    })?;
-    let mut res = Vec::new();
-    for r in rows { res.push(r?); }
-    Ok(res)
+ 
+
+
+
+   load_json_table(conn, "cuotas_afiliados", "monto")
 }
 
 pub fn save_afiliados_table(tx: &Transaction<'_>, values: &[serde_json::Value]) -> Result<(), AppError> {
-    tx.execute("DELETE FROM afiliados", [])?;
-    let mut stmt = tx.prepare("INSERT INTO afiliados (id, nombre, version) VALUES (?1, ?2, ?3)")?;
-    for v in values {
-        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
-        let nombre = v.get("nombre").and_then(|x| x.as_str()).unwrap_or("");
-        stmt.execute(params![id, nombre, 1])?;
-    }
-    Ok(())
+    save_json_table(tx, "afiliados", "nombre", values)
 }
+
+
+
 
 pub fn save_planes_table(tx: &Transaction<'_>, values: &[serde_json::Value]) -> Result<(), AppError> {
-    tx.execute("DELETE FROM planes_afiliados", [])?;
-    let mut stmt = tx.prepare("INSERT INTO planes_afiliados (id, nombre, version) VALUES (?1, ?2, ?3)")?;
-    for v in values {
-        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
-        let nombre = v.get("nombre").and_then(|x| x.as_str()).unwrap_or("");
-        stmt.execute(params![id, nombre, 1])?;
-    }
-    Ok(())
+    save_json_table(tx, "planes_afiliados", "nombre", values)
 }
 
-pub fn save_cuotas_table(tx: &Transaction<'_>, values: &[serde_json::Value]) -> Result<(), AppError> {
-    tx.execute("DELETE FROM cuotas_afiliados", [])?;
-    let mut stmt = tx.prepare("INSERT INTO cuotas_afiliados (id, monto, version) VALUES (?1, ?2, ?3)")?;
-    for v in values {
-        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
-        let monto = v.get("monto").and_then(|x| x.as_f64()).unwrap_or(0.0);
-        stmt.execute(params![id, monto, 1])?;
-    }
-    Ok(())
+
+
+
+pub fn save_cuotas_table(tx: 
+
+&Transaction<'_>, values: &[serde_json::Value]) -> Result<(), AppError> {
+    save_json_table(tx, "cuotas_afiliados", "monto", values)
 }
 
 /// Guarda un afiliado por registro con control de versión.
@@ -1081,4 +1170,106 @@ pub fn load_audit_log(conn: &Connection) -> Result<Vec<AuditLogEntry>, AppError>
         result.push(r?);
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod afiliados_roundtrip_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn conn_con_tablas() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(concat!(include_str!("../../../migrations/0006_afiliados_tablas.sql"), "\n", include_str!("../../../migrations/0008_afiliados_datos_completos.sql")))
+            .unwrap();
+        conn
+    }
+
+    #[test]
+    fn afiliados_roundtrip_no_pierde_campos() {
+        let conn = conn_con_tablas();
+        let afi = vec![json!({
+            "id": "a1",
+            "patientId": "p1",
+            "planId": "pl1",
+            "fechaInicio": "2026-01-15",
+            "activo": true
+        })];
+        let tx = conn.unchecked_transaction().unwrap();
+        save_afiliados_table(&tx, &afi).unwrap();
+        tx.commit().unwrap();
+        let loaded = load_afiliados_table(&conn).unwrap();
+        assert_eq!(loaded, afi, "guardar y recargar no debe perder campos del afiliado");
+    }
+
+    #[test]
+    fn afiliados_roundtrip_conserva_la_version() {
+        let conn = conn_con_tablas();
+        let afi = vec![json!({
+            "id": "a1",
+            "patientId": "p1",
+            "planId": "pl1",
+            "fechaInicio": "2026-01-15",
+            "activo": true,
+            "version": 3
+        })];
+        let tx = conn.unchecked_transaction().unwrap();
+        save_afiliados_table(&tx, &afi).unwrap();
+        tx.commit().unwrap();
+        let loaded = load_afiliados_table(&conn).unwrap();
+        assert_eq!(loaded[0]["version"], 3, "la version no debe reiniciarse a 1");
+    }
+}
+
+#[cfg(test)]
+mod tablas_json_extra_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn conn_con_tablas() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(concat!(
+            include_str!("../../../migrations/0006_afiliados_tablas.sql"),
+            "\n",
+            include_str!("../../../migrations/0008_afiliados_datos_completos.sql")
+        ))
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn filas_viejas_sin_data_se_leen_en_forma_minima() {
+        let conn = conn_con_tablas();
+        conn.execute("INSERT INTO afiliados (id, nombre, version) VALUES ('x', 'Viejo', 4)", [])
+            .unwrap();
+        let loaded = load_afiliados_table(&conn).unwrap();
+        assert_eq!(loaded, vec![json!({"id": "x", "nombre": "Viejo", "version": 4})]);
+    }
+
+    #[test]
+    fn registro_sin_id_da_error_y_no_borra_lo_anterior() {
+        let conn = conn_con_tablas();
+        conn.execute(
+            "INSERT INTO afiliados (id, nombre, version, data) VALUES ('keep', 'K', 1, '{\"id\":\"keep\"}')",
+            [],
+        )
+        .unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        let res = save_afiliados_table(&tx, &[json!({"patientId": "p1"})]);
+        assert!(res.is_err());
+        drop(tx); // rollback
+        assert_eq!(load_afiliados_table(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn planes_y_cuotas_conservan_todos_sus_campos() {
+        let conn = conn_con_tablas();
+        let planes = vec![json!({"id": "pl1", "nombre": "Plan A", "usos": 2, "version": 5})];
+        let cuotas = vec![json!({"id": "c1", "monto": 1500.5, "afiliadoId": "a1", "mes": "2026-01"})];
+        let tx = conn.unchecked_transaction().unwrap();
+        save_planes_table(&tx, &planes).unwrap();
+        save_cuotas_table(&tx, &cuotas).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(load_planes_table(&conn).unwrap(), planes);
+        assert_eq!(load_cuotas_table(&conn).unwrap(), cuotas);
+    }
 }

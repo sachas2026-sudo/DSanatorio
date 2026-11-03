@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Sanatorio V",
-  "version": "15.0.0",
+  "version": "16.0.0",
   "identifier": "com.sanatorio.gestion",
   "build": {
     "frontendDist": "../dist",
@@ -22,6 +22,8 @@
         "resizable": true,
         "fullscreen": false,
         "maximized": true,
+        "visible": true,
+        "focus": true,
         "decorations": false
       }
     ],

@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import {
   authenticate,
   canAccessPath,
@@ -20,7 +21,29 @@ import {
   type AuthSession,
   type LoginAttemptResult,
 } from '../lib/auth'
+import { isClientMode } from '../lib/appMode'
 import { useConfirm } from './ConfirmContext'
+
+type ClientSessionInfo = {
+  username: string
+  role: string
+  displayName: string
+  mustChangePassword: boolean
+}
+
+function isValidRole(role: string): role is AppRole {
+  return role === 'admin' || role === 'secretaria' || role === 'afiliado'
+}
+
+function sessionFromClientInfo(info: ClientSessionInfo): AuthSession | null {
+  if (!isValidRole(info.role)) return null
+  return {
+    username: info.username,
+    role: info.role,
+    displayName: info.displayName || info.username,
+    mustChangePassword: info.mustChangePassword,
+  }
+}
 
 type AuthCtx = {
   session: AuthSession | null
@@ -39,22 +62,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false
-    void ensureAuthAccountsLoaded()
-      .then(() => {
+    void (async () => {
+      try {
+        if (await isClientMode()) {
+          // En modo cliente la sesión real vive en Rust (el token nunca llega
+          // al frontend). Si la app se reinició, hay que volver a ingresar.
+          const info = await invoke<ClientSessionInfo | null>('client_session_info')
+          if (cancelled) return
+          const restored = info ? sessionFromClientInfo(info) : null
+          if (restored) {
+            storeSession(restored)
+            setSession(restored)
+          } else {
+            clearStoredSession()
+            setSession(null)
+          }
+          return
+        }
+        await ensureAuthAccountsLoaded()
         if (cancelled) return
         // Migrar todas las cuentas con contraseñas en texto plano
         void migrateAllPlainPasswordAccounts()
         setSession(revalidateStoredSession())
-        setAuthReady(true)
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error('Error al preparar autenticación:', err)
         if (cancelled) return
         // Intentar migración incluso si hay error al cargar cuentas
         void migrateAllPlainPasswordAccounts()
         setSession(revalidateStoredSession())
-        setAuthReady(true)
-      })
+      } finally {
+        if (!cancelled) setAuthReady(true)
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -62,6 +101,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (username: string, password: string): Promise<LoginAttemptResult> => {
+      if (await isClientMode()) {
+        try {
+          const info = await invoke<ClientSessionInfo>('client_login', {
+            username,
+            password,
+          })
+          const clientSession = sessionFromClientInfo(info)
+          if (!clientSession) {
+            return { ok: false, reason: 'invalid_credentials' }
+          }
+          storeSession(clientSession)
+          setSession(clientSession)
+          return { ok: true, session: clientSession }
+        } catch (err) {
+          const message =
+            typeof err === 'string' ? err : err instanceof Error ? err.message : ''
+          // Error de credenciales: se muestra el mensaje estándar del login.
+          if (/incorrect|credencial|usuario o contrase/i.test(message)) {
+            return { ok: false, reason: 'invalid_credentials' }
+          }
+          // Sin conexión / configuración: que LoginScreen muestre el error genérico.
+          throw err
+        }
+      }
       await ensureAuthAccountsLoaded()
       const wasDefaults = isUsingDefaultAccounts()
       const result = await authenticate(username, password)
@@ -85,6 +148,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     clearStoredSession()
     setSession(null)
+    void isClientMode().then((client) => {
+      if (client) void invoke('client_logout')
+    })
   }, [])
 
   const canAccess = useCallback(

@@ -75,9 +75,9 @@ const TARJETA_R = 2
  * entra y el nombre del encabezado se parte en tres líneas.
  */
 const PCT_FECHA = 7.4
-const PCT_MEDICO = 14.6
+const PCT_MEDICO = 16.1
 const PCT_PACIENTE = 12.4
-const PCT_MOTIVO = 7.2
+const PCT_MOTIVO = 5.7
 const PCT_MONTO = 7.5
 const PCT_OS = 7.1
 const PCT_TOTAL_MEDICO = 8.3
@@ -116,7 +116,7 @@ type PctsColumna = {
  */
 function pctsDeColumna(pageW: number): PctsColumna {
   if (pageW < 230) {
-    return { fecha: 8.5, medico: 16, paciente: 14, motivo: 12, monto: 10, total: 9.5 }
+    return { fecha: 8.5, medico: 17.5, paciente: 14, motivo: 10.5, monto: 10, total: 9.5 }
   }
   return {
     fecha: PCT_FECHA,
@@ -240,6 +240,7 @@ export function buildDistribucionObrasSocialesPdf(params: {
         filas: recortar(rows, indices),
         titulo: nGrupo === 0 ? undefined : `CONTINUACIÓN · ${nGrupo + 1} de ${grupos.length}`,
         startY: nGrupo === 0 ? bannerBottom + 3 : MARGEN + 4,
+        mostrarPaciente: false,
       }),
     )
   })
@@ -664,7 +665,6 @@ type MedidasEncabezado = {
 const HEAD_FONT = 9
 const HEAD_LINE_H = 4.1
 const HEAD_PAD_Y = 1.6
-const ROTULOS_FIJOS = ['Fecha', 'Médico', 'Paciente', 'Motivo de la Consulta', 'Monto']
 
 /**
  * Mide el encabezado de dos filas (rótulos de % arriba, nombres de columna abajo).
@@ -679,6 +679,7 @@ function medirEncabezado(
   doc: jsPDF,
   obras: DistribucionPdfObra[],
   anchos: number[],
+  rotulos: string[],
 ): MedidasEncabezado {
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(HEAD_FONT)
@@ -686,8 +687,9 @@ function medirEncabezado(
   const partir = (texto: string, w: number) =>
     doc.splitTextToSize(texto, w - 2.4) as string[]
 
-  const lineasFijas = ROTULOS_FIJOS.map((t, i) => partir(t, anchos[i]!))
-  const lineasObras = obras.map((o, i) => partir(o.nombre, anchos[5 + i]!))
+  const nFijas = rotulos.length
+  const lineasFijas = rotulos.map((t, i) => partir(t, anchos[i]!))
+  const lineasObras = obras.map((o, i) => partir(o.nombre, anchos[nFijas + i]!))
 
   const altoFilaRotulos = HEAD_LINE_H + HEAD_PAD_Y * 2
   const maxLineas = Math.max(
@@ -721,9 +723,10 @@ function dibujarEncabezado(
     obras: DistribucionPdfObra[]
     anchos: number[]
     m: MedidasEncabezado
+    nFijas: number
   },
 ): void {
-  const { x, y, w, obras, anchos, m } = p
+  const { x, y, w, obras, anchos, m, nFijas } = p
 
   degradadoEncabezado(doc, x, y, w, m.alto)
 
@@ -731,13 +734,13 @@ function dibujarEncabezado(
   doc.setFontSize(HEAD_FONT)
   doc.setTextColor(C.headTexto[0], C.headTexto[1], C.headTexto[2])
 
-  const anchoFijos = anchos.slice(0, 5).reduce((s, v) => s + v, 0)
+  const anchoFijos = anchos.slice(0, nFijas).reduce((s, v) => s + v, 0)
 
   // Fila 1 · "% Cuidar" y el % de cada obra social.
   doc.text('% Cuidar', x + 1.2, y + m.yFilaRotulos)
   obras.forEach((o, i) => {
-    const previo = anchos.slice(5, 5 + i).reduce((s, v) => s + v, 0)
-    doc.text(`${o.porcentaje}%`, x + anchoFijos + previo + anchos[5 + i]! - 1.2, y + m.yFilaRotulos, {
+    const previo = anchos.slice(nFijas, nFijas + i).reduce((s, v) => s + v, 0)
+    doc.text(`${o.porcentaje}%`, x + anchoFijos + previo + anchos[nFijas + i]! - 1.2, y + m.yFilaRotulos, {
       align: 'right',
     })
   })
@@ -753,8 +756,8 @@ function dibujarEncabezado(
     cx += ancho
   }
 
-  m.lineasFijas.forEach((lineas, i) => escribir(lineas, anchos[i]!, i === 4 ? 'right' : 'left'))
-  m.lineasObras.forEach((lineas, i) => escribir(lineas, anchos[5 + i]!, 'right'))
+  m.lineasFijas.forEach((lineas, i) => escribir(lineas, anchos[i]!, i === nFijas - 1 ? 'right' : 'left'))
+  m.lineasObras.forEach((lineas, i) => escribir(lineas, anchos[nFijas + i]!, 'right'))
   escribir(
     doc.splitTextToSize('Total Médico', anchos[anchos.length - 1]! - 2.4) as string[],
     anchos[anchos.length - 1]!,
@@ -770,6 +773,12 @@ function dibujarEncabezado(
 /* ── Tabla ───────────────────────────────────────────────────────────────── */
 
 /** Arma una tabla de la distribución (resumen o detalle). */
+function rotulosFijos(mostrarPaciente: boolean): string[] {
+  return mostrarPaciente
+    ? ['Fecha', 'Médico', 'Paciente', 'Motivo de la Consulta', 'Monto']
+    : ['Fecha', 'Médico', 'Motivo de la Consulta', 'Monto']
+}
+
 function tablaDistribucion(p: {
   doc: jsPDF
   pageW: number
@@ -778,13 +787,16 @@ function tablaDistribucion(p: {
   filas: DistribucionObrasSocialesPdfRow[]
   titulo?: string
   startY: number
+  /** Si es false, se omite la columna Paciente (usado en el resumen). */
+  mostrarPaciente?: boolean
 }): UserOptions {
   const { doc, pageW, obras, filas, titulo, startY } = p
+  const mostrarPaciente = p.mostrarPaciente !== false
+  const nFijas = mostrarPaciente ? 5 : 4
 
-  const PCT_COL_0 = 5
   const nObras = obras.length
   // Índice de la columna Total Médico: va en todas las hojas.
-  const totalCol = PCT_COL_0 + nObras
+  const totalCol = nFijas + nObras
 
   // Anchos en mm a partir de los porcentajes. Los porcentajes suman 100
   // exacto y se les deja el 1 % de holgura: con el ancho completo la última
@@ -796,7 +808,7 @@ function tablaDistribucion(p: {
   // por eso el degradé del encabezado y las celdas quedaban desalineados.
   const anchoUtil = tableW - 1
   const pc = pctsDeColumna(pageW)
-  const ocupado = pc.fecha + pc.medico + pc.paciente + pc.motivo + pc.monto + pc.total
+  const ocupado = pc.fecha + pc.medico + (mostrarPaciente ? pc.paciente : 0) + pc.motivo + pc.monto + pc.total
   // La suma da 100 sólo cuando caben todas las obras en una hoja. Si la lista
   // se partió, cada hoja lleva su grupo y las columnas se reparten el ancho
   // sobrante, con el mínimo legible como piso.
@@ -807,7 +819,9 @@ function tablaDistribucion(p: {
   // sale de la hoja.
   const pctOs = nObras > 0 ? Math.max(disponible / nObras, PCT_OS) : 0
   const pcts = [
-    pc.fecha, pc.medico, pc.paciente, pc.motivo, pc.monto,
+    pc.fecha, pc.medico,
+    ...(mostrarPaciente ? [pc.paciente] : []),
+    pc.motivo, pc.monto,
     ...obras.map(() => pctOs),
     pc.total,
   ]
@@ -815,7 +829,8 @@ function tablaDistribucion(p: {
 
   // Encabezado medido y dibujado antes de la tabla, para que autoTable escriba
   // las filas de datos debajo y no encima.
-  const headM = medirEncabezado(doc, obras, anchos)
+  const rotulos = rotulosFijos(mostrarPaciente)
+  const headM = medirEncabezado(doc, obras, anchos, rotulos)
   let cardTop = startY
   let headY = startY
   if (titulo) {
@@ -830,25 +845,22 @@ function tablaDistribucion(p: {
   // no `tableW`: con el degradé al 100 % y las celdas al 99 % la última columna
   // (Total Médico) quedaba cortada ~2,7 mm antes del borde y su separador se
   // veía terminar en el aire. Alineados, ambos terminan en el mismo x.
-  dibujarEncabezado(doc, { x: MARGEN, y: headY, w: anchoUtil, obras, anchos, m: headM })
+  dibujarEncabezado(doc, { x: MARGEN, y: headY, w: anchoUtil, obras, anchos, m: headM, nFijas })
 
   // El nombre del médico va en mayúsculas. En COMPLETO el paciente viene vacío
   // cuando ya lo trajo la fila anterior del mismo médico.
-  const body = filas.map((r) => [
-    r.fecha,
-    r.medico.toUpperCase(),
-    r.paciente,
-    r.motivo,
-    r.monto,
-    ...r.porObraSocial,
-    r.total,
-  ])
+  const body = filas.map((r) => {
+    const row: string[] = [r.fecha, r.medico.toUpperCase()]
+    if (mostrarPaciente) row.push(r.paciente)
+    row.push(r.motivo, r.monto, ...r.porObraSocial, r.total)
+    return row
+  })
 
   const sumMonto = filas.reduce((s, r) => s + parseMoney(r.monto), 0)
   const sumTotal = filas.reduce((s, r) => s + parseMoney(r.total), 0)
   const totalesRow = [
     'TOTALES',
-    '', '', '',
+    ...Array.from({ length: nFijas - 2 }, () => ''),
     sumMonto > 0 ? formatMoney(sumMonto) : '',
     ...obras.map((_, i) => {
       const s = filas.reduce((acc, r) => acc + parseMoney(r.porObraSocial[i] ?? ''), 0)
@@ -862,7 +874,7 @@ function tablaDistribucion(p: {
     columnStyles[i] = {
       cellWidth: cw,
       // Monto, obras sociales y total van a la derecha; el resto a la izquierda.
-      halign: i >= 4 ? 'right' : 'left',
+      halign: i >= nFijas - 1 ? 'right' : 'left',
     }
   })
 
@@ -880,15 +892,16 @@ function tablaDistribucion(p: {
     head: [],
     body: body.length
       ? body
-      : [['Sin datos en el filtro actual', ...Array.from({ length: 4 + nObras + 1 }, () => '')]],
+      : [['Sin datos en el filtro actual', ...Array.from({ length: nFijas + nObras }, () => '')]],
     foot: [totalesRow],
     theme: 'plain',
     styles: {
       font: 'helvetica',
       // A 10,5 pt la fecha "11-05-26" no entra en su columna de 14 mm y se partía en
       // dos renglones; en vertical el ancho útil bajó de 276 a 189 mm y todo se
-      // aprieta. 9 pt entra en las seis columnas fijas.
-      fontSize: tableW < 230 ? 9 : 10.5,
+      // aprieta. 8,5 pt entra en las seis columnas fijas y deja la tabla más
+      // compacta (pedido: fuente un poco más chica en la tabla de datos).
+      fontSize: tableW < 230 ? 8.5 : 10,
       // Padding justo: cada 0,5 mm por lado son ~14 mm de alto en una tabla de
       // 14 médicos, y eso es justo lo que separa "entra en una hoja" de "se
       // cae el último renglón solo a la página siguiente".
@@ -909,8 +922,8 @@ function tablaDistribucion(p: {
       textColor: [...C.headTexto],
       fontStyle: 'bold',
       // En vertical la columna de Fecha queda en 16 mm y "TOTALES" a 9,5 pt
-      // mide ~17 mm: se partía en "TOTALE / S". A 8 pt entra en una línea.
-      fontSize: tableW < 230 ? 8 : 9.5,
+      // mide ~17 mm: se partía en "TOTALE / S". A 7,5 pt entra en una línea.
+      fontSize: tableW < 230 ? 7.5 : 9,
       lineColor: [...C.headLinea],
       cellPadding: { top: 2, bottom: 2, left: 1.2, right: 1.2 },
     },
@@ -921,7 +934,7 @@ function tablaDistribucion(p: {
       const par = row.index % 2 === 1
 
       if (section === 'foot') {
-        if (i >= 4) data.cell.styles.halign = 'right'
+        if (i >= nFijas - 1) data.cell.styles.halign = 'right'
         data.cell.styles.fillColor =
           i === totalCol ? [...C.footTotal] : [...C.footFondo]
         data.cell.styles.lineWidth = { top: 0.7 }
@@ -952,7 +965,7 @@ function tablaDistribucion(p: {
       // la primera celda. Sin esto, al partirse la tabla las hojas 2..n quedan
       // sin títulos y sin los % de cada obra social.
       if (data.pageNumber > 1) {
-        dibujarEncabezado(doc, { x: MARGEN, y: headY, w: anchoUtil, obras, anchos, m: headM })
+        dibujarEncabezado(doc, { x: MARGEN, y: headY, w: anchoUtil, obras, anchos, m: headM, nFijas })
       }
     },
     didDrawPage: (data) => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { isTauri } from '@tauri-apps/api/core'
-import { IconEye, IconEyeOff } from '../components/icons'
+import { IconEye, IconEyeOff, IconSave } from '../components/icons'
 import { useAppState } from '../context/AppStateContext'
 import { useAuth } from '../context/AuthContext'
 import { useConfirm } from '../context/ConfirmContext'
@@ -225,6 +225,64 @@ export function ConfiguracionPage() {
     )
     setNewUser({ username: '', password: '', role: 'secretaria', displayName: '' })
     setAccountsMsg({ type: 'ok', text: 'Usuarios y contraseñas guardados.' })
+  }
+
+  async function handleSaveUserPassword(userAccount: (typeof accountsDraft)[0]) {
+    setAccountsMsg(null)
+    const newPass = userAccount.nextPassword?.trim()
+    if (!newPass) {
+      setAccountsMsg({
+        type: 'err',
+        text: `Ingresá una nueva contraseña para ${userAccount.username} antes de guardar.`,
+      })
+      return
+    }
+
+    const next = accountsDraft.map((a) => ({
+      username: a.username.trim(),
+      password: (a.username === userAccount.username ? newPass : a.nextPassword || a.password).trim(),
+      role: a.role,
+      displayName: a.displayName?.trim() || a.username.trim(),
+    }))
+
+    if (next.some((a) => !a.username || !a.password)) {
+      setAccountsMsg({ type: 'err', text: 'Usuario y contraseña no pueden quedar vacíos.' })
+      return
+    }
+    const dup = new Set<string>()
+    for (const a of next) {
+      const key = a.username.toLowerCase()
+      if (dup.has(key)) {
+        setAccountsMsg({ type: 'err', text: 'Hay usuarios repetidos.' })
+        return
+      }
+      dup.add(key)
+    }
+
+    const ok = await confirm({
+      title: 'ADMINISTRACION',
+      message: `¿Guardar la nueva contraseña para "${userAccount.username}"?\n\nA partir de ahora el ingreso usará esta credencial.`,
+      confirmLabel: 'Guardar',
+      cancelLabel: 'Cancelar',
+    })
+    if (!ok) return
+
+    const hashed = await hashAccountsForStorage(
+      next.map((a) => ({
+        username: a.username,
+        role: a.role,
+        displayName: a.displayName,
+        plainPassword: a.password,
+      })),
+    )
+    saveStoredAccounts(hashed)
+    setAccountsDraft(
+      hashed.map((a) => ({ ...a, password: '', nextPassword: '' })),
+    )
+    setAccountsMsg({
+      type: 'ok',
+      text: `Contraseña de "${userAccount.username}" guardada correctamente.`,
+    })
   }
 
   function addNewUserToDraft() {
@@ -655,31 +713,52 @@ export function ConfiguracionPage() {
                   </div>
                   <div className="field field--pill field--clave">
                     <label>Nueva contraseña</label>
-                    <div className="pill-input pill-input--password">
-                      <input
-                        type={show ? 'text' : 'password'}
-                        placeholder="(sin cambios)"
-                        value={a.nextPassword}
-                        onChange={(e) =>
-                          setAccountsDraft((list) =>
-                            list.map((x) =>
-                              x.username === a.username
-                                ? { ...x, nextPassword: e.target.value }
-                                : x,
-                            ),
-                          )
-                        }
-                      />
+                    <div className="pill-input-group">
+                      <div className="pill-input pill-input--password">
+                        <input
+                          type={show ? 'text' : 'password'}
+                          placeholder="(sin cambios)"
+                          value={a.nextPassword}
+                          onChange={(e) =>
+                            setAccountsDraft((list) =>
+                              list.map((x) =>
+                                x.username === a.username
+                                  ? { ...x, nextPassword: e.target.value }
+                                  : x,
+                              ),
+                            )
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              void handleSaveUserPassword(a)
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="pill-input__toggle-clave"
+                          onClick={() =>
+                            setShowPassMap((m) => ({ ...m, [a.username]: !show }))
+                          }
+                          aria-label={show ? 'Ocultar' : 'Mostrar'}
+                          title={show ? 'Ocultar' : 'Mostrar'}
+                        >
+                          {show ? <IconEyeOff /> : <IconEye />}
+                        </button>
+                      </div>
                       <button
                         type="button"
-                        className="pill-input__toggle-clave"
-                        onClick={() =>
-                          setShowPassMap((m) => ({ ...m, [a.username]: !show }))
+                        className={`btn-icon btn-icon--save ${a.nextPassword?.trim() ? 'btn-icon--save--active' : ''}`}
+                        onClick={() => void handleSaveUserPassword(a)}
+                        aria-label="Guardar contraseña"
+                        title={
+                          a.nextPassword?.trim()
+                            ? `Guardar nueva contraseña para ${a.username}`
+                            : 'Guardar contraseña'
                         }
-                        aria-label={show ? 'Ocultar' : 'Mostrar'}
-                        title={show ? 'Ocultar' : 'Mostrar'}
                       >
-                        {show ? <IconEyeOff /> : <IconEye />}
+                        <IconSave />
                       </button>
                     </div>
                   </div>

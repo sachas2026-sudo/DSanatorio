@@ -3,6 +3,7 @@ import {
   historicoArchiveFilename,
   type HistoricoArchivePayload,
 } from './archiveHistorico'
+import { isClientMode } from './appMode'
 
 export type HistoricoArchiveEntry = {
   filename: string
@@ -18,6 +19,8 @@ export async function saveHistoricoArchive(
 ): Promise<string> {
   const filename = historicoArchiveFilename(payload.cutoffDate)
   const json = JSON.stringify(payload)
+  // El histórico vive en el disco de la PC servidor: desde un cliente no se escribe.
+  if (await isClientMode()) return filename
   if (!isTauri()) {
     localStorage.setItem(`sanatorio-historico-${payload.cutoffDate}`, json)
     return filename
@@ -29,6 +32,7 @@ export async function readHistoricoArchive(
   cutoffDate: string,
 ): Promise<HistoricoArchivePayload | null> {
   const filename = historicoArchiveFilename(cutoffDate)
+  if (await isClientMode()) return null
   if (!isTauri()) {
     const raw = localStorage.getItem(`sanatorio-historico-${cutoffDate}`)
     if (!raw) return null
@@ -43,6 +47,7 @@ export async function readHistoricoArchive(
 }
 
 export async function listHistoricoArchives(): Promise<HistoricoArchiveEntry[]> {
+  if (await isClientMode()) return []
   if (!isTauri()) {
     const out: HistoricoArchiveEntry[] = []
     for (let i = 0; i < localStorage.length; i++) {

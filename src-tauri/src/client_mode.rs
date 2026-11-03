@@ -30,7 +30,9 @@ impl AppMode {
 #[serde(rename_all = "camelCase")]
 pub struct ClientConfig {
     pub mode: AppMode,
+    #[serde(alias = "server_url")]
     pub server_url: Option<String>,
+    #[serde(alias = "server_cert_pem")]
     pub server_cert_pem: Option<String>,
 }
 
@@ -65,6 +67,23 @@ pub fn config_path() -> PathBuf {
     appdata.join("Sanatorio").join("client-config.json")
 }
 
+/// Si el archivo trae a la vez la clave camelCase y la legacy snake_case,
+/// se descarta la legacy: serde las interpreta como el mismo campo y fallaría
+/// con "duplicate field".
+fn quitar_claves_duplicadas(value: &mut serde_json::Value) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    for (canonica, legacy) in [
+        ("serverUrl", "server_url"),
+        ("serverCertPem", "server_cert_pem"),
+    ] {
+        if obj.contains_key(canonica) && obj.contains_key(legacy) {
+            obj.remove(legacy);
+        }
+    }
+}
+
 pub fn load_config_from(path: &std::path::Path) -> Result<ClientConfig, String> {
     if !path.exists() {
         return Ok(ClientConfig {
@@ -75,7 +94,12 @@ pub fn load_config_from(path: &std::path::Path) -> Result<ClientConfig, String> 
     }
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("No se pudo leer client-config: {e}"))?;
-    let cfg: ClientConfig = serde_json::from_str(&content)
+    // Tolerar BOM (los scripts de PowerShell pueden dejarlo al escribir UTF-8).
+    let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
+    let mut value: serde_json::Value = serde_json::from_str(content)
+        .map_err(|e| format!("client-config inválido: {e}"))?;
+    quitar_claves_duplicadas(&mut value);
+    let cfg: ClientConfig = serde_json::from_value(value)
         .map_err(|e| format!("client-config inválido: {e}"))?;
 
     if cfg.mode == AppMode::Client {
@@ -150,6 +174,51 @@ mod tests {
         assert_eq!(cfg.mode, AppMode::Local);
         assert!(cfg.server_url.is_none());
         assert!(cfg.server_cert_pem.is_none());
+    }
+
+    #[test]
+    fn acepta_claves_snake_case_desde_scripts() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.json");
+        let json = r#"{
+            "mode": "client",
+            "server_url": "https://192.168.1.10:8787",
+            "server_cert_pem": "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----"
+        }"#;
+        std::fs::write(&path, json).unwrap();
+        let loaded = load_config_from(&path).unwrap();
+        assert_eq!(loaded.mode, AppMode::Client);
+        assert_eq!(loaded.server_url.as_deref(), Some("https://192.168.1.10:8787"));
+        assert!(loaded.server_cert_pem.as_deref().unwrap().contains("CERTIFICATE"));
+    }
+
+    #[test]
+    fn acepta_camel_y_snake_juntas_sin_duplicar() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.json");
+        let json = r#"{
+            "mode": "client",
+            "serverUrl": "https://192.168.1.20:8787",
+            "server_url": "https://192.168.1.10:8787",
+            "serverCertPem": "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
+            "server_cert_pem": "viejo"
+        }"#;
+        std::fs::write(&path, json).unwrap();
+        let loaded = load_config_from(&path).unwrap();
+        assert_eq!(loaded.mode, AppMode::Client);
+        assert_eq!(loaded.server_url.as_deref(), Some("https://192.168.1.20:8787"));
+        assert!(loaded.server_cert_pem.as_deref().unwrap().contains("CERTIFICATE"));
+    }
+
+    #[test]
+    fn tolera_bom_al_inicio() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.json");
+        let json = "{\"mode\":\"client\",\"serverUrl\":\"https://192.168.1.10:8787\",\"serverCertPem\":\"cert\"}";
+        std::fs::write(&path, format!("\u{feff}{json}")).unwrap();
+        let loaded = load_config_from(&path).unwrap();
+        assert_eq!(loaded.mode, AppMode::Client);
+        assert_eq!(loaded.server_url.as_deref(), Some("https://192.168.1.10:8787"));
     }
 
     #[test]

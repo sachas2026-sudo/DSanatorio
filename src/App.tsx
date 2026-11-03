@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './shared/components/Layout'
 import { LoadingScreen } from './shared/components/LoadingScreen'
 import { ProtectedRoute } from './shared/components/ProtectedRoute'
+import { useAuthSession } from './context/AuthContext'
 import { preloadPdfHeaderBanner } from './lib/pdfHeaderBanner'
 import { preloadPdfLogo } from './lib/pdfLogo'
 
@@ -40,6 +41,15 @@ const AfiliadosPage = lazy(() =>
   import('./modules/afiliados/pages/AfiliadosPage').then((m) => ({ default: m.AfiliadosPage })),
 )
 
+/** Inicio: el afiliado no tiene dashboard, va directo a su módulo. */
+function IndexRoute() {
+  const { session } = useAuthSession()
+  if (session?.role === 'afiliado') {
+    return <Navigate to="/afiliados" replace />
+  }
+  return <HomePage />
+}
+
 export default function App() {
   useEffect(() => {
     void preloadPdfLogo()
@@ -50,7 +60,7 @@ export default function App() {
     <Suspense fallback={<LoadingScreen />}>
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={<HomePage />} />
+            <Route index element={<IndexRoute />} />
             <Route path="pacientes" element={<PacientesPage />} />
             <Route path="medicos" element={<MedicosPage />} />
             <Route path="agenda" element={<AgendaPage />} />

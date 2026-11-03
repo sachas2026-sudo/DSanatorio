@@ -1,0 +1,20 @@
+{
+  "productName": "Sanatorio Server",
+  "identifier": "com.sanatorio.server",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Centro Medico — Servidor"
+      }
+    ]
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "startMenuFolder": "Sanatorio Server"
+      }
+    }
+  }
+}
+

@@ -42,5 +42,10 @@ commands.allow = [
   "upload_backup_to_google_drive",
   "list_google_drive_backups",
   "download_google_drive_backup",
-  "get_google_drive_config"
+  "get_google_drive_config",
+  "get_app_mode",
+  "client_login",
+  "client_logout",
+  "client_session_info",
+  "client_api"
 ]

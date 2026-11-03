@@ -13,6 +13,9 @@ use std::sync::{Mutex, MutexGuard};
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
+    /// Usuario con el que se inició sesión (el servidor no lo devuelve en el
+    /// login, pero el cliente lo conoce y lo conserva para restaurar la UI).
+    pub username: String,
     pub role: String,
     pub display_name: String,
     pub must_change_password: bool,
@@ -94,6 +97,7 @@ impl ClientSession {
             .map_err(|_| "Respuesta de login inválida del servidor".to_string())?;
 
         let info = SessionInfo {
+            username: username.trim().to_string(),
             role: body.role,
             display_name: body.display_name,
             must_change_password: body.must_change_password,
@@ -197,6 +201,7 @@ mod tests {
         assert_eq!(
             info,
             SessionInfo {
+                username: "ana".into(),
                 role: "admin".into(),
                 display_name: "Ana".into(),
                 must_change_password: false

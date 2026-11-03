@@ -11,13 +11,14 @@ describe('canAccessPath — matriz rol x ruta', () => {
     }
   })
 
-  it('secretaria accede a rutas públicas pero no a admin-only', () => {
+  it('secretaria accede a rutas públicas pero no a admin-only ni Afiliados', () => {
     for (const p of publicPaths) {
       expect(canAccessPath('secretaria', p)).toBe(true)
     }
     for (const p of adminOnly) {
       expect(canAccessPath('secretaria', p)).toBe(false)
     }
+    expect(canAccessPath('secretaria', '/afiliados')).toBe(false)
   })
 
   it('afiliado solo accede a /afiliados y /pacientes', () => {

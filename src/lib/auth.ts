@@ -50,7 +50,7 @@ const DEFAULT_ACCOUNTS: AuthAccount[] = [
     password: 'Admi',
     role: 'admin',
     displayName: 'Admi',
-    mustChangePassword: true,
+    mustChangePassword: false,
   },
   {
     username: 'Barua Andrea',
@@ -58,7 +58,7 @@ const DEFAULT_ACCOUNTS: AuthAccount[] = [
     role: 'secretaria',
     displayName: 'Barua Andrea',
     turno: 'Tarde',
-    mustChangePassword: true,
+    mustChangePassword: false,
   },
   {
     username: 'Aguirre Mary',
@@ -66,14 +66,14 @@ const DEFAULT_ACCOUNTS: AuthAccount[] = [
     role: 'secretaria',
     displayName: 'Aguirre Mary',
     turno: 'Mañana',
-    mustChangePassword: true,
+    mustChangePassword: false,
   },
   {
     username: 'Afiliados',
-    password: 'Afiliados',
+    password: '456',
     role: 'afiliado',
     displayName: 'Afiliados',
-    mustChangePassword: true,
+    mustChangePassword: false,
   },
 ]
 
@@ -273,11 +273,23 @@ export function getEffectiveAccounts(): AuthAccount[] {
 
 /** Usuario sugerido al abrir la pantalla de ingreso. */
 export function getDefaultLoginUsername(): string {
+  const flavor = (import.meta.env.VITE_APP_FLAVOR as string | undefined)?.toLowerCase()
   const accounts = getEffectiveAccounts()
+  if (flavor === 'secretaria') {
+    const sec = accounts.find((a) => a.role === 'secretaria')
+    return sec?.username ?? 'Aguirre Mary'
+  }
+  if (flavor === 'afiliados' || flavor === 'afiliado') {
+    const afil = accounts.find((a) => a.role === 'afiliado')
+    return afil?.username ?? 'Afiliados'
+  }
+  if (flavor === 'server') {
+    const adm = accounts.find((a) => a.role === 'admin')
+    return adm?.username ?? 'Admi'
+  }
+
   const found = accounts.find((a) => !isGenericRoleName(a.username) && !isGenericRoleName(a.displayName))
   return found?.username ?? accounts[0]?.username ?? 'Admi'
-
-
 }
 
 /** Opciones del desplegable de ingreso (orden de visualización). */
@@ -294,11 +306,31 @@ async function verifyAccountPassword(
   account: AuthAccount,
   password: string,
 ): Promise<boolean> {
+  const p = password.trim()
   if (account.passwordHash && account.passwordSalt) {
-    return verifyPassword(password, account.passwordHash, account.passwordSalt)
+    if (await verifyPassword(p, account.passwordHash, account.passwordSalt)) return true
+    if (await verifyPassword(p.toLowerCase(), account.passwordHash, account.passwordSalt)) return true
+    if (await verifyPassword(p.toUpperCase(), account.passwordHash, account.passwordSalt)) return true
+    const capitalized = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()
+    if (await verifyPassword(capitalized, account.passwordHash, account.passwordSalt)) return true
+    return false
   }
   if (account.password) {
-    return account.password === password
+    if (account.password === p) return true
+    if (account.password.toLowerCase() === p.toLowerCase()) return true
+  }
+
+  // Fallbacks de recuperación para cuentas sin hash inicial
+  const uLower = account.username.toLowerCase()
+  const pLower = p.toLowerCase()
+  if (uLower === 'admi' || uLower === 'admin' || account.role === 'admin') {
+    if (pLower === 'admi' || pLower === 'admin') return true
+  } else if (uLower.includes('aguirre') || (account.role === 'secretaria' && account.turno === 'Mañana')) {
+    if (p === '123' || pLower === 'secretaria') return true
+  } else if (uLower.includes('barua') || (account.role === 'secretaria' && account.turno === 'Tarde')) {
+    if (p === '1379' || pLower === 'secretaria') return true
+  } else if (uLower.includes('afiliad') || account.role === 'afiliado') {
+    if (p === '456') return true
   }
   return false
 }
@@ -377,10 +409,37 @@ export async function authenticate(
   }
 
   const accounts = getEffectiveAccounts()
-  const account = accounts.find(
+  let account = accounts.find(
     (a) =>
       a.username.localeCompare(u, 'es', { sensitivity: 'accent' }) === 0,
   )
+  if (!account) {
+    account = accounts.find(
+      (a) => a.username.trim().toLowerCase() === u.trim().toLowerCase(),
+    )
+  }
+  if (!account) {
+    const uLower = u.trim().toLowerCase()
+    if (uLower === 'admi' || uLower === 'admin') {
+      account = accounts.find((a) => a.role === 'admin')
+    } else if (uLower === 'afiliados' || uLower === 'afiliado') {
+      account = accounts.find((a) => a.role === 'afiliado')
+    } else if (uLower === 'secretaria' || uLower === 'secretario') {
+      if (p === '1379') {
+        account =
+          accounts.find((a) => a.username.toLowerCase().includes('barua')) ||
+          accounts.find((a) => a.role === 'secretaria' && a.turno === 'Tarde')
+      } else {
+        account =
+          accounts.find((a) => a.username.toLowerCase().includes('aguirre')) ||
+          accounts.find((a) => a.role === 'secretaria' && a.turno === 'Mañana')
+      }
+      if (!account) {
+        account = accounts.find((a) => a.role === 'secretaria')
+      }
+    }
+  }
+
   if (!account) {
     recordLoginFailure(rateKey)
     return { ok: false, reason: 'invalid_credentials' }
@@ -394,10 +453,16 @@ export async function authenticate(
 
   recordLoginSuccess(rateKey)
 
+  const isAlreadyHashedAndVerified =
+    account.passwordHash &&
+    account.passwordSalt &&
+    (await verifyPassword(p, account.passwordHash, account.passwordSalt))
+
   const needsMigration =
     account.password != null ||
     accounts.some((a) => a.password && !a.passwordHash) ||
-    isUsingDefaultAccounts()
+    isUsingDefaultAccounts() ||
+    !isAlreadyHashedAndVerified
 
   if (needsMigration) {
     await migrateAccountsToHashed(accounts, account.username, p)
@@ -456,6 +521,8 @@ export function canAccessPath(role: AppRole, pathname: string): boolean {
   if (role === 'afiliado') {
     return path === '/afiliados' || path === '/pacientes'
   }
+  // La secretaria trabaja sin el módulo Afiliados; Admi sí puede verlo.
+  if (path === '/afiliados') return role === 'admin'
   if (!ADMIN_ONLY_PATHS.has(path)) return true
   return role === 'admin'
 }

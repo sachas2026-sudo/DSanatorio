@@ -43,7 +43,9 @@ fn stop_legacy_background_services() {}
 
 #[tauri::command]
 pub fn get_backup_dir() -> Result<String, String> {
-    crate::client_mode::ensure_local().map_err(|e| e)?;
+    if crate::client_mode::is_client() {
+        return Ok(String::new());
+    }
     service::backup_dir_primary()
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| e.to_string())
@@ -51,7 +53,9 @@ pub fn get_backup_dir() -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_backup_locations() -> Result<Vec<String>, String> {
-    crate::client_mode::ensure_local().map_err(|e| e)?;
+    if crate::client_mode::is_client() {
+        return Ok(Vec::new());
+    }
     let mut out: Vec<String> = service::backup_dirs_local_only()
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
@@ -85,13 +89,17 @@ pub fn get_backup_locations() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub fn list_data_backups() -> Result<Vec<BackupEntry>, String> {
-    crate::client_mode::ensure_local().map_err(|e| e)?;
+    if crate::client_mode::is_client() {
+        return Ok(Vec::new());
+    }
     service::list_data_backups().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn rotate_data_backups(json: String) -> Result<(), String> {
-    crate::client_mode::ensure_local().map_err(|e| e)?;
+    if crate::client_mode::is_client() {
+        return Ok(());
+    }
     service::rotate_backups_all(&json).map_err(|e| e.to_string())?;
     service::save_full_backup_on_exit().map_err(|e| e.to_string())
 }
@@ -151,13 +159,17 @@ pub fn apply_data_backup_restore(
 
 #[tauri::command]
 pub fn save_daily_data_backup(json: String, date: String) -> Result<(), String> {
-    crate::client_mode::ensure_local().map_err(|e| e)?;
+    if crate::client_mode::is_client() {
+        return Ok(());
+    }
     service::save_daily_backups_all(&json, &date).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn list_daily_data_backups() -> Result<Vec<DailyBackupEntry>, String> {
-    crate::client_mode::ensure_local().map_err(|e| e)?;
+    if crate::client_mode::is_client() {
+        return Ok(Vec::new());
+    }
     let daily_dir = service::backup_dir_primary()
         .map(|p| p.join("diario"))
         .map_err(|e| e.to_string())?;
@@ -166,7 +178,9 @@ pub fn list_daily_data_backups() -> Result<Vec<DailyBackupEntry>, String> {
 
 #[tauri::command]
 pub fn get_recovery_checklist() -> Result<Vec<RecoveryChecklistEntry>, String> {
-    crate::client_mode::ensure_local().map_err(|e| e)?;
+    if crate::client_mode::is_client() {
+        return Ok(Vec::new());
+    }
     service::get_recovery_checklist().map_err(|e| e.to_string())
 }
 

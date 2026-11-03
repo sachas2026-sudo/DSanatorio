@@ -74,6 +74,7 @@ export function MantenimientoPage() {
     setHistoricoLoading(true)
     void listHistoricoArchives()
       .then(setHistoricoItems)
+      .catch(() => setHistoricoItems([]))
       .finally(() => setHistoricoLoading(false))
   }
 

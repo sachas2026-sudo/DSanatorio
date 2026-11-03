@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::core::config::settings;
 use crate::core::db;
-use crate::modules::configuracion::dto::{Afiliado, CuotaAfiliado, Patient, PatientWriteResult, PlanAfiliado, WriteResult};
+use crate::modules::configuracion::dto::{Afiliado, AppData, CuotaAfiliado, Patient, PatientWriteResult, PlanAfiliado, WriteResult};
 use crate::modules::configuracion::service;
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -277,11 +277,70 @@ fn authenticate_request(state: &AppState, headers: &HeaderMap, _token_expiry_sec
 
 fn role_allowed(role: &str, path: &str) -> bool {
     match role {
+        // Admi accede a todo, incluido el módulo Afiliados.
         "admin" => true,
-        "secretaria" => matches!(path, "/api/pacientes" | "/api/medicos" | "/api/agenda" | "/api/pagos" | "/api/afiliados"),
+        // La secretaria trabaja sin el módulo Afiliados.
+        "secretaria" => matches!(
+            path,
+            "/api/pacientes" | "/api/medicos" | "/api/agenda" | "/api/pagos" | "/api/obras-sociales"
+        ),
         "afiliado" => matches!(path, "/api/pacientes" | "/api/afiliados"),
         _ => false,
     }
+}
+
+/// Claves de AppData que puede leer/escribir cada rol en el endpoint de
+/// sincronización (`/api/app-data`).
+///
+/// - admin: todo.
+/// - secretaria: todo excepto el módulo Afiliados.
+/// - afiliado: Pacientes + módulo Afiliados (sin settings).
+fn app_data_key_allowed(role: &str, key: &str) -> bool {
+    const AFILIADOS_KEYS: [&str; 3] = ["afiliados", "planesAfiliados", "cuotasAfiliados"];
+    match role {
+        "admin" => true,
+        "secretaria" => !AFILIADOS_KEYS.contains(&key),
+        "afiliado" => matches!(
+            key,
+            "patients" | "afiliados" | "planesAfiliados" | "cuotasAfiliados"
+        ),
+        _ => false,
+    }
+}
+
+/// Devuelve una copia del AppData con las colecciones que el rol no puede ver
+/// vaciadas. `settings` se mantiene siempre (la interfaz lo necesita para
+/// funcionar), pero no se permite escribirlo desde el rol afiliado.
+fn filter_app_data_for_role(role: &str, mut value: serde_json::Value) -> serde_json::Value {
+    let Some(obj) = value.as_object_mut() else {
+        return value;
+    };
+    let keys: Vec<String> = obj.keys().cloned().collect();
+    for key in keys {
+        if key == "settings" {
+            continue;
+        }
+        if !app_data_key_allowed(role, &key) && obj.get(&key).map(|v| v.is_array()).unwrap_or(false) {
+            obj.insert(key, serde_json::json!([]));
+        }
+    }
+    value
+}
+
+/// Superpone sobre el AppData actual solo las claves que el rol puede escribir.
+fn merge_app_data_for_role(
+    role: &str,
+    mut current: serde_json::Value,
+    incoming: &serde_json::Value,
+) -> serde_json::Value {
+    if let (Some(cur), Some(inc)) = (current.as_object_mut(), incoming.as_object()) {
+        for (key, val) in inc {
+            if app_data_key_allowed(role, key) {
+                cur.insert(key.clone(), val.clone());
+            }
+        }
+    }
+    current
 }
 
 /// Devuelve true solo si el rol es uno de los válidos: admin, secretaria o afiliado.
@@ -311,7 +370,7 @@ async fn check_write_enabled(state: &AppState) -> Result<(), (StatusCode, axum::
 }
 
 async fn health() -> Json<Health> {
-    Json(Health { status: "ok", version: "15.0.0" })
+    Json(Health { status: "ok", version: "16.0.0" })
 }
 
 async fn login(State(state): State<AppState>, Json(body): Json<LoginReq>) -> Result<Json<LoginRes>, StatusCode> {
@@ -445,6 +504,52 @@ async fn get_obras_sociales(State(state): State<AppState>, headers: HeaderMap) -
     Ok(Json(data.obras_sociales_custom))
 }
 
+/// Estado completo de la aplicación para el modo cliente, filtrado por rol.
+async fn get_app_data(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if !is_valid_role(&session.role) {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
+    }
+    let data = service::load_app_data()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    let value = serde_json::to_value(&data)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "serialization error"}))))?;
+    Ok(Json(filter_app_data_for_role(&session.role, value)))
+}
+
+/// Guarda el estado completo. Solo aplica las claves habilitadas para el rol;
+/// el resto se conserva como estaba en el servidor.
+async fn post_app_data(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(incoming): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if !is_valid_role(&session.role) {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
+    }
+    if !incoming.is_object() {
+        return Err(validation_response("se esperaba un objeto JSON con los datos"));
+    }
+    let current = service::load_app_data()
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    let current_value = serde_json::to_value(&current)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "serialization error"}))))?;
+    let merged = merge_app_data_for_role(&session.role, current_value, &incoming);
+    let data: AppData = serde_json::from_value(merged)
+        .map_err(|e| validation_response(&format!("datos inválidos: {e}")))?;
+    service::replace_app_data_direct(&data)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
 fn validate_new_password(username: &str, new: &str) -> Result<(), &'static str> {
     if new.len() < 8 { return Err("min 8 chars"); }
     if new.eq_ignore_ascii_case(username) { return Err("same as user"); }
@@ -489,6 +594,45 @@ async fn change_password(State(state): State<AppState>, headers: HeaderMap, Json
         if s.username.eq_ignore_ascii_case(&session.username) { s.must_change_password = false; }
     }
     Ok(Json(ChangePasswordRes { ok: true }))
+}
+
+async fn get_auth_accounts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    if session.role != "admin" {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
+    }
+    let accounts = state.accounts.lock().unwrap().clone();
+    Ok(Json(serde_json::to_value(accounts).unwrap_or_else(|_| serde_json::json!([]))))
+}
+
+async fn post_auth_accounts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Result<StatusCode, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    if session.role != "admin" {
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
+    }
+    let accounts: Vec<Account> = serde_json::from_value(body)
+        .map_err(|_| (StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "invalid body"}))))?;
+    // Validar roles
+    for a in &accounts {
+        if !is_valid_role(&a.role) {
+            return Err((StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "invalid role"}))));
+        }
+    }
+    {
+        let mut guard = state.accounts.lock().unwrap();
+        *guard = accounts;
+    }
+    save_accounts(&state).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "save failed"}))))?;
+    Ok(StatusCode::OK)
 }
 
 async fn get_write_enabled(
@@ -572,9 +716,9 @@ fn conflict_response(current: Option<serde_json::Value>) -> (StatusCode, axum::J
     )
 }
 
-/// Crear y editar pacientes: admin y secretaria.
+/// Crear y editar pacientes: admin, secretaria y afiliado.
 fn can_write_pacientes(role: &str) -> bool {
-    matches!(role, "admin" | "secretaria")
+    matches!(role, "admin" | "secretaria" | "afiliado")
 }
 
 /// Baja lógica de pacientes: solo admin.
@@ -1200,6 +1344,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/health", get(health))
         .route("/api/login", axum::routing::post(login))
         .route("/api/change-password", axum::routing::post(change_password))
+        .route("/api/auth-accounts", get(get_auth_accounts).post(post_auth_accounts))
         .route("/api/write-enabled", get(get_write_enabled).post(post_write_enabled))
         .route("/api/audit-log", get(get_audit_log))
         .route("/api/pacientes", get(get_pacientes))
@@ -1217,6 +1362,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/cuotas", axum::routing::post(post_cuota))
         .route("/api/cuotas/:id", axum::routing::put(put_cuota))
         .route("/api/obras-sociales", get(get_obras_sociales))
+        // Sincronización del estado completo para el modo cliente (PC2/PC3).
+        .route(
+            "/api/app-data",
+            get(get_app_data)
+                .post(post_app_data)
+                .layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .with_state(state)
 }
 
@@ -1799,6 +1951,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_app_data_get_filtra_colecciones_por_rol() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        let token_secretaria = test.login_as("secretaria").await;
+        let token_afiliado = test.login_as("afiliado").await;
+
+        // Admin ve todo, incluido el módulo Afiliados.
+        let (status, body) = test.get("/api/app-data", Some(&token_admin)).await;
+        assert_eq!(status, StatusCode::OK, "GET app-data admin: {}", body);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(v["patients"].is_array());
+        assert!(v["afiliados"].is_array());
+        assert!(v["planesAfiliados"].is_array());
+        assert!(v["cuotasAfiliados"].is_array());
+        assert!(v["settings"].is_object());
+
+        // Secretaria no ve el módulo Afiliados.
+        let (status, body) = test.get("/api/app-data", Some(&token_secretaria)).await;
+        assert_eq!(status, StatusCode::OK, "GET app-data secretaria: {}", body);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["afiliados"], serde_json::json!([]));
+        assert_eq!(v["planesAfiliados"], serde_json::json!([]));
+        assert_eq!(v["cuotasAfiliados"], serde_json::json!([]));
+        assert!(v["patients"].is_array());
+        assert!(v["settings"].is_object());
+
+        // Afiliado solo ve Pacientes y Afiliados.
+        let (status, body) = test.get("/api/app-data", Some(&token_afiliado)).await;
+        assert_eq!(status, StatusCode::OK, "GET app-data afiliado: {}", body);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(v["patients"].is_array());
+        assert!(v["afiliados"].is_array());
+        assert_eq!(v["doctors"], serde_json::json!([]));
+        assert_eq!(v["payments"], serde_json::json!([]));
+        assert_eq!(v["appointments"], serde_json::json!([]));
+        assert!(v["settings"].is_object());
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_app_data_post_respeta_limites_de_rol() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let token_admin = test.login_as("admin").await;
+        let token_secretaria = test.login_as("secretaria").await;
+        let token_afiliado = test.login_as("afiliado").await;
+
+        // Admin puede guardar afiliados y settings.
+        let (_, body) = test.get("/api/app-data", Some(&token_admin)).await;
+        let mut data: serde_json::Value = serde_json::from_str(&body).unwrap();
+        data["afiliados"] = serde_json::json!([{"id":"a1","nombre":"Admin"}]);
+        data["settings"]["email"] = serde_json::json!("admin@test.com");
+        let (status, body) = test
+            .post("/api/app-data", &data.to_string(), Some(&token_admin))
+            .await;
+        assert_eq!(status, StatusCode::OK, "POST app-data admin: {}", body);
+
+        let (_, body) = test.get("/api/app-data", Some(&token_admin)).await;
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["afiliados"][0]["id"], serde_json::json!("a1"));
+        assert_eq!(v["settings"]["email"], serde_json::json!("admin@test.com"));
+
+        // Secretaria intenta escribir afiliados: se ignora. Sus settings sí se guardan.
+        let mut data = v;
+        data["afiliados"] = serde_json::json!([{"id":"a2","nombre":"Intruso"}]);
+        data["settings"]["email"] = serde_json::json!("secre@test.com");
+        let (status, body) = test
+            .post("/api/app-data", &data.to_string(), Some(&token_secretaria))
+            .await;
+        assert_eq!(status, StatusCode::OK, "POST app-data secretaria: {}", body);
+
+        let (_, body) = test.get("/api/app-data", Some(&token_secretaria)).await;
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            v["afiliados"],
+            serde_json::json!([]),
+            "secretaria no debe poder escribir afiliados"
+        );
+        assert_eq!(v["settings"]["email"], serde_json::json!("secre@test.com"));
+
+        // Afiliado intenta cambiar settings: se ignora. Sus afiliados sí se guardan.
+        let mut data = v;
+        data["settings"]["email"] = serde_json::json!("afiliado@test.com");
+        data["afiliados"] = serde_json::json!([{"id":"a3","nombre":"Afiliado"}]);
+        let (status, body) = test
+            .post("/api/app-data", &data.to_string(), Some(&token_afiliado))
+            .await;
+        assert_eq!(status, StatusCode::OK, "POST app-data afiliado: {}", body);
+
+        let (_, body) = test.get("/api/app-data", Some(&token_admin)).await;
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["settings"]["email"], serde_json::json!("secre@test.com"));
+
+        let (_, body) = test.get("/api/app-data", Some(&token_afiliado)).await;
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["afiliados"][0]["id"], serde_json::json!("a3"));
+
+        drop(test);
+    }
+
+    #[tokio::test]
     async fn test_audit_log_solo_admin_y_con_entradas() {
         let test = TestApp::new(Some(vec![
             Account {
@@ -2202,7 +2455,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_afiliado_post_put_baja_pacientes_role_forbidden() {
+    async fn test_afiliado_puede_post_put_pero_no_baja_pacientes() {
         let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
         let token_admin = test.login_as("admin").await;
         let token_afiliado = test.login_as("afiliado").await;
@@ -2217,6 +2470,7 @@ mod tests {
             .await;
         assert_eq!(status, StatusCode::OK, "admin crea paciente: {}", body);
 
+        // El afiliado puede crear y editar pacientes.
         let (status, body) = test
             .post(
                 "/api/pacientes",
@@ -2224,25 +2478,22 @@ mod tests {
                 Some(&token_afiliado),
             )
             .await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "afiliado POST: {}", body);
-        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(json["error"], "role_forbidden");
+        assert_eq!(status, StatusCode::OK, "afiliado POST: {}", body);
 
         let (status, body) = test
             .put(
-                "/api/pacientes/pac-1",
-                r#"{"id":"pac-1","nombre":"Editado","apellido":"Perez","version":1}"#,
+                "/api/pacientes/pac-2",
+                r#"{"id":"pac-2","nombre":"Beto Editado","apellido":"Gomez","version":1}"#,
                 Some(&token_afiliado),
             )
             .await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "afiliado PUT: {}", body);
-        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(json["error"], "role_forbidden");
+        assert_eq!(status, StatusCode::OK, "afiliado PUT: {}", body);
 
+        // Pero no puede dar de baja: eso sigue siendo solo de admin.
         let (status, body) = test
             .post(
-                "/api/pacientes/pac-1/baja",
-                r#"{"version":1}"#,
+                "/api/pacientes/pac-2/baja",
+                r#"{"version":2}"#,
                 Some(&token_afiliado),
             )
             .await;
@@ -2258,26 +2509,26 @@ mod tests {
             "debe quedar PERMISO_DENEGADO en audit_log"
         );
 
-        // El paciente no se modificó ni se dio de baja.
+        // El paciente editado sigue activo; la baja no se aplicó.
         let (_, body) = test.get("/api/pacientes", Some(&token_admin)).await;
         let lista: serde_json::Value = serde_json::from_str(&body).unwrap();
         let p = lista
             .as_array()
             .unwrap()
             .iter()
-            .find(|p| p["id"] == "pac-1")
-            .expect("pac-1 debe seguir existiendo");
-        assert_eq!(p["nombre"], "Ana");
+            .find(|p| p["id"] == "pac-2")
+            .expect("pac-2 debe seguir existiendo");
+        assert_eq!(p["nombre"], "Beto Editado");
         assert!(p["deletedAt"].is_null());
 
         drop(test);
     }
 
     #[tokio::test]
-    async fn test_afiliado_write_disabled_sigue_role_forbidden() {
+    async fn test_afiliado_write_disabled_retorna_writes_disabled() {
         let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
         let token_afiliado = test.login_as("afiliado").await;
-        // A propósito NO se habilitan las escrituras: el rol debe chequearse primero.
+        // A propósito NO se habilitan las escrituras.
 
         let (status, body) = test
             .post(
@@ -2294,8 +2545,8 @@ mod tests {
         );
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(
-            json["error"], "role_forbidden",
-            "el rol se chequea antes que write_enabled: {}",
+            json["error"], "writes_disabled",
+            "el afiliado ya tiene permiso de rol: {}",
             body
         );
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { isTauri } from '@tauri-apps/api/core'
-import { IconEye, IconEyeOff } from '../../../shared/components/icons'
+import { IconEye, IconEyeOff, IconSave } from '../../../shared/components/icons'
 import { useAppState } from '../../../context/AppStateContext'
 import { useAuth } from '../../../context/AuthContext'
 import { useConfirm } from '../../../context/ConfirmContext'
@@ -306,7 +306,7 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
         plainPassword: a.password,
         passwordHash: a.passwordHash,
         passwordSalt: a.passwordSalt,
-        mustChangePassword: a.password ? true : a.mustChangePassword,
+        mustChangePassword: false,
       })),
     )
     saveStoredAccounts(hashed)
@@ -320,8 +320,79 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
         turno: a.turno ?? (a.role === 'secretaria' ? 'Mañana' : ''),
       })),
     )
-    setNewUser({ username: '', password: '', role: 'secretaria', displayName: '', turno: 'Mañana', mustChangePassword: true })
+    setNewUser({ username: '', password: '', role: 'secretaria', displayName: '', turno: 'Mañana', mustChangePassword: false })
     setAccountsMsg({ type: 'ok', text: 'Usuarios y contraseñas guardados.' })
+  }
+
+  async function handleSaveUserPassword(userAccount: (typeof accountsDraft)[0]) {
+    setAccountsMsg(null)
+    const newPass = userAccount.nextPassword?.trim()
+    if (!newPass) {
+      setAccountsMsg({
+        type: 'err',
+        text: `Ingresá una nueva contraseña para ${userAccount.username} antes de guardar.`,
+      })
+      return
+    }
+
+    const next = accountsDraft.map((a) => ({
+      ...a,
+      username: a.username.trim(),
+      password: (a.id === userAccount.id ? newPass : a.nextPassword || a.password).trim(),
+      role: a.role,
+      displayName: a.displayName?.trim() || a.username.trim(),
+      turno: a.turno?.trim() || undefined,
+    }))
+
+    if (next.some((a) => !a.username || (!a.password && !a.passwordHash))) {
+      setAccountsMsg({ type: 'err', text: 'Usuario y contraseña no pueden quedar vacíos.' })
+      return
+    }
+    const dup = new Set<string>()
+    for (const a of next) {
+      const key = a.username.toLowerCase()
+      if (dup.has(key)) {
+        setAccountsMsg({ type: 'err', text: 'Hay usuarios repetidos.' })
+        return
+      }
+      dup.add(key)
+    }
+
+    const ok = await confirm({
+      title: 'ADMINISTRACION',
+      message: `¿Guardar la nueva contraseña para "${userAccount.username}"?\n\nA partir de ahora el ingreso usará esta credencial.`,
+      confirmLabel: 'Guardar',
+      cancelLabel: 'Cancelar',
+    })
+    if (!ok) return
+
+    const hashed = await hashAccountsForStorage(
+      next.map((a) => ({
+        username: a.username,
+        role: a.role,
+        displayName: a.displayName,
+        turno: a.turno,
+        plainPassword: a.password,
+        passwordHash: a.passwordHash,
+        passwordSalt: a.passwordSalt,
+        mustChangePassword: false,
+      })),
+    )
+    saveStoredAccounts(hashed)
+    setAccountsDraft(
+      hashed.map((a) => ({ 
+        ...a, 
+        id: Math.random().toString(36).slice(2),
+        originalUsername: a.username,
+        password: '', 
+        nextPassword: '', 
+        turno: a.turno ?? (a.role === 'secretaria' ? 'Mañana' : ''),
+      })),
+    )
+    setAccountsMsg({
+      type: 'ok',
+      text: `Contraseña de "${userAccount.username}" guardada correctamente.`,
+    })
   }
 
   function addNewUserToDraft() {
@@ -347,10 +418,10 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
         displayName: newUser.displayName.trim() || username,
         nextPassword: '',
         turno: newUser.turno.trim() || '',
-        mustChangePassword: true,
+        mustChangePassword: false,
       },
     ])
-    setNewUser({ username: '', password: '', role: 'secretaria', displayName: '', turno: 'Mañana', mustChangePassword: true })
+    setNewUser({ username: '', password: '', role: 'secretaria', displayName: '', turno: 'Mañana', mustChangePassword: false })
   }
 
   function removeUserFromDraft(id: string) {
@@ -1025,31 +1096,52 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
                   </div>
                   <div className="field field--pill field--clave">
                     <label>Nueva contraseña</label>
-                    <div className="pill-input pill-input--password">
-                      <input
-                        type={show ? 'text' : 'password'}
-                        placeholder="(sin cambios)"
-                        value={a.nextPassword}
-                        onChange={(e) =>
-                          setAccountsDraft((list) =>
-                            list.map((x) =>
-                              x.id === a.id
-                                ? { ...x, nextPassword: e.target.value }
-                                : x,
-                            ),
-                          )
-                        }
-                      />
+                    <div className="pill-input-group">
+                      <div className="pill-input pill-input--password">
+                        <input
+                          type={show ? 'text' : 'password'}
+                          placeholder="(sin cambios)"
+                          value={a.nextPassword}
+                          onChange={(e) =>
+                            setAccountsDraft((list) =>
+                              list.map((x) =>
+                                x.id === a.id
+                                  ? { ...x, nextPassword: e.target.value }
+                                  : x,
+                              ),
+                            )
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              void handleSaveUserPassword(a)
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="pill-input__toggle-clave"
+                          onClick={() =>
+                            setShowPassMap((m) => ({ ...m, [a.id]: !show }))
+                          }
+                          aria-label={show ? 'Ocultar' : 'Mostrar'}
+                          title={show ? 'Ocultar' : 'Mostrar'}
+                        >
+                          {show ? <IconEyeOff /> : <IconEye />}
+                        </button>
+                      </div>
                       <button
                         type="button"
-                        className="pill-input__toggle-clave"
-                        onClick={() =>
-                          setShowPassMap((m) => ({ ...m, [a.id]: !show }))
+                        className={`btn-icon btn-icon--save ${a.nextPassword?.trim() ? 'btn-icon--save--active' : ''}`}
+                        onClick={() => void handleSaveUserPassword(a)}
+                        aria-label="Guardar contraseña"
+                        title={
+                          a.nextPassword?.trim()
+                            ? `Guardar nueva contraseña para ${a.username}`
+                            : 'Guardar contraseña'
                         }
-                        aria-label={show ? 'Ocultar' : 'Mostrar'}
-                        title={show ? 'Ocultar' : 'Mostrar'}
                       >
-                        {show ? <IconEyeOff /> : <IconEye />}
+                        <IconSave />
                       </button>
                     </div>
                   </div>

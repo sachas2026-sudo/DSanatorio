@@ -1,0 +1,20 @@
+{
+  "productName": "Sanatorio Afiliados",
+  "identifier": "com.sanatorio.afiliados",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Centro Medico — Afiliados"
+      }
+    ]
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "startMenuFolder": "Sanatorio Afiliados"
+      }
+    }
+  }
+}
+
