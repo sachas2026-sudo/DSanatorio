@@ -3,17 +3,22 @@ import type { ResumenDiario, SupabaseConfig } from './types'
 const STORAGE_KEY_CONFIG = 'cuidar_supabase_config_v1'
 const STORAGE_KEY_CACHE_PREFIX = 'cuidar_resumen_cache_'
 
+export const DEFAULT_SUPABASE_CONFIG: SupabaseConfig = {
+  url: 'https://mzfyzabgdlzqkvufqrxh.supabase.co',
+  anonKey: 'sb_publishable_5E4thTDbweeAZOd4wcypsw_I5O7F4fM',
+}
+
 export function getStoredSupabaseConfig(): SupabaseConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_CONFIG)
-    if (raw) return JSON.parse(raw)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed.url && parsed.anonKey) return parsed
+    }
   } catch {
     // fallback
   }
-  return {
-    url: 'https://mzfyzabgdlzqkvufqrxh.supabase.co',
-    anonKey: 'sb_publishable_5E4thTDbweeAZOd4wcypsw_I5O7F4fM',
-  }
+  return DEFAULT_SUPABASE_CONFIG
 }
 
 export function saveStoredSupabaseConfig(cfg: SupabaseConfig): void {
@@ -90,3 +95,61 @@ export async function fetchResumenDiario(
   }
 }
 
+export interface FechaResumenItem {
+  fecha: string
+  total_cobrado: number
+}
+
+/**
+ * Obtiene la lista de fechas disponibles con su total de cobro.
+ */
+export async function fetchAvailableDates(
+  cfg: SupabaseConfig,
+): Promise<FechaResumenItem[]> {
+  const url = cfg.url.trim().replace(/\/+$/, '')
+  const key = cfg.anonKey.trim()
+  if (!url || !key) return []
+
+  try {
+    const res = await fetch(`${url}/rest/v1/resumen_diario?select=fecha,total_cobrado&order=fecha.desc&limit=100`, {
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+    })
+    if (!res.ok) return []
+    return (await res.json()) as FechaResumenItem[]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Obtiene todos los resúmenes de un mes (formato YYYY-MM) para calcular el acumulado.
+ */
+export async function fetchMonthRows(
+  mesStr: string, // YYYY-MM
+  cfg: SupabaseConfig,
+): Promise<ResumenDiario[]> {
+  const url = cfg.url.trim().replace(/\/+$/, '')
+  const key = cfg.anonKey.trim()
+  if (!url || !key) return []
+
+  try {
+    const res = await fetch(
+      `${url}/rest/v1/resumen_diario?fecha=gte.${mesStr}-01&fecha=lte.${mesStr}-31&order=fecha.desc`,
+      {
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    )
+    if (!res.ok) return []
+    return (await res.json()) as ResumenDiario[]
+  } catch {
+    return []
+  }
+}

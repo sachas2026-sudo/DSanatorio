@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  padding-bottom: 24px;
+  padding-bottom: 30px;
 }
 
 /* Header */
@@ -20,7 +20,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .header-brand {
@@ -85,6 +85,35 @@
   to { transform: rotate(360deg); }
 }
 
+/* Tabs */
+.view-tabs {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 3px;
+  margin-bottom: 10px;
+  gap: 4px;
+}
+
+.view-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 7px 4px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-tab.active {
+  background: #ffffff;
+  color: var(--primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
 /* Date Navigator */
 .date-nav {
   display: flex;
@@ -97,8 +126,8 @@
 }
 
 .date-nav-btn {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 8px;
   border: none;
   background: transparent;
@@ -106,6 +135,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
+  font-size: 0.88rem;
   cursor: pointer;
 }
 
@@ -118,7 +148,7 @@
   align-items: center;
   gap: 6px;
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   color: var(--text-main);
   cursor: pointer;
   position: relative;
@@ -142,6 +172,28 @@
   padding: 2px 6px;
   border-radius: 6px;
   text-transform: uppercase;
+}
+
+/* Quick Date Pill */
+.quick-dates-pill {
+  margin-top: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 8px;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.quick-dates-pill:active {
+  background: #dbeafe;
 }
 
 /* Main Content */
@@ -450,6 +502,51 @@
   color: var(--success);
 }
 
+/* Historial List View */
+.historial-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.historial-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.historial-card:active {
+  background: var(--bg-page);
+  border-color: var(--primary);
+}
+
+.historial-date-info strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-main);
+  text-transform: capitalize;
+}
+
+.historial-date-info span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.historial-amount {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--primary);
+}
+
 /* Footer info */
 .last-sync-footer {
   text-align: center;
@@ -459,7 +556,7 @@
   margin-top: 8px;
 }
 
-/* Settings Modal */
+/* Modal Drawer */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -551,4 +648,3 @@
 .modal-btn:active {
   opacity: 0.9;
 }
-
