@@ -69,7 +69,7 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  font-size: 14px;
+  font-size: 15px;
   font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif;
   user-select: none;
   overflow-y: auto;
@@ -122,7 +122,7 @@
 
 .sidebar-user {
   margin: 6px 0 0 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--menu-nombre);
   text-align: center;
@@ -148,10 +148,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 8px 9px;
   margin: 1px 0;
   color: var(--menu-texto);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   text-decoration: none;
   border-radius: 10px;
@@ -190,8 +190,8 @@
 }
 
 .sidebar-nav-icon {
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
   stroke: currentColor;
 }
@@ -219,9 +219,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 8px 9px;
   margin: 1px 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   border: 1px solid transparent;
   border-radius: 10px;
