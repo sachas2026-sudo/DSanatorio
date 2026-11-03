@@ -50,3 +50,4 @@ CREATE POLICY "Permitir actualizacion resumen_diario"
 
 -- Índice para consultas rápidas por fecha
 CREATE INDEX IF NOT EXISTS idx_resumen_diario_fecha ON public.resumen_diario (fecha DESC);
+

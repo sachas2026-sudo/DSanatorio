@@ -73,3 +73,4 @@ describe('calcularResumenDiario', () => {
     expect(resumen.medicos_detalle[0].nombre).toBe('Gómez, Juan')
   })
 })
+
