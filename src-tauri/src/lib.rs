@@ -25,7 +25,7 @@ use crate::core::config::settings;
 pub fn run() {
     use crate::client_mode::{load_config, StartupPlan};
 
-    let config = match load_config() {
+    let mut config = match load_config() {
         Ok(c) => c,
         Err(e) => {
             rfd::MessageDialog::new()
@@ -36,6 +36,18 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+
+    // Si aún no se configuró explícitamente, buscar automáticamente si hay un servidor en la red local
+    if !crate::client_mode::config_path().exists() {
+        if let Ok(servers) = crate::discovery::discover_servers(500) {
+            if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
+                config.mode = crate::client_mode::AppMode::Client;
+                config.server_url = Some(srv.server_url);
+                config.server_cert_pem = srv.cert_pem.or_else(|| Some("auto".to_string()));
+                let _ = crate::client_mode::save_config(&config);
+            }
+        }
+    }
 
     let plan = StartupPlan::for_mode(config.mode);
     let prepare_local = plan.prepare_local_storage;
