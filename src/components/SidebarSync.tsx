@@ -24,11 +24,11 @@ export function SidebarSync() {
       <div className="sidebar-sync-left">
         <svg
           className={`sidebar-sync-icon ${syncBusy ? 'spin-anim' : ''}`}
-          width="14"
-          height="14"
+          width="15"
+          height="15"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="var(--sidebar-accent-blue, #2F7BD6)"
+          stroke="var(--menu-acento, #2F7BD6)"
           strokeWidth="2.2"
           strokeLinecap="round"
           strokeLinejoin="round"

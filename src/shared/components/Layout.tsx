@@ -144,8 +144,8 @@ function SidebarGoogleDrive({ onClick }: { onClick?: () => void }) {
         className="sidebar-drive-dot"
         style={{
           backgroundColor: isConnected
-            ? 'var(--sidebar-online-green, #2E7D4F)'
-            : 'var(--sidebar-drive-red, #E5484D)',
+            ? 'var(--menu-ok, #2E7D4F)'
+            : 'var(--menu-error, #E5484D)',
         }}
         aria-hidden="true"
       />
@@ -188,9 +188,6 @@ export function Layout() {
   if (!session) return null
 
   const links = ALL_LINKS.filter((l) => canAccessPath(l.to))
-  const primaryPaths = ['/', '/pacientes', '/medicos', '/agenda', '/pagos']
-  const primaryLinks = links.filter((l) => primaryPaths.includes(l.to))
-  const otherLinks = links.filter((l) => !primaryPaths.includes(l.to))
 
   async function handleSalir() {
     if (salirBusy) return
@@ -232,12 +229,11 @@ export function Layout() {
           <p className="sidebar-user" title={displayName}>
             {displayName}
           </p>
-          <div className="sidebar-header-divider" />
         </div>
 
         {/* OPCIONES DEL MENÚ */}
         <nav className="sidebar-nav">
-          {primaryLinks.map((l) => (
+          {links.map((l) => (
             <NavLink
               key={l.to}
               to={l.to}
@@ -251,21 +247,7 @@ export function Layout() {
             </NavLink>
           ))}
 
-          {otherLinks.length > 0 && otherLinks.map((l) => (
-            <NavLink
-              key={l.to}
-              to={l.to}
-              end={Boolean(l.end)}
-              className={({ isActive }) =>
-                `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`
-              }
-            >
-              {getNavIcon(l.to)}
-              <span>{l.label}</span>
-            </NavLink>
-          ))}
-
-          {/* Separador después de Pagos / opciones principales */}
+          {/* Separador de 1px var(--menu-separador) con 10px de margen arriba y 6px abajo */}
           <div className="sidebar-menu-divider" />
 
           {/* CUENTA */}

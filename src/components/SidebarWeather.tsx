@@ -51,7 +51,7 @@ export function SidebarWeather() {
           height="26"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="var(--sidebar-weather-icon, #8E9BD6)"
+          stroke="#9AA5B1"
           strokeWidth="1.9"
           strokeLinecap="round"
           strokeLinejoin="round"

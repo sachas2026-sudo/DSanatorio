@@ -1,22 +1,17 @@
 :root {
-  --sidebar-bg: #F4F8FD;
-  --sidebar-border: #D6E4F5;
-  --sidebar-separator: #C9DAF0;
-  --sidebar-text: #3B4A5E;
-  --sidebar-user-color: #1F4E8C;
-  --sidebar-active-bg: #DCEBFB;
-  --sidebar-active-text: #174A8B;
-  --sidebar-active-border: #9DC1EC;
-  --sidebar-hover-bg: #E9F1FB;
-  --sidebar-account-text: #5A6B80;
-  --sidebar-exit-color: #B3261E;
-  --sidebar-accent-blue: #2F7BD6;
-  --sidebar-weather-icon: #8E9BD6;
-  --sidebar-weather-temp: #1F4E8C;
-  --sidebar-online-green: #2E7D4F;
-  --sidebar-offline-red: #B3261E;
-  --sidebar-drive-red: #E5484D;
-  --sidebar-footer-text: #5A6B80;
+  --menu-bg: #FFFFFF;
+  --menu-borde: #E4E7EB;
+  --menu-separador: #E4E7EB;
+  --menu-texto: #3E4852;
+  --menu-texto-secundario: #6B7785;
+  --menu-activo-bg: #F0F2F5;
+  --menu-activo-texto: #111827;
+  --menu-activo-borde: #D5D9DF;
+  --menu-nombre: #1F2933;
+  --menu-acento: #2F7BD6;
+  --menu-peligro: #B3261E;
+  --menu-ok: #2E7D4F;
+  --menu-error: #E5484D;
 }
 
 .app-shell {
@@ -33,9 +28,9 @@
   min-width: 240px;
   max-width: 240px;
   height: 100vh;
-  background: var(--sidebar-bg);
-  border-right: 1px solid var(--sidebar-border);
-  padding: 14px 12px;
+  background: var(--menu-bg);
+  border-right: 1px solid var(--menu-borde);
+  padding: 12px;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -63,56 +58,55 @@
   align-items: center;
   margin-bottom: 6px;
   width: 100%;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .sidebar-logo {
-  max-width: 110px;
-  max-height: 80px;
-  width: auto;
+  width: 80px;
+  max-width: 80px;
   height: auto;
   object-fit: contain;
-  border-radius: 4px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  display: block;
 }
 
 .sidebar-user {
-  margin: 0;
+  margin: 6px 0 0 0;
   font-size: 15px;
-  font-weight: 500;
-  color: var(--sidebar-user-color);
+  font-weight: 700;
+  color: var(--menu-nombre);
   text-align: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--menu-separador);
+  width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  width: 100%;
-  padding: 0 4px;
   box-sizing: border-box;
-}
-
-.sidebar-header-divider {
-  width: 100%;
-  height: 1px;
-  background-color: var(--sidebar-separator);
-  margin-top: 10px;
-  margin-bottom: 10px;
-  border: none;
 }
 
 /* ===== OPCIONES DEL MENÚ ===== */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
   width: 100%;
   flex-shrink: 0;
+  margin-top: 6px;
 }
 
 .sidebar-nav-item {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px 10px;
-  color: var(--sidebar-text);
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 1px 0;
+  color: var(--menu-texto);
   font-size: 13px;
+  font-weight: 700;
   text-decoration: none;
   border-radius: 10px;
   border: 1px solid transparent;
@@ -125,20 +119,20 @@
 }
 
 .sidebar-nav-item:hover:not(.sidebar-nav-item--active) {
-  background: var(--sidebar-hover-bg);
+  background: #F7F8FA;
   border-radius: 10px;
 }
 
 .sidebar-nav-item--active {
-  background: var(--sidebar-active-bg);
-  color: var(--sidebar-active-text);
-  font-weight: 500;
-  border: 1px solid var(--sidebar-active-border);
+  background: var(--menu-activo-bg);
+  color: var(--menu-activo-texto);
+  font-weight: 700;
+  border: 1px solid var(--menu-activo-borde);
   border-radius: 10px;
 }
 
 .sidebar-nav-item:focus-visible {
-  outline: 2px solid var(--sidebar-accent-blue);
+  outline: 2px solid var(--menu-acento);
   outline-offset: 2px;
 }
 
@@ -149,11 +143,11 @@
   stroke: currentColor;
 }
 
-/* Separador después de Pagos */
+/* Separador después de opciones de menú */
 .sidebar-menu-divider {
   width: 100%;
   height: 1px;
-  background-color: var(--sidebar-separator);
+  background-color: var(--menu-separador);
   margin-top: 10px;
   margin-bottom: 6px;
   border: none;
@@ -164,7 +158,6 @@
 .sidebar-account-section {
   display: flex;
   flex-direction: column;
-  gap: 3px;
   width: 100%;
   flex-shrink: 0;
 }
@@ -172,9 +165,11 @@
 .sidebar-account-btn {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px 10px;
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 1px 0;
   font-size: 13px;
+  font-weight: 700;
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
@@ -187,11 +182,11 @@
 }
 
 .sidebar-account-btn:hover {
-  background: var(--sidebar-hover-bg);
+  background: #F7F8FA;
 }
 
 .sidebar-account-btn:focus-visible {
-  outline: 2px solid var(--sidebar-accent-blue);
+  outline: 2px solid var(--menu-acento);
   outline-offset: 2px;
 }
 
@@ -201,13 +196,11 @@
 }
 
 .sidebar-account-btn--session {
-  color: var(--sidebar-account-text);
-  font-weight: 400;
+  color: var(--menu-texto-secundario);
 }
 
 .sidebar-account-btn--salir {
-  color: var(--sidebar-exit-color);
-  font-weight: 500;
+  color: var(--menu-peligro);
 }
 
 /* ===== PIE (FOOTER) ===== */
@@ -218,7 +211,8 @@
   gap: 8px;
   padding-top: 12px;
   font-size: 11px;
-  color: var(--sidebar-footer-text);
+  font-weight: normal;
+  color: var(--menu-texto-secundario);
   width: 100%;
   flex-shrink: 0;
   box-shadow: none;
@@ -244,6 +238,7 @@
   width: 26px;
   height: 26px;
   flex-shrink: 0;
+  stroke: #9AA5B1;
 }
 
 .sidebar-weather-temp-wrap {
@@ -255,12 +250,13 @@
 .sidebar-weather-curr-temp {
   font-size: 14px;
   font-weight: 500;
-  color: var(--sidebar-weather-temp);
+  color: var(--menu-nombre);
 }
 
 .sidebar-weather-range {
   font-size: 10px;
-  color: var(--sidebar-footer-text);
+  font-weight: normal;
+  color: var(--menu-texto-secundario);
   white-space: nowrap;
 }
 
@@ -275,13 +271,13 @@
 .sidebar-weather-date {
   font-size: 11px;
   font-weight: 500;
-  color: var(--sidebar-accent-blue);
+  color: var(--menu-acento);
 }
 
 .sidebar-weather-time {
   font-size: 14px;
   font-weight: 500;
-  color: var(--sidebar-accent-blue);
+  color: var(--menu-acento);
   font-variant-numeric: tabular-nums;
 }
 
@@ -292,7 +288,7 @@
   justify-content: space-between;
   width: 100%;
   background: #FFFFFF;
-  border: 1px solid var(--sidebar-border);
+  border: 1px solid var(--menu-borde);
   border-radius: 8px;
   padding: 7px 8px;
   box-sizing: border-box;
@@ -303,11 +299,11 @@
 }
 
 .sidebar-sync-btn:hover:not(:disabled) {
-  background: var(--sidebar-hover-bg);
+  background: #F7F8FA;
 }
 
 .sidebar-sync-btn:focus-visible {
-  outline: 2px solid var(--sidebar-accent-blue);
+  outline: 2px solid var(--menu-acento);
   outline-offset: 2px;
 }
 
@@ -323,10 +319,10 @@
 }
 
 .sidebar-sync-icon {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
-  stroke: var(--sidebar-accent-blue);
+  stroke: var(--menu-acento);
 }
 
 .sidebar-sync-icon.spin-anim {
@@ -341,12 +337,13 @@
 .sidebar-sync-text {
   font-size: 11px;
   font-weight: 500;
-  color: var(--sidebar-user-color);
+  color: var(--menu-acento);
 }
 
 .sidebar-sync-time {
   font-size: 10px;
-  color: var(--sidebar-footer-text);
+  font-weight: normal;
+  color: var(--menu-texto-secundario);
   font-variant-numeric: tabular-nums;
 }
 
@@ -376,13 +373,13 @@
 }
 
 .sidebar-server-btn:focus-visible {
-  outline: 2px solid var(--sidebar-accent-blue);
+  outline: 2px solid var(--menu-acento);
   outline-offset: 2px;
 }
 
 .sidebar-server-wifi-icon {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
 }
 
@@ -390,20 +387,21 @@
   background: transparent;
   border: none;
   padding: 0;
-  color: var(--sidebar-footer-text);
+  color: var(--menu-texto-secundario);
   font-size: 10px;
+  font-weight: normal;
   cursor: pointer;
   line-height: 1;
   box-shadow: none;
 }
 
 .sidebar-f1-btn:focus-visible {
-  outline: 2px solid var(--sidebar-accent-blue);
+  outline: 2px solid var(--menu-acento);
   outline-offset: 2px;
 }
 
 .sidebar-f1-btn:hover {
-  color: var(--sidebar-accent-blue);
+  color: var(--menu-acento);
 }
 
 /* 4. Google Drive */
@@ -413,13 +411,14 @@
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: var(--sidebar-footer-text);
+  font-weight: normal;
+  color: var(--menu-texto-secundario);
   cursor: pointer;
   margin-top: 1px;
 }
 
 .sidebar-drive-row:focus-visible {
-  outline: 2px solid var(--sidebar-accent-blue);
+  outline: 2px solid var(--menu-acento);
   outline-offset: 2px;
 }
 
