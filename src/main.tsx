@@ -6,6 +6,7 @@ import { AppErrorBoundary } from './shared/components/AppErrorBoundary'
 import { AuthGate } from './shared/components/AuthGate'
 import { AppStateProvider } from './context/AppStateContext'
 import { ConfirmProvider } from './context/ConfirmContext'
+import { WindowMinimizeButton } from './shared/components/WindowMinimizeButton'
 import { resetAppRouteToInicio } from './lib/appNavigation'
 import './index.css'
 import App from './App.tsx'
@@ -28,6 +29,7 @@ if (isTauri()) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppErrorBoundary>
+      <WindowMinimizeButton />
       <HashRouter>
         <ConfirmProvider>
           <AuthGate>

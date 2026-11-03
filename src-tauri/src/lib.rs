@@ -160,6 +160,7 @@ pub fn run() {
             discovery::auto_connect_sanatorio_server,
             discovery::get_network_connection_status,
             discovery::set_manual_server_url,
+            modules::configuracion::commands::minimize_window,
         ])
         .setup(move |app| {
             // Traer la ventana principal al frente al iniciar: sin decoración puede

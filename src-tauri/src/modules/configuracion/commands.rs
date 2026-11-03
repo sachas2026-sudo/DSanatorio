@@ -331,3 +331,11 @@ pub fn get_app_mode() -> serde_json::Value {
         }),
     }
 }
+
+#[tauri::command]
+pub fn minimize_window(app: tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.minimize();
+    }
+}
