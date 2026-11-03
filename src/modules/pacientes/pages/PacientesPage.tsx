@@ -1186,7 +1186,9 @@ export function PacientesPage() {
               <span>DNI <strong>{summaryPatient.dni || '—'}</strong></span>
               <span>Tel <strong>{summaryPatient.telefono || '—'}</strong></span>
               <span>Localidad <strong>{summaryPatient.localidad || '—'}</strong></span>
+              <span>Domicilio <strong>{summaryPatient.domicilio || '—'}</strong></span>
               <span>OS <strong>{summaryPatient.obraSocial || 'Particular'}</strong></span>
+              <span>Email <strong>{summaryPatient.email || '—'}</strong></span>
             </div>
             <div className="pac-modal__body pac-modal__body--summary">
               <PacienteHistorialSection patientId={summaryPatient.id} compact />
