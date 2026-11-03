@@ -1,0 +1,275 @@
+/* Network Selector & Connection Indicator */
+
+.network-indicator {
+  background: none;
+  border: none;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2rem;
+  color: #475569;
+  text-align: left;
+  user-select: none;
+}
+
+.network-indicator:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.network-indicator--online {
+  color: #15803d;
+}
+
+.network-indicator--offline {
+  color: #b91c1c;
+}
+
+.network-indicator__icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.network-indicator__icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  transition: all 0.25s ease;
+}
+
+.network-indicator--online .network-indicator__icon {
+  color: #16a34a;
+  stroke: #16a34a;
+  filter: drop-shadow(0 0 2px rgba(22, 163, 74, 0.5));
+}
+
+.network-indicator--offline .network-indicator__icon {
+  color: #dc2626;
+  stroke: #dc2626;
+  filter: drop-shadow(0 0 2px rgba(220, 38, 38, 0.4));
+}
+
+.network-indicator__dot {
+  position: absolute;
+  bottom: -2px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  transition: all 0.25s ease;
+}
+
+.network-indicator__dot--online {
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  animation: network-pulse-online 2s infinite ease-in-out;
+}
+
+.network-indicator__dot--offline {
+  background: #ef4444;
+  box-shadow: 0 0 4px #ef4444;
+}
+
+.network-indicator__text {
+  font-size: 0.74rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes network-pulse-online {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.85;
+  }
+}
+
+/* Modal Dialog Overlay */
+.network-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: network-fade-in 0.15s ease-out;
+}
+
+.network-dialog {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 440px;
+  padding: 1.5rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  color: #1e293b;
+}
+
+.network-dialog h2 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.network-dialog__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.network-dialog__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.network-dialog__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.network-dialog__value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.network-dialog__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.network-dialog__badge--online {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.network-dialog__badge--offline {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.network-dialog__msg {
+  font-size: 0.78rem;
+  color: #475569;
+  margin-top: 0.2rem;
+}
+
+.network-dialog__error {
+  padding: 0.5rem 0.75rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  margin-bottom: 0.75rem;
+}
+
+.network-dialog__success {
+  padding: 0.5rem 0.75rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  margin-bottom: 0.75rem;
+}
+
+.network-dialog__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.btn-network-primary {
+  background: #0284c7;
+  color: #ffffff;
+  border: none;
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  transition: background 0.15s;
+}
+
+.btn-network-primary:hover:not(:disabled) {
+  background: #0369a1;
+}
+
+.btn-network-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-network-secondary {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-network-secondary:hover {
+  background: #e2e8f0;
+}
+
+@keyframes network-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+

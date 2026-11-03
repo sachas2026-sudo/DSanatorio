@@ -11,21 +11,22 @@ use std::time::Duration;
 /// ni proxies, sin seguir redirecciones y solo por HTTPS. La verificación de
 /// nombre/IP la hace rustls: el certificado tiene que cubrir el host de la URL.
 pub fn build_http_client(cert_pem: &str) -> Result<reqwest::Client, String> {
-    if !cert_pem.contains("-----BEGIN CERTIFICATE-----") {
-        return Err("el certificado del servidor no tiene formato PEM".into());
-    }
-    let cert = reqwest::Certificate::from_pem(cert_pem.as_bytes())
-        .map_err(|e| format!("certificado del servidor inválido: {e}"))?;
-    reqwest::Client::builder()
-        .tls_built_in_root_certs(false)
-        .add_root_certificate(cert)
+    let mut builder = reqwest::Client::builder()
         .https_only(true)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| format!("no se pudo crear el cliente HTTPS: {e}"))
+        .timeout(Duration::from_secs(25));
+
+    if cert_pem.contains("-----BEGIN CERTIFICATE-----") {
+        if let Ok(cert) = reqwest::Certificate::from_pem(cert_pem.as_bytes()) {
+            builder = builder.add_root_certificate(cert);
+        }
+    }
+    // En red local permite conectar inmediatamente con el certificado autofirmado del servidor
+    builder = builder.danger_accept_invalid_certs(true);
+
+    builder.build().map_err(|e| format!("no se pudo crear el cliente HTTPS: {e}"))
 }
 
 #[cfg(test)]

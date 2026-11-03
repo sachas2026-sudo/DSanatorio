@@ -127,6 +127,10 @@ pub fn load_config() -> Result<ClientConfig, String> {
     load_config_from(&config_path())
 }
 
+pub fn save_config(cfg: &ClientConfig) -> Result<(), String> {
+    save_config_to(&config_path(), cfg)
+}
+
 // --- Runtime mode (global, set once at startup) ---
 
 pub fn set_runtime_mode(mode: AppMode) {

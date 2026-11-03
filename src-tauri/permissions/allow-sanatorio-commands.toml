@@ -47,5 +47,9 @@ commands.allow = [
   "client_login",
   "client_logout",
   "client_session_info",
-  "client_api"
+  "client_api",
+  "discover_sanatorio_servers",
+  "auto_connect_sanatorio_server",
+  "get_network_connection_status",
+  "set_manual_server_url"
 ]

@@ -1459,6 +1459,80 @@ pub fn run_server() {
     });
 }
 
+/// Inicia el servidor HTTP/HTTPS en segundo plano junto con el responder UDP para descubrimiento automático.
+pub fn start_background_server() {
+    static SERVER_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if SERVER_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+
+    std::thread::Builder::new()
+        .name("sanatorio-bg-server".to_string())
+        .spawn(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            let _ = service::ensure_initialized();
+            let data_dir = settings::data_dir();
+            let _ = std::fs::create_dir_all(&data_dir);
+
+            // TLS
+            let tls_dir = settings::sanatorio_root().join("config").join("tls");
+            let _ = std::fs::create_dir_all(&tls_dir);
+            let cert_path = tls_dir.join("server-cert.pem");
+            let key_path = tls_dir.join("server-key.pem");
+            let extra_names = crate::tls_files::load_extra_names(&tls_dir).unwrap_or_default();
+            let cert_names = crate::tls_cert::desired_names(&extra_names);
+            let _ = crate::tls_files::ensure_server_cert(&tls_dir, &cert_names);
+
+            let cert_pem = std::fs::read_to_string(&cert_path).unwrap_or_default();
+
+            // Iniciar responder UDP para que las terminales en red lo encuentren automáticamente
+            crate::discovery::start_udp_responder("Sanatorio Server".to_string(), cert_pem);
+
+            // Abrir puertos de red en Firewall de Windows de manera silenciosa
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                let _ = Command::new("netsh")
+                    .args(["advfirewall", "firewall", "add", "rule", "name=Sanatorio Server", "dir=in", "action=allow", "protocol=TCP", "localport=8787"])
+                    .creation_flags(0x08000000)
+                    .status();
+                let _ = Command::new("netsh")
+                    .args(["advfirewall", "firewall", "add", "rule", "name=Sanatorio Discovery", "dir=in", "action=allow", "protocol=UDP", "localport=8788"])
+                    .creation_flags(0x08000000)
+                    .status();
+            }
+
+            let accounts = load_accounts(&data_dir);
+            let state = AppState {
+                accounts: Arc::new(Mutex::new(accounts)),
+                data_dir: data_dir.clone(),
+                sessions: Arc::new(Mutex::new(HashMap::new())),
+                login_attempts: Arc::new(Mutex::new(HashMap::new())),
+            };
+
+            let app = build_router(state);
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("Error creando tokio runtime: {e}");
+                    return;
+                }
+            };
+
+            rt.block_on(async {
+                let addr: SocketAddr = "0.0.0.0:8787".parse().unwrap();
+                if let Ok(rustls_config) = RustlsConfig::from_pem_file(&cert_path, &key_path).await {
+                    println!("[Sanatorio] Servidor en red activo en https://0.0.0.0:8787");
+                    let _ = axum_server::bind_rustls(addr, rustls_config)
+                        .serve(app.into_make_service())
+                        .await;
+                }
+            });
+        })
+        .ok();
+}
+
+
 #[cfg(test)]
 mod tests {
     use std::env;

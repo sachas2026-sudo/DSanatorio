@@ -10,6 +10,7 @@ mod api_client;
 mod client_session;
 mod client_commands;
 mod client_request;
+pub mod discovery;
 #[cfg(test)]
 mod test_support;
 
@@ -119,6 +120,10 @@ pub fn run() {
             client_commands::client_logout,
             client_commands::client_session_info,
             client_request::client_api,
+            discovery::discover_sanatorio_servers,
+            discovery::auto_connect_sanatorio_server,
+            discovery::get_network_connection_status,
+            discovery::set_manual_server_url,
         ])
         .setup(move |app| {
             // Traer la ventana principal al frente al iniciar: sin decoración puede
@@ -136,6 +141,7 @@ pub fn run() {
                 if let Some(guard) = lock_guard {
                     app.manage(guard);
                 }
+                server::start_background_server();
             }
             if cfg!(debug_assertions) {
                 app.handle().plugin(

@@ -4,6 +4,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { SystemAlertBanner } from './SystemAlertBanner'
 import { DailyBackupAlertBanner } from './DailyBackupAlertBanner'
 import { SidebarWeather } from './SidebarWeather'
+import { NetworkSelector } from './NetworkSelector'
 import { AppInfoModal } from './AppInfoModal'
 import { GoogleDriveSetupModal } from './GoogleDriveSetupModal'
 import { useConfirm } from '../../context/ConfirmContext'
@@ -173,6 +174,7 @@ export function Layout() {
         </nav>
         <div className="sidebar-bottom">
           <SidebarWeather />
+          <NetworkSelector />
           <SidebarGoogleDrive />
           <button
             type="button"

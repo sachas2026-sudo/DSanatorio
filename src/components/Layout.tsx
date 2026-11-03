@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { SystemAlertBanner } from './SystemAlertBanner'
 import { DailyBackupAlertBanner } from './DailyBackupAlertBanner'
 import { SidebarWeather } from './SidebarWeather'
+import { NetworkSelector } from './NetworkSelector'
 import { AppInfoModal } from './AppInfoModal'
 import { ForcePasswordChange } from './ForcePasswordChange'
 import { useConfirm } from '../context/ConfirmContext'
@@ -132,6 +133,7 @@ export function Layout() {
         </nav>
         <div className="sidebar-bottom">
           <SidebarWeather />
+          <NetworkSelector />
           <button
             type="button"
             className="sidebar-version"
