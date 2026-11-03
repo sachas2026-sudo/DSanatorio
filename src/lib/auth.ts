@@ -118,7 +118,13 @@ function parseAccountsJson(raw: string): AuthAccount[] | null {
           if (!account.turno) account.turno = 'Mañana'
         }
       }
-      out.push({ ...account, username: u, displayName: d })
+      const isDefaultUser = u === 'Admi' || u === 'Aguirre Mary' || u === 'Barua Andrea' || u === 'Afiliados'
+      out.push({
+        ...account,
+        username: u,
+        displayName: d,
+        mustChangePassword: isDefaultUser ? false : account.mustChangePassword,
+      })
     }
     return out.length > 0 ? out : null
   } catch {
@@ -275,17 +281,17 @@ export function getEffectiveAccounts(): AuthAccount[] {
 export function getDefaultLoginUsername(): string {
   const flavor = (import.meta.env.VITE_APP_FLAVOR as string | undefined)?.toLowerCase()
   const accounts = getEffectiveAccounts()
-  if (flavor === 'secretaria') {
+  if (flavor === 'administrador' || flavor === 'admin' || flavor === 'admi') {
+    const adm = accounts.find((a) => a.role === 'admin')
+    return adm?.username ?? 'Admi'
+  }
+  if (flavor === 'secretaria' || flavor === 'server') {
     const sec = accounts.find((a) => a.role === 'secretaria')
     return sec?.username ?? 'Aguirre Mary'
   }
   if (flavor === 'afiliados' || flavor === 'afiliado') {
     const afil = accounts.find((a) => a.role === 'afiliado')
     return afil?.username ?? 'Afiliados'
-  }
-  if (flavor === 'server') {
-    const adm = accounts.find((a) => a.role === 'admin')
-    return adm?.username ?? 'Admi'
   }
 
   const found = accounts.find((a) => !isGenericRoleName(a.username) && !isGenericRoleName(a.displayName))

@@ -23,7 +23,17 @@ use crate::core::config::settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    use crate::client_mode::{load_config, StartupPlan};
+    let context = tauri::generate_context!();
+    let identifier = context.config().identifier.to_lowercase();
+    let product_name = context.config().product_name.as_deref().unwrap_or("").to_lowercase();
+    let is_client_flavor = identifier.contains("afiliado") 
+        || identifier.contains("administrador") 
+        || identifier.contains("admi")
+        || product_name.contains("afiliado")
+        || product_name.contains("administrador")
+        || product_name.contains("admi");
+
+    use crate::client_mode::{load_config, StartupPlan, AppMode};
 
     let mut config = match load_config() {
         Ok(c) => c,
@@ -37,14 +47,28 @@ pub fn run() {
         }
     };
 
-    // Si aún no se configuró explícitamente, buscar automáticamente si hay un servidor en la red local
-    if !crate::client_mode::config_path().exists() {
-        if let Ok(servers) = crate::discovery::discover_servers(500) {
-            if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
-                config.mode = crate::client_mode::AppMode::Client;
-                config.server_url = Some(srv.server_url);
-                config.server_cert_pem = srv.cert_pem.or_else(|| Some("auto".to_string()));
-                let _ = crate::client_mode::save_config(&config);
+    if is_client_flavor {
+        // En los instaladores cliente (Afiliados y Administrador) siempre opera en modo cliente
+        if !crate::client_mode::config_path().exists() || config.mode == AppMode::Local {
+            config.mode = AppMode::Client;
+            if let Ok(servers) = crate::discovery::discover_servers(800) {
+                if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
+                    config.server_url = Some(srv.server_url);
+                    config.server_cert_pem = srv.cert_pem.or_else(|| Some("auto".to_string()));
+                }
+            }
+            let _ = crate::client_mode::save_config(&config);
+        }
+    } else {
+        // En sabor Server (Mesa de Entrada), si no hay configuración, busca si ya hay otro servidor o es local
+        if !crate::client_mode::config_path().exists() {
+            if let Ok(servers) = crate::discovery::discover_servers(500) {
+                if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
+                    config.mode = AppMode::Client;
+                    config.server_url = Some(srv.server_url);
+                    config.server_cert_pem = srv.cert_pem.or_else(|| Some("auto".to_string()));
+                    let _ = crate::client_mode::save_config(&config);
+                }
             }
         }
     }
@@ -164,7 +188,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 

@@ -93,6 +93,13 @@ SkipSeedAuth:
   Delete "$INSTDIR\auth-accounts.json"
   Delete "$INSTDIR\resources\auth-accounts.json"
 
+  ; Abrir puertos en Firewall de Windows para permitir conexion de terminales en red local
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall delete rule name="Sanatorio Server" 2>nul'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall delete rule name="Sanatorio Discovery" 2>nul'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio Server" dir=in action=allow protocol=TCP localport=8787 profile=any'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio Discovery" dir=in action=allow protocol=UDP localport=8788 profile=any'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio App" dir=in action=allow program="$INSTDIR\app.exe" profile=any'
+
   FileOpen $9 "C:\Sanatorio\Abrir Centro Medico.cmd" w
   FileWrite $9 "@echo off$\r$\n"
   FileWrite $9 "start $\"$\" $\"$INSTDIR\app.exe$\"$\r$\n"

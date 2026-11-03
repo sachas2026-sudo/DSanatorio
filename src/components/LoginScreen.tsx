@@ -45,8 +45,9 @@ export function LoginScreen({ onSuccess }: Props) {
             : 'Usuario o contraseña incorrectos.',
         )
       }
-    } catch {
-      setError('No se pudo iniciar la sesión.')
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : err instanceof Error ? err.message : 'No se pudo iniciar la sesión.'
+      setError(msg)
     } finally {
       setBusy(false)
     }

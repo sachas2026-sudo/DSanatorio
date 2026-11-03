@@ -54,14 +54,26 @@ impl ClientState {
         if cfg.mode != AppMode::Client {
             return Err("La aplicación no está en modo cliente".into());
         }
-        let base_url = cfg
-            .server_url
-            .clone()
-            .ok_or_else(|| "Falta la dirección del servidor en la configuración".to_string())?;
-        let pem = cfg
-            .server_cert_pem
-            .clone()
-            .ok_or_else(|| "Falta el certificado del servidor en la configuración".to_string())?;
+        let mut base_url_opt = cfg.server_url.clone();
+        let mut pem_opt = cfg.server_cert_pem.clone();
+
+        if base_url_opt.is_none() {
+            if let Ok(servers) = crate::discovery::discover_servers(1200) {
+                if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
+                    base_url_opt = Some(srv.server_url);
+                    pem_opt = srv.cert_pem.or_else(|| Some("auto".to_string()));
+                    let mut updated = cfg.clone();
+                    updated.server_url = base_url_opt.clone();
+                    updated.server_cert_pem = pem_opt.clone();
+                    let _ = client_mode::save_config(&updated);
+                }
+            }
+        }
+
+        let base_url = base_url_opt.ok_or_else(|| {
+            "No se encontró el servidor de Mesa de Entrada en la red local. Verificá que la PC principal esté encendida con el programa abierto.".to_string()
+        })?;
+        let pem = pem_opt.unwrap_or_else(|| "auto".to_string());
         let client = build_http_client(&pem)?;
         let info = self
             .session

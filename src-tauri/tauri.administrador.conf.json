@@ -1,0 +1,19 @@
+{
+  "productName": "Sanatorio Administrador",
+  "identifier": "com.sanatorio.administrador",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Centro Medico — Administrador"
+      }
+    ]
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "startMenuFolder": "Sanatorio Administrador"
+      }
+    }
+  }
+}
