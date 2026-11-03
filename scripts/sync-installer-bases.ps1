@@ -23,4 +23,9 @@ foreach ($n in 1..3) {
     Copy-Item $src (Join-Path $dest "sanatorio-datos.respaldo-$n.json") -Force
 }
 
+$auth = 'C:\Sanatorio\datos\auth-accounts.json'
+if (Test-Path $auth) {
+    Copy-Item $auth (Join-Path $dest 'auth-accounts.json') -Force
+}
+
 Write-Host "Bases listas en $dest"

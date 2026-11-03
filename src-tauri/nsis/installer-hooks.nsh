@@ -80,6 +80,19 @@ SkipSeedData:
   Delete "$INSTDIR\resources\sanatorio-datos.respaldo-2.json"
   Delete "$INSTDIR\resources\sanatorio-datos.respaldo-3.json"
 
+  ; Si no existen cuentas de usuario, copiar auth-accounts.json semilla
+  IfFileExists "C:\Sanatorio\datos\auth-accounts.json" SkipSeedAuth 0
+
+  IfFileExists "$INSTDIR\auth-accounts.json" 0 +2
+    CopyFiles /SILENT "$INSTDIR\auth-accounts.json" "C:\Sanatorio\datos\"
+
+  IfFileExists "$INSTDIR\resources\auth-accounts.json" 0 +2
+    CopyFiles /SILENT "$INSTDIR\resources\auth-accounts.json" "C:\Sanatorio\datos\"
+
+SkipSeedAuth:
+  Delete "$INSTDIR\auth-accounts.json"
+  Delete "$INSTDIR\resources\auth-accounts.json"
+
   FileOpen $9 "C:\Sanatorio\Abrir Centro Medico.cmd" w
   FileWrite $9 "@echo off$\r$\n"
   FileWrite $9 "start $\"$\" $\"$INSTDIR\app.exe$\"$\r$\n"

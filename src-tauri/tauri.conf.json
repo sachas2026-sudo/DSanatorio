@@ -38,7 +38,8 @@
       "installer-bases/sanatorio-datos.json": "sanatorio-datos.json",
       "installer-bases/sanatorio-datos.respaldo-1.json": "sanatorio-datos.respaldo-1.json",
       "installer-bases/sanatorio-datos.respaldo-2.json": "sanatorio-datos.respaldo-2.json",
-      "installer-bases/sanatorio-datos.respaldo-3.json": "sanatorio-datos.respaldo-3.json"
+      "installer-bases/sanatorio-datos.respaldo-3.json": "sanatorio-datos.respaldo-3.json",
+      "installer-bases/auth-accounts.json": "auth-accounts.json"
     },
     "windows": {
       "nsis": {

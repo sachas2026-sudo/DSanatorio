@@ -10,6 +10,10 @@ Push-Location $ProjectRoot
 try {
   Write-Host "=== Generando 3 Instaladores de Sanatorio v16.0.0 ===" -ForegroundColor Cyan
 
+  Write-Host "`nSincronizando bases y credenciales para instaladores..." -ForegroundColor Yellow
+  npm run installer:sync-bases
+  if ($LASTEXITCODE -ne 0) { throw "Fallo la sincronizacion de bases del instalador" }
+
   # 1. Server
   Write-Host "`n[1/3] Compilando Sanatorio Server..." -ForegroundColor Yellow
   $env:VITE_APP_FLAVOR = "server"
