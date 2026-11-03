@@ -1,0 +1,96 @@
+.sidebar-sync-btn {
+  background: rgba(248, 250, 252, 0.85);
+  border: 1px solid #e2e8f0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.1rem;
+  color: #334155;
+  text-align: left;
+  user-select: none;
+  box-sizing: border-box;
+  margin-top: 0.35rem;
+  margin-bottom: 0.25rem;
+}
+
+.sidebar-sync-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.sidebar-sync-btn:disabled {
+  opacity: 0.85;
+  cursor: wait;
+}
+
+.sidebar-sync-btn.is-syncing {
+  border-color: #0284c7;
+  background: #f0f9ff;
+  color: #0284c7;
+}
+
+.sidebar-sync-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.sidebar-sync-icon {
+  width: 16px;
+  height: 16px;
+  stroke: #0284c7;
+  transition: transform 0.2s ease;
+}
+
+.sidebar-sync-btn:hover:not(:disabled) .sidebar-sync-icon {
+  transform: rotate(45deg);
+}
+
+.sidebar-sync-icon.spin-anim {
+  animation: sidebarSyncSpin 0.8s linear infinite;
+  stroke: #0284c7;
+}
+
+@keyframes sidebarSyncSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sidebar-sync-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  gap: 0.35rem;
+}
+
+.sidebar-sync-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-sync-sub {
+  font-size: 0.68rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

@@ -239,6 +239,9 @@ type Ctx = {
     | { ok: true; stats: ArchiveHistoricoStats }
     | { ok: false; error: string }
   >
+  syncData: (silent?: boolean) => Promise<boolean>
+  syncBusy: boolean
+  lastSyncTime: Date | null
 }
 
 const AppStateContext = createContext<Ctx | null>(null)
@@ -266,6 +269,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [dailyBackupAlert, setDailyBackupAlert] = useState<DailyBackupAlert | null>(
     null,
   )
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null)
 
   const loaderVisibleRef = useRef(false)
   const loadGenerationRef = useRef(0)
@@ -332,6 +337,53 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [reportPersistError],
   )
 
+  const syncData = useCallback(async (silent = false): Promise<boolean> => {
+    if (saveDebounceRef.current) {
+      return false
+    }
+    if (!silent) setSyncBusy(true)
+    try {
+      const result = await loadFromStorage()
+      if (result.kind === "ok") {
+        const enriched = await enrichLoadedData(result.data)
+        const currentSnap = dataRef.current
+        const currentStr = currentSnap ? serializeAppData(currentSnap) : ""
+        const newStr = serializeAppData(enriched)
+        if (currentStr !== newStr) {
+          dataRef.current = enriched
+          skipAutosaveOnceRef.current = true
+          setData(enriched)
+        }
+        setLastSyncTime(new Date())
+        return true
+      }
+      return false
+    } catch (err) {
+      if (!silent) {
+        console.warn("Error al sincronizar datos:", err)
+      }
+      return false
+    } finally {
+      if (!silent) setSyncBusy(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void syncData(true)
+    }, 12000)
+
+    const onFocus = () => {
+      void syncData(true)
+    }
+
+    window.addEventListener("focus", onFocus)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener("focus", onFocus)
+    }
+  }, [syncData])
+
   /** Guarda en disco al salir. */
   const flushPersistForExit = useCallback(async () => {
     if (saveDebounceRef.current) {
@@ -384,6 +436,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         }
         const enriched = await enrichLoadedData(result.data)
         setData(enriched)
+        setLastSyncTime(new Date())
         if (result.integrityAlert) {
           setSystemAlert(result.integrityAlert)
         }
@@ -1937,6 +1990,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       restoreFromBackup,
       restoreFromDailyBackup,
       archiveHistoricoBeforeCutoff,
+      syncData,
+      syncBusy,
+      lastSyncTime,
     }),
     [
       data,
@@ -2002,6 +2058,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       restoreFromBackup,
       restoreFromDailyBackup,
       archiveHistoricoBeforeCutoff,
+      syncData,
+      syncBusy,
+      lastSyncTime,
     ],
   )
 
