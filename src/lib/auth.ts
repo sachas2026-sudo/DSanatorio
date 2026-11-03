@@ -47,7 +47,9 @@ const ACCOUNTS_STORAGE_KEY = 'sanatorio-auth-accounts-v1'
 const DEFAULT_ACCOUNTS: AuthAccount[] = [
   {
     username: 'Admi',
-    password: 'Admi',
+    password: '753',
+    passwordHash: 'cdXg6ncfUGvtkxkx8BjDY5Wf0Zexceg2kmvM2TD7lB4=',
+    passwordSalt: '6nUUdlNVF/cc1cCad+FJsA==',
     role: 'admin',
     displayName: 'Admi',
     mustChangePassword: false,
@@ -89,41 +91,13 @@ function parseAccountsJson(raw: string): AuthAccount[] | null {
     for (const row of parsed) {
       const account = parseStoredAccountRow(row)
       if (!account) return null
-      let u = account.username.trim()
-      let d = account.displayName.trim()
-      const t = (account.turno || '').trim().toLowerCase()
-      if (u.toLowerCase().includes('aguirre') || d.toLowerCase().includes('aguirre')) {
-        u = 'Aguirre Mary'
-        d = 'Aguirre Mary'
-        if (!account.turno) account.turno = 'Mañana'
-      } else if (u.toLowerCase().includes('barua') || d.toLowerCase().includes('barua')) {
-        u = 'Barua Andrea'
-        d = 'Barua Andrea'
-        if (!account.turno) account.turno = 'Tarde'
-      } else if (isGenericRoleName(u) || isGenericRoleName(d)) {
-        if (t.includes('mañana') || t.includes('manana') || u.includes('2') || d.includes('2')) {
-          if (isGenericRoleName(u)) u = 'Aguirre Mary'
-          if (isGenericRoleName(d)) d = 'Aguirre Mary'
-          if (!account.turno) account.turno = 'Mañana'
-        } else if (t.includes('tarde') || u.includes('1') || d.includes('1')) {
-          if (isGenericRoleName(u)) u = 'Barua Andrea'
-          if (isGenericRoleName(d)) d = 'Barua Andrea'
-          if (!account.turno) account.turno = 'Tarde'
-        } else if (account.role === 'admin') {
-          if (isGenericRoleName(u)) u = 'Admi'
-          if (isGenericRoleName(d)) d = 'Admi'
-        } else {
-          if (isGenericRoleName(u)) u = 'Aguirre Mary'
-          if (isGenericRoleName(d)) d = 'Aguirre Mary'
-          if (!account.turno) account.turno = 'Mañana'
-        }
-      }
-      const isDefaultUser = u === 'Admi' || u === 'Aguirre Mary' || u === 'Barua Andrea' || u === 'Afiliados'
+      const u = account.username.trim()
+      const d = (account.displayName || account.username).trim()
       out.push({
         ...account,
         username: u,
         displayName: d,
-        mustChangePassword: isDefaultUser ? false : account.mustChangePassword,
+        mustChangePassword: account.mustChangePassword ?? false,
       })
     }
     return out.length > 0 ? out : null
@@ -252,12 +226,10 @@ export function readStoredAccounts(): AuthAccount[] | null {
   }
 }
 
-export function saveStoredAccounts(accounts: AuthAccount[]): void {
+export async function saveStoredAccounts(accounts: AuthAccount[]): Promise<void> {
   accountsCache = accounts
   const json = serializeAccountsForStorage(accounts)
-  void saveAuthAccountsRaw(json).catch((err) => {
-    console.error('No se pudieron guardar las cuentas de ingreso:', err)
-  })
+  await saveAuthAccountsRaw(json)
   // Asegurar persistencia en localStorage como respaldo
   try {
     localStorage.setItem(ACCOUNTS_STORAGE_KEY, json)
@@ -398,7 +370,7 @@ export async function migrateAccountsToHashed(
       migrated.push(a)
     }
   }
-  saveStoredAccounts(migrated)
+  await saveStoredAccounts(migrated)
 }
 
 export async function authenticate(
@@ -515,7 +487,7 @@ export async function changeAccountPassword(
       updated.push(a)
     }
   }
-  saveStoredAccounts(updated)
+  await saveStoredAccounts(updated)
   const session = readStoredSession()
   if (session && session.username.localeCompare(username, 'es', { sensitivity: 'accent' }) === 0) {
     storeSession({ ...session, mustChangePassword: false })

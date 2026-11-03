@@ -273,7 +273,7 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
       username: a.username.trim(),
       password: (a.nextPassword || a.password).trim(),
       role: a.role,
-      displayName: a.displayName?.trim() || a.username.trim(),
+      displayName: a.username.trim(),
       turno: a.turno?.trim() || undefined,
     }))
     if (next.some((a) => !a.username || (!a.password && !a.passwordHash))) {
@@ -297,31 +297,38 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
       cancelLabel: 'Cancelar',
     })
     if (!ok) return
-    const hashed = await hashAccountsForStorage(
-      next.map((a) => ({
-        username: a.username,
-        role: a.role,
-        displayName: a.displayName,
-        turno: a.turno,
-        plainPassword: a.password,
-        passwordHash: a.passwordHash,
-        passwordSalt: a.passwordSalt,
-        mustChangePassword: false,
-      })),
-    )
-    saveStoredAccounts(hashed)
-    setAccountsDraft(
-      hashed.map((a) => ({ 
-        ...a, 
-        id: Math.random().toString(36).slice(2),
-        originalUsername: a.username,
-        password: '', 
-        nextPassword: '', 
-        turno: a.turno ?? (a.role === 'secretaria' ? 'Mañana' : ''),
-      })),
-    )
-    setNewUser({ username: '', password: '', role: 'secretaria', displayName: '', turno: 'Mañana', mustChangePassword: false })
-    setAccountsMsg({ type: 'ok', text: 'Usuarios y contraseñas guardados.' })
+    try {
+      const hashed = await hashAccountsForStorage(
+        next.map((a) => ({
+          username: a.username,
+          role: a.role,
+          displayName: a.displayName,
+          turno: a.turno,
+          plainPassword: a.password,
+          passwordHash: a.passwordHash,
+          passwordSalt: a.passwordSalt,
+          mustChangePassword: false,
+        })),
+      )
+      await saveStoredAccounts(hashed)
+      setAccountsDraft(
+        hashed.map((a) => ({ 
+          ...a, 
+          id: Math.random().toString(36).slice(2),
+          originalUsername: a.username,
+          password: '', 
+          nextPassword: '', 
+          turno: a.turno ?? (a.role === 'secretaria' ? 'Mañana' : ''),
+        })),
+      )
+      setNewUser({ username: '', password: '', role: 'secretaria', displayName: '', turno: 'Mañana', mustChangePassword: false })
+      setAccountsMsg({ type: 'ok', text: 'Usuarios y contraseñas guardados.' })
+    } catch (err) {
+      setAccountsMsg({
+        type: 'err',
+        text: `Error al guardar usuarios: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
   }
 
   async function handleSaveUserPassword(userAccount: (typeof accountsDraft)[0]) {
@@ -338,9 +345,9 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
     const next = accountsDraft.map((a) => ({
       ...a,
       username: a.username.trim(),
+      displayName: a.username.trim(),
       password: (a.id === userAccount.id ? newPass : a.nextPassword || a.password).trim(),
       role: a.role,
-      displayName: a.displayName?.trim() || a.username.trim(),
       turno: a.turno?.trim() || undefined,
     }))
 
@@ -366,33 +373,40 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
     })
     if (!ok) return
 
-    const hashed = await hashAccountsForStorage(
-      next.map((a) => ({
-        username: a.username,
-        role: a.role,
-        displayName: a.displayName,
-        turno: a.turno,
-        plainPassword: a.password,
-        passwordHash: a.passwordHash,
-        passwordSalt: a.passwordSalt,
-        mustChangePassword: false,
-      })),
-    )
-    saveStoredAccounts(hashed)
-    setAccountsDraft(
-      hashed.map((a) => ({ 
-        ...a, 
-        id: Math.random().toString(36).slice(2),
-        originalUsername: a.username,
-        password: '', 
-        nextPassword: '', 
-        turno: a.turno ?? (a.role === 'secretaria' ? 'Mañana' : ''),
-      })),
-    )
-    setAccountsMsg({
-      type: 'ok',
-      text: `Contraseña de "${userAccount.username}" guardada correctamente.`,
-    })
+    try {
+      const hashed = await hashAccountsForStorage(
+        next.map((a) => ({
+          username: a.username,
+          role: a.role,
+          displayName: a.displayName,
+          turno: a.turno,
+          plainPassword: a.password,
+          passwordHash: a.passwordHash,
+          passwordSalt: a.passwordSalt,
+          mustChangePassword: false,
+        })),
+      )
+      await saveStoredAccounts(hashed)
+      setAccountsDraft(
+        hashed.map((a) => ({ 
+          ...a, 
+          id: Math.random().toString(36).slice(2),
+          originalUsername: a.username,
+          password: '', 
+          nextPassword: '', 
+          turno: a.turno ?? (a.role === 'secretaria' ? 'Mañana' : ''),
+        })),
+      )
+      setAccountsMsg({
+        type: 'ok',
+        text: `Contraseña de "${userAccount.username}" guardada correctamente.`,
+      })
+    } catch (err) {
+      setAccountsMsg({
+        type: 'err',
+        text: `Error al guardar contraseña: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
   }
 
   function addNewUserToDraft() {
@@ -1038,15 +1052,16 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
                     <div className="pill-input">
                       <input 
                         value={a.username} 
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const val = e.target.value
                           setAccountsDraft((list) =>
                             list.map((x) =>
                               x.id === a.id
-                                ? { ...x, username: e.target.value }
+                                ? { ...x, username: val, displayName: val }
                                 : x,
                             ),
                           )
-                        }
+                        }}
                       />
                     </div>
                   </div>

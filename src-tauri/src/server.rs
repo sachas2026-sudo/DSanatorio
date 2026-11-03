@@ -189,8 +189,8 @@ fn load_accounts(data_dir: &std::path::Path) -> Vec<Account> {
                 "username": "Admi",
                 "role": "admin",
                 "displayName": "Admi",
-                "passwordHash": "7BxFDBXLc7cG6WtOZQLSHVRsdzUrEgZj1S72btz1XZg=",
-                "passwordSalt": "LfDzGj3a8GL9QnmOkemt9Q==",
+                "passwordHash": "cdXg6ncfUGvtkxkx8BjDY5Wf0Zexceg2kmvM2TD7lB4=",
+                "passwordSalt": "6nUUdlNVF/cc1cCad+FJsA==",
                 "mustChangePassword": false
             }),
             serde_json::json!({

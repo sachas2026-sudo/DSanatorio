@@ -219,7 +219,7 @@ export function ConfiguracionPage() {
         plainPassword: a.password,
       })),
     )
-    saveStoredAccounts(hashed)
+    await saveStoredAccounts(hashed)
     setAccountsDraft(
       hashed.map((a) => ({ ...a, password: '', nextPassword: '' })),
     )
@@ -275,7 +275,7 @@ export function ConfiguracionPage() {
         plainPassword: a.password,
       })),
     )
-    saveStoredAccounts(hashed)
+    await saveStoredAccounts(hashed)
     setAccountsDraft(
       hashed.map((a) => ({ ...a, password: '', nextPassword: '' })),
     )

@@ -46,7 +46,7 @@ describe('cambio obligatorio de contraseña', () => {
   })
 
   it('authenticate devuelve mustChangePassword false para cuenta por defecto', async () => {
-    const res = await authenticate('Admi', 'Admi')
+    const res = await authenticate('Admi', '753')
     expect(res.ok).toBe(true)
     if (res.ok) {
       expect(res.session.mustChangePassword).toBe(false)
@@ -55,8 +55,8 @@ describe('cambio obligatorio de contraseña', () => {
 
   it('changeAccountPassword limpia el flag si estaba activo y verifica la nueva contraseña', async () => {
     const accounts = getEffectiveAccounts()
-    saveStoredAccounts(accounts.map((a) => a.username === 'Admi' ? { ...a, mustChangePassword: true } : a))
-    const res = await authenticate('Admi', 'Admi')
+    await saveStoredAccounts(accounts.map((a) => a.username === 'Admi' ? { ...a, mustChangePassword: true } : a))
+    const res = await authenticate('Admi', '753')
     expect(res.ok).toBe(true)
     if (res.ok) {
       expect(res.session.mustChangePassword).toBe(true)
@@ -66,11 +66,11 @@ describe('cambio obligatorio de contraseña', () => {
     const account = getEffectiveAccounts().find((a) => a.username === 'Admi')
     expect(account?.mustChangePassword).toBe(false)
     expect(await verifyCurrentPassword('Admi', 'NuevaClave123')).toBe(true)
-    expect(await verifyCurrentPassword('Admi', 'Admi')).toBe(false)
+    expect(await verifyCurrentPassword('Admi', '753')).toBe(false)
   })
 
   it('la sesión almacenada refleja mustChangePassword false tras el cambio', async () => {
-    const res = await authenticate('Admi', 'Admi')
+    const res = await authenticate('Admi', '753')
     if (res.ok) storeSession(res.session)
     await changeAccountPassword('Admi', 'OtraClave456')
     const session = readStoredSession()
