@@ -13,11 +13,14 @@
   transition: background 0.15s ease;
   user-select: none;
   box-shadow: none;
-  margin: 0;
+  margin-top: 0;
+  margin-left: 0;
+  margin-right: 0;
+  margin-bottom: 10px;
 }
 
 .sidebar-sync-btn:hover:not(:disabled) {
-  background: #F7F8FA;
+  background: var(--menu-hover-bg, #F7F8FA);
 }
 
 .sidebar-sync-btn:focus-visible {
@@ -54,13 +57,13 @@
 
 .sidebar-sync-text {
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--menu-acento, #2F7BD6);
 }
 
 .sidebar-sync-time {
   font-size: 10px;
-  font-weight: normal;
+  font-weight: 400;
   color: var(--menu-texto-secundario, #6B7785);
   font-variant-numeric: tabular-nums;
 }

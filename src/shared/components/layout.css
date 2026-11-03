@@ -1,3 +1,36 @@
+/* ===== FUENTE NUNITO (LOCAL Y OFFLINE) ===== */
+@font-face {
+  font-family: 'Nunito';
+  src: url('../../assets/fonts/Nunito-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito';
+  src: url('../../assets/fonts/Nunito-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito';
+  src: url('../../assets/fonts/Nunito-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito';
+  src: url('../../assets/fonts/Nunito-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --menu-bg: #FFFFFF;
   --menu-borde: #E4E7EB;
@@ -7,11 +40,13 @@
   --menu-activo-bg: #F0F2F5;
   --menu-activo-texto: #111827;
   --menu-activo-borde: #D5D9DF;
+  --menu-hover-bg: #F7F8FA;
   --menu-nombre: #1F2933;
   --menu-acento: #2F7BD6;
   --menu-peligro: #B3261E;
   --menu-ok: #2E7D4F;
   --menu-error: #E5484D;
+  --menu-icono-clima: #9AA5B1;
 }
 
 .app-shell {
@@ -34,12 +69,23 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  font-size: 13px;
+  font-size: 14px;
+  font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif;
   user-select: none;
   overflow-y: auto;
   overflow-x: hidden;
   box-shadow: none;
   background-image: none;
+}
+
+.sidebar *,
+.sidebar button,
+.sidebar input,
+.sidebar select,
+.sidebar span,
+.sidebar p,
+.sidebar a {
+  font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif;
 }
 
 /* ===== ENCABEZADO ===== */
@@ -101,11 +147,11 @@
 .sidebar-nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 10px;
   margin: 1px 0;
   color: var(--menu-texto);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   text-decoration: none;
   border-radius: 10px;
@@ -116,10 +162,17 @@
   width: 100%;
   box-sizing: border-box;
   box-shadow: none;
+  white-space: nowrap;
+}
+
+.sidebar-nav-item span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-nav-item:hover:not(.sidebar-nav-item--active) {
-  background: #F7F8FA;
+  background: var(--menu-hover-bg);
   border-radius: 10px;
 }
 
@@ -165,10 +218,10 @@
 .sidebar-account-btn {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 10px;
   margin: 1px 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -179,10 +232,15 @@
   text-align: left;
   transition: background 0.15s ease;
   box-shadow: none;
+  white-space: nowrap;
+}
+
+.sidebar-account-btn span {
+  white-space: nowrap;
 }
 
 .sidebar-account-btn:hover {
-  background: #F7F8FA;
+  background: var(--menu-hover-bg);
 }
 
 .sidebar-account-btn:focus-visible {
@@ -208,10 +266,9 @@
   margin-top: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   padding-top: 12px;
   font-size: 11px;
-  font-weight: normal;
+  font-weight: 400;
   color: var(--menu-texto-secundario);
   width: 100%;
   flex-shrink: 0;
@@ -219,69 +276,7 @@
   background: transparent;
 }
 
-/* 1. Clima y Fecha/Hora */
-.sidebar-weather-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.sidebar-weather-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sidebar-weather-svg {
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  stroke: #9AA5B1;
-}
-
-.sidebar-weather-temp-wrap {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
-}
-
-.sidebar-weather-curr-temp {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--menu-nombre);
-}
-
-.sidebar-weather-range {
-  font-size: 10px;
-  font-weight: normal;
-  color: var(--menu-texto-secundario);
-  white-space: nowrap;
-}
-
-.sidebar-weather-right {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  line-height: 1.15;
-}
-
-.sidebar-weather-date {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--menu-acento);
-}
-
-.sidebar-weather-time {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--menu-acento);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 2. Botón Sincronizar */
+/* 1. Botón Sincronizar (PRIMERO, arriba del clima) */
 .sidebar-sync-btn {
   display: flex;
   align-items: center;
@@ -291,6 +286,7 @@
   border: 1px solid var(--menu-borde);
   border-radius: 8px;
   padding: 7px 8px;
+  margin-bottom: 10px;
   box-sizing: border-box;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -299,7 +295,7 @@
 }
 
 .sidebar-sync-btn:hover:not(:disabled) {
-  background: #F7F8FA;
+  background: var(--menu-hover-bg);
 }
 
 .sidebar-sync-btn:focus-visible {
@@ -336,14 +332,77 @@
 
 .sidebar-sync-text {
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--menu-acento);
 }
 
 .sidebar-sync-time {
   font-size: 10px;
-  font-weight: normal;
+  font-weight: 400;
   color: var(--menu-texto-secundario);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 2. Fila de clima (debajo del botón, margin-bottom 10px) */
+.sidebar-weather-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.sidebar-weather-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-weather-svg {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  stroke: var(--menu-icono-clima);
+}
+
+.sidebar-weather-temp-wrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.sidebar-weather-curr-temp {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--menu-nombre);
+}
+
+.sidebar-weather-range {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--menu-texto-secundario);
+  white-space: nowrap;
+}
+
+.sidebar-weather-right {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.sidebar-weather-date {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--menu-acento);
+}
+
+.sidebar-weather-time {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--menu-acento);
   font-variant-numeric: tabular-nums;
 }
 
@@ -383,13 +442,18 @@
   flex-shrink: 0;
 }
 
+.sidebar-server-status-text {
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .sidebar-f1-btn {
   background: transparent;
   border: none;
   padding: 0;
   color: var(--menu-texto-secundario);
   font-size: 10px;
-  font-weight: normal;
+  font-weight: 400;
   cursor: pointer;
   line-height: 1;
   box-shadow: none;
@@ -411,10 +475,10 @@
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  font-weight: normal;
+  font-weight: 400;
   color: var(--menu-texto-secundario);
   cursor: pointer;
-  margin-top: 1px;
+  margin-top: 4px;
 }
 
 .sidebar-drive-row:focus-visible {
@@ -431,7 +495,7 @@
 
 .sidebar-drive-text {
   font-size: 10px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* ===== MAIN AREA ===== */

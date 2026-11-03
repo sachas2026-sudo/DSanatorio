@@ -281,11 +281,11 @@ export function Layout() {
 
         {/* PIE */}
         <div className="sidebar-bottom">
-          {/* 1. Clima y Fecha/Hora */}
-          <SidebarWeather />
-
-          {/* 2. Botón Sincronizar */}
+          {/* 1. Botón Sincronizar (PRIMERO, arriba del clima) */}
           <SidebarSync />
+
+          {/* 2. Fila de clima (debajo del botón, margin-bottom 10px) */}
+          <SidebarWeather />
 
           {/* 3. Servidor y F1 Ayuda en una sola línea */}
           <NetworkSelector onOpenInfo={openInfo} />
