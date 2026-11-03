@@ -2,15 +2,23 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   autoConnectServer,
   getNetworkConnectionStatus,
+  setManualServerUrl,
   type NetworkStatusInfo,
 } from '../../lib/networkDiscovery'
+import { APP_VERSION } from '../../lib/appVersion'
 import './network-selector.css'
 
-export function NetworkSelector() {
+type NetworkSelectorProps = {
+  onOpenInfo?: () => void
+  appVersion?: string
+}
+
+export function NetworkSelector({ onOpenInfo, appVersion = APP_VERSION }: NetworkSelectorProps) {
   const [status, setStatus] = useState<NetworkStatusInfo | null>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [manualIp, setManualIp] = useState('')
 
   const checkStatus = useCallback(async () => {
     try {
@@ -49,6 +57,28 @@ export function NetworkSelector() {
     }
   }
 
+  async function handleManualConnect() {
+    if (!manualIp.trim()) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      let target = manualIp.trim()
+      if (!target.startsWith('http://') && !target.startsWith('https://')) {
+        target = `https://${target}:8787`
+      }
+      await setManualServerUrl(target)
+      setMessage({ type: 'ok', text: 'Servidor configurado manualmente.' })
+      await checkStatus()
+    } catch (err) {
+      setMessage({
+        type: 'err',
+        text: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const isOnline = status?.isOnline ?? false
   const isHost = status?.isServerHost ?? false
 
@@ -58,30 +88,26 @@ export function NetworkSelector() {
       ? `Conectado al servidor (${status?.serverUrl ?? ''})`
       : 'Servidor desconectado (buscando en red local)'
 
-  const displayText = isHost
-    ? 'Servidor local activo'
-    : isOnline
-      ? 'Servidor en red'
-      : 'Buscando servidor...'
-
   return (
     <>
-      <button
-        type="button"
-        className={`network-indicator ${isOnline ? 'network-indicator--online' : 'network-indicator--offline'}`}
-        onClick={() => {
-          setMessage(null)
-          setOpen(true)
-        }}
-        title={tooltipText}
-        aria-label={tooltipText}
-      >
-        <span className="network-indicator__icon-wrap">
+      <div className="sidebar-footer-row">
+        <button
+          type="button"
+          className="sidebar-server-btn"
+          onClick={() => {
+            setMessage(null)
+            setOpen(true)
+          }}
+          title={tooltipText}
+          aria-label={isOnline ? 'Servidor activo' : 'Servidor inactivo'}
+        >
           <svg
-            className="network-indicator__icon"
+            className="sidebar-server-wifi-icon"
+            width="13"
+            height="13"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="currentColor"
+            stroke={isOnline ? 'var(--sidebar-online-green, #2E7D4F)' : 'var(--sidebar-offline-red, #B3261E)'}
             strokeWidth="2.2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -90,16 +116,30 @@ export function NetworkSelector() {
             <path d="M5 12.55a11 11 0 0 1 14.08 0" />
             <path d="M1.42 9a16 16 0 0 1 21.16 0" />
             <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
-            <circle cx="12" cy="20" r="1.5" fill="currentColor" stroke="none" />
+            <circle cx="12" cy="20" r="1.5" fill={isOnline ? 'var(--sidebar-online-green, #2E7D4F)' : 'var(--sidebar-offline-red, #B3261E)'} stroke="none" />
           </svg>
           <span
-            className={`network-indicator__dot ${
-              isOnline ? 'network-indicator__dot--online' : 'network-indicator__dot--offline'
-            }`}
-          />
-        </span>
-        <span className="network-indicator__text">{displayText}</span>
-      </button>
+            className="sidebar-server-status-text"
+            style={{
+              color: isOnline ? 'var(--sidebar-online-green, #2E7D4F)' : 'var(--sidebar-offline-red, #B3261E)',
+              fontWeight: 500,
+            }}
+          >
+            {isOnline ? 'Servidor activo' : 'Servidor inactivo'}
+          </span>
+        </button>
+
+        {onOpenInfo && (
+          <button
+            type="button"
+            className="sidebar-f1-btn"
+            title="Versión y atajos (F1)"
+            onClick={onOpenInfo}
+          >
+            v{appVersion} · F1 ayuda
+          </button>
+        )}
+      </div>
 
       {open && (
         <div className="network-dialog-overlay" onClick={() => setOpen(false)}>
@@ -119,72 +159,84 @@ export function NetworkSelector() {
                 <span className="network-dialog__label">Estado de conexión</span>
                 <div className="network-dialog__value">
                   <span
-                    className={`network-dialog__badge ${
-                      isOnline ? 'network-dialog__badge--online' : 'network-dialog__badge--offline'
+                    className={`network-badge ${
+                      isOnline ? 'network-badge--online' : 'network-badge--offline'
                     }`}
                   >
-                    {isOnline ? '● En línea' : '○ Desconectado'}
+                    {isOnline ? 'En línea' : 'Desconectado'}
                   </span>
-                  <span>{status?.serverName ?? 'Verificando…'}</span>
                 </div>
-                {status?.message && (
-                  <span className="network-dialog__msg">{status.message}</span>
-                )}
               </div>
 
               <div className="network-dialog__row">
-                <span className="network-dialog__label">Dirección del Servidor</span>
+                <span className="network-dialog__label">Modo</span>
                 <span className="network-dialog__value">
-                  {status?.serverUrl || '(Buscando automáticamente…)'}
+                  {isHost ? 'PC Servidor (Principal)' : 'Terminal Cliente'}
                 </span>
               </div>
 
+              {status?.serverUrl && (
+                <div className="network-dialog__row">
+                  <span className="network-dialog__label">Dirección servidor</span>
+                  <span className="network-dialog__value font-mono">
+                    {status.serverUrl}
+                  </span>
+                </div>
+              )}
+
               <div className="network-dialog__row">
-                <span className="network-dialog__label">Modo de esta terminal</span>
-                <span className="network-dialog__value">
-                  {isHost
-                    ? 'Servidor principal (base de datos local)'
-                    : 'Terminal cliente (sincronizada en red)'}
-                </span>
+                <span className="network-dialog__label">Detalle</span>
+                <span className="network-dialog__value">{status?.message || '—'}</span>
               </div>
             </div>
 
             {message && (
               <div
-                className={
-                  message.type === 'ok'
-                    ? 'network-dialog__success'
-                    : 'network-dialog__error'
-                }
+                className={`network-message network-message--${message.type}`}
+                role="alert"
               >
                 {message.text}
               </div>
             )}
 
-            <div className="network-dialog__actions">
-              {!isHost && (
+            {!isHost && (
+              <div className="network-dialog__actions">
                 <button
                   type="button"
-                  className="btn-network-primary"
+                  className="network-action-btn network-action-btn--primary"
                   onClick={() => void handleAutoConnect()}
                   disabled={busy}
                 >
-                  {busy ? 'Buscando en la red…' : 'Buscar y vincular servidor automáticamente'}
+                  {busy ? 'Buscando en red...' : 'Reconectar automáticamente'}
                 </button>
-              )}
 
+                <div className="network-manual-box">
+                  <label htmlFor="manual-ip-input">O ingresar IP del Servidor:</label>
+                  <div className="network-manual-row">
+                    <input
+                      id="manual-ip-input"
+                      type="text"
+                      placeholder="192.168.1.100"
+                      value={manualIp}
+                      onChange={(e) => setManualIp(e.target.value)}
+                      disabled={busy}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleManualConnect()}
+                      disabled={busy || !manualIp.trim()}
+                    >
+                      Guardar IP
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="network-dialog__footer">
               <button
                 type="button"
-                className="btn-network-secondary"
-                onClick={() => void checkStatus()}
-                disabled={busy}
-              >
-                Actualizar verificación
-              </button>
-
-              <button
-                type="button"
-                className="btn-network-secondary"
+                className="network-action-btn network-action-btn--secondary"
                 onClick={() => setOpen(false)}
               >
                 Cerrar
@@ -196,4 +248,3 @@ export function NetworkSelector() {
     </>
   )
 }
-

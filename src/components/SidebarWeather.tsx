@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
-import { fetchWeather, getWeatherIcon, WEATHER_PLACE_NAME, type WeatherData } from '../lib/weather'
+import { fetchWeather, WEATHER_PLACE_NAME, type WeatherData } from '../lib/weather'
 
 export function SidebarWeather() {
   const [weather, setWeather] = useState<WeatherData | null>(null)
-  const [error, setError] = useState(false)
   const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
@@ -15,21 +14,14 @@ export function SidebarWeather() {
         const data = await fetchWeather()
         if (isMounted) {
           setWeather(data)
-          setError(false)
         }
       } catch {
-        if (isMounted) {
-          setError(true)
-        }
+        // preserve previous state
       }
     }
 
     void loadWeather()
-
-    // Refresh weather every 30 minutes
-    const interval = window.setInterval(() => {
-      void loadWeather()
-    }, 30 * 60 * 1000)
+    const interval = window.setInterval(loadWeather, 30 * 60 * 1000)
 
     return () => {
       isMounted = false
@@ -42,25 +34,39 @@ export function SidebarWeather() {
     return () => window.clearInterval(id)
   }, [])
 
-  if (error || !weather) return null
+  const tempDisplay = weather ? `${weather.temp}°` : '--°'
+  const maxMinDisplay = weather
+    ? `Máx: ${weather.max}° · Mín: ${weather.min}°`
+    : 'Máx: --° · Mín: --°'
 
   return (
-    <div className="sidebar-weather" title={`${weather.temp}°C en ${WEATHER_PLACE_NAME}`}>
-      <span className="sidebar-weather__icon">{getWeatherIcon(weather.weatherCode)}</span>
-      <div className="sidebar-weather__content">
-        <div className="sidebar-weather__info">
-          <p className="sidebar-weather__temp">{weather.temp}°</p>
-          <p className="sidebar-weather__range">
-            <span className="sidebar-weather__label">Máx:</span> {weather.max}°
-          </p>
-          <p className="sidebar-weather__range">
-            <span className="sidebar-weather__label">Mín:</span> {weather.min}°
-          </p>
+    <div
+      className="sidebar-weather-row"
+      title={weather ? `${weather.temp}°C en ${WEATHER_PLACE_NAME}` : 'Clima'}
+    >
+      <div className="sidebar-weather-left">
+        <svg
+          className="sidebar-weather-svg"
+          width="26"
+          height="26"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--sidebar-weather-icon, #8E9BD6)"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+        </svg>
+        <div className="sidebar-weather-temp-wrap">
+          <span className="sidebar-weather-curr-temp">{tempDisplay}</span>
+          <span className="sidebar-weather-range">{maxMinDisplay}</span>
         </div>
-        <div className="sidebar-weather__datetime">
-          <span className="sidebar-weather__date">{format(now, 'dd-MM-yy')}</span>
-          <span className="sidebar-weather__time">{format(now, 'HH:mm')}</span>
-        </div>
+      </div>
+      <div className="sidebar-weather-right">
+        <span className="sidebar-weather-date">{format(now, 'dd-MM-yy')}</span>
+        <span className="sidebar-weather-time">{format(now, 'HH:mm')}</span>
       </div>
     </div>
   )

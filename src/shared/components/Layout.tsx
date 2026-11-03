@@ -11,13 +11,9 @@ import { GoogleDriveSetupModal } from './GoogleDriveSetupModal'
 import { useConfirm } from '../../context/ConfirmContext'
 import { useAppState } from '../../context/AppStateContext'
 import { useAuth } from '../../context/AuthContext'
-import { APP_VERSION } from '../../lib/appVersion'
 import { bindAppShortcuts } from '../../lib/appShortcuts'
 import { exitApp } from '../../lib/exitApp'
-import {
-  getGoogleDriveStatus,
-  needsGoogleDriveSetup,
-} from '../../lib/googleDrive'
+import { getGoogleDriveStatus } from '../../lib/googleDrive'
 import type { AppSettings } from '../../types'
 import logoUrl from '../../assets/Logo.jpeg?url'
 import './layout.css'
@@ -34,7 +30,87 @@ const ALL_LINKS: { to: string; label: string; end?: boolean }[] = [
   { to: '/mantenimiento', label: 'Mantenimiento' },
 ]
 
-function SidebarGoogleDrive() {
+function getNavIcon(to: string) {
+  switch (to) {
+    case '/':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1V9.5z" />
+        </svg>
+      )
+    case '/pacientes':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      )
+    case '/medicos':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4.5 3v5a4.5 4.5 0 0 0 9 0V3" />
+          <path d="M9 12.5v3.5a4 4 0 0 0 4 4h1a4 4 0 0 0 4-4v-1.5" />
+          <circle cx="18" cy="10" r="2.5" />
+          <line x1="3" y1="3" x2="6" y2="3" />
+          <line x1="12" y1="3" x2="15" y2="3" />
+        </svg>
+      )
+    case '/agenda':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+      )
+    case '/pagos':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="2" y="5" width="20" height="14" rx="2" />
+          <line x1="2" y1="10" x2="22" y2="10" />
+        </svg>
+      )
+    case '/pagos-cancelados':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="2" y="5" width="20" height="14" rx="2" />
+          <line x1="2" y1="10" x2="22" y2="10" />
+          <line x1="14" y1="13" x2="18" y2="17" />
+          <line x1="18" y1="13" x2="14" y2="17" />
+        </svg>
+      )
+    case '/afiliados':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <circle cx="8.5" cy="10" r="2" />
+          <line x1="14" y1="9" x2="17.5" y2="9" />
+          <line x1="14" y1="13" x2="17.5" y2="13" />
+          <path d="M5.5 16c0-1.5 1.5-2 3-2s3 .5 3 2" />
+        </svg>
+      )
+    case '/configuracion':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      )
+    case '/mantenimiento':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+      )
+    default:
+      return null
+  }
+}
+
+function SidebarGoogleDrive({ onClick }: { onClick?: () => void }) {
   const { data } = useAppState()
   const [available, setAvailable] = useState<boolean | null>(null)
 
@@ -48,61 +124,73 @@ function SidebarGoogleDrive() {
     data.settings.googleDriveDeshabilitado,
   ])
 
-  if (available === null) return null
-
-  const title = available
-    ? 'Google Drive activo en esta PC'
-    : data.settings.googleDriveDeshabilitado
-      ? 'Google Drive desactivado'
-      : 'Google Drive no detectado'
+  const isConnected = available === true
 
   return (
-    <div className="sidebar-gd" title={title}>
-      <span className={`sidebar-gd__dot ${available ? 'sidebar-gd__dot--ok' : 'sidebar-gd__dot--err'}`} />
-      Google Drive
+    <div
+      className="sidebar-drive-row"
+      title={isConnected ? 'Google Drive conectado' : 'Google Drive no conectado'}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (onClick && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault()
+          onClick()
+        }
+      }}
+    >
+      <span
+        className="sidebar-drive-dot"
+        style={{
+          backgroundColor: isConnected
+            ? 'var(--sidebar-online-green, #2E7D4F)'
+            : 'var(--sidebar-drive-red, #E5484D)',
+        }}
+        aria-hidden="true"
+      />
+      <span className="sidebar-drive-text">Google Drive</span>
     </div>
   )
 }
 
 export function Layout() {
+  const { session, logout, canAccessPath } = useAuth()
   const {
-    data,
-    updateSettings,
     requestExit,
     systemAlert,
     dismissSystemAlert,
     dailyBackupAlert,
     dismissDailyBackupAlert,
     retryDailyBackup,
+    data,
+    updateSettings,
   } = useAppState()
-  const { session, logout, canAccessPath } = useAuth()
   const { confirm } = useConfirm()
   const navigate = useNavigate()
   const [infoOpen, setInfoOpen] = useState(false)
   const [salirBusy, setSalirBusy] = useState(false)
   const [dailyBackupRetryBusy, setDailyBackupRetryBusy] = useState(false)
-
-  const showGoogleDriveSetup =
-    isTauri() && needsGoogleDriveSetup(data.settings)
-
-  const handleGoogleDriveSetup = useCallback(
-    (patch: Partial<AppSettings>) => {
-      updateSettings({
-        ...patch,
-        googleDriveSetupCompletado: true,
-      })
-    },
-    [updateSettings],
-  )
+  const [showGoogleDriveSetup, setShowGoogleDriveSetup] = useState(false)
 
   const openInfo = useCallback(() => setInfoOpen(true), [])
   const closeInfo = useCallback(() => setInfoOpen(false), [])
 
   useEffect(() => {
     return bindAppShortcuts(navigate, canAccessPath, openInfo)
-  }, [navigate, canAccessPath, openInfo])
+  }, [openInfo, canAccessPath, navigate])
+
+  const handleGoogleDriveSetup = (patch: Partial<AppSettings>) => {
+    updateSettings(patch)
+    setShowGoogleDriveSetup(false)
+  }
+
+  if (!session) return null
 
   const links = ALL_LINKS.filter((l) => canAccessPath(l.to))
+  const primaryPaths = ['/', '/pacientes', '/medicos', '/agenda', '/pagos']
+  const primaryLinks = links.filter((l) => primaryPaths.includes(l.to))
+  const otherLinks = links.filter((l) => !primaryPaths.includes(l.to))
 
   async function handleSalir() {
     if (salirBusy) return
@@ -126,68 +214,105 @@ export function Layout() {
     logout()
   }
 
+  const displayName = session.displayName?.trim() || session.username
+
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Menú principal">
-        <div className="sidebar-brand" data-tauri-drag-region>
-          <div className="sidebar-brand__logo-wrap">
+        {/* ENCABEZADO */}
+        <div className="sidebar-header">
+          <div className="sidebar-brand">
             <img
               src={logoUrl}
-              alt=""
+              alt="Cuidar Centro Médico"
               className="sidebar-logo"
-              width={120}
-              height={120}
               draggable={false}
             />
           </div>
+          <p className="sidebar-user" title={displayName}>
+            {displayName}
+          </p>
+          <div className="sidebar-header-divider" />
         </div>
-        <p className="sidebar-user" title={session.displayName} data-role={session.role}>
-          {session.username}
-        </p>
+
+        {/* OPCIONES DEL MENÚ */}
         <nav className="sidebar-nav">
-          {links.map((l) => (
+          {primaryLinks.map((l) => (
             <NavLink
               key={l.to}
               to={l.to}
               end={Boolean(l.end)}
               className={({ isActive }) =>
-                `nav-item${isActive ? ' nav-item--active' : ''}`
+                `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`
               }
             >
-              {l.label}
+              {getNavIcon(l.to)}
+              <span>{l.label}</span>
             </NavLink>
           ))}
-          <button
-            type="button"
-            className="nav-item nav-item--session"
-            onClick={handleCerrarSesion}
-          >
-            Cerrar sesión
-          </button>
-          <button
-            type="button"
-            className="nav-item nav-item--salir"
-            disabled={salirBusy}
-            onClick={() => void handleSalir()}
-          >
-            {salirBusy ? 'Saliendo…' : 'Salir'}
-          </button>
+
+          {otherLinks.length > 0 && otherLinks.map((l) => (
+            <NavLink
+              key={l.to}
+              to={l.to}
+              end={Boolean(l.end)}
+              className={({ isActive }) =>
+                `sidebar-nav-item${isActive ? ' sidebar-nav-item--active' : ''}`
+              }
+            >
+              {getNavIcon(l.to)}
+              <span>{l.label}</span>
+            </NavLink>
+          ))}
+
+          {/* Separador después de Pagos / opciones principales */}
+          <div className="sidebar-menu-divider" />
+
+          {/* CUENTA */}
+          <div className="sidebar-account-section">
+            <button
+              type="button"
+              className="sidebar-account-btn sidebar-account-btn--session"
+              onClick={handleCerrarSesion}
+            >
+              <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              <span>Cerrar sesión</span>
+            </button>
+            <button
+              type="button"
+              className="sidebar-account-btn sidebar-account-btn--salir"
+              disabled={salirBusy}
+              onClick={() => void handleSalir()}
+            >
+              <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                <line x1="12" y1="2" x2="12" y2="12" />
+              </svg>
+              <span>{salirBusy ? 'Saliendo…' : 'Salir'}</span>
+            </button>
+          </div>
         </nav>
+
+        {/* PIE */}
         <div className="sidebar-bottom">
+          {/* 1. Clima y Fecha/Hora */}
           <SidebarWeather />
+
+          {/* 2. Botón Sincronizar */}
           <SidebarSync />
-          <NetworkSelector />
-          <SidebarGoogleDrive />
-          <button
-            type="button"
-            className="sidebar-version"
-            title="Versión y atajos (F1)"
-            onClick={openInfo}
-          >
-            v{APP_VERSION} · F1 ayuda
-          </button>
+
+          {/* 3. Servidor y F1 Ayuda en una sola línea */}
+          <NetworkSelector onOpenInfo={openInfo} />
+
+          {/* 4. Google Drive */}
+          <SidebarGoogleDrive onClick={() => setShowGoogleDriveSetup(true)} />
         </div>
       </aside>
+
       <main className="main-area">
         {infoOpen && (
           <AppInfoModal onClose={closeInfo} canAccessPath={canAccessPath} />
