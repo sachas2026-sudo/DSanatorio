@@ -165,6 +165,8 @@ pub fn run() {
             // Traer la ventana principal al frente al iniciar: sin decoración puede
             // quedar detrás de otras aplicaciones y parecer que no abrió.
             if let Some(win) = app.get_webview_window("main") {
+                let _ = win.center();
+                let _ = win.maximize();
                 let _ = win.unminimize();
                 let _ = win.show();
                 // El "siempre visible" momentáneo fuerza el raise; se quita enseguida.

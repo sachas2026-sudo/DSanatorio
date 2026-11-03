@@ -5,7 +5,18 @@
     "windows": [
       {
         "label": "main",
-        "title": "Centro Medico — Afiliados"
+        "title": "Centro Medico - Afiliados",
+        "width": 2000,
+        "height": 1020,
+        "minWidth": 1280,
+        "minHeight": 800,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "maximized": true,
+        "visible": true,
+        "focus": true,
+        "decorations": false
       }
     ]
   },
@@ -17,4 +28,3 @@
     }
   }
 }
-
