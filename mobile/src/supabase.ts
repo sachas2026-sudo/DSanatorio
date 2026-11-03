@@ -11,8 +11,8 @@ export function getStoredSupabaseConfig(): SupabaseConfig {
     // fallback
   }
   return {
-    url: '',
-    anonKey: '',
+    url: 'https://mzfyzabgdlzqkvufqrxh.supabase.co',
+    anonKey: 'sb_publishable_5E4thTDbweeAZOd4wcypsw_I5O7F4fM',
   }
 }
 
@@ -89,3 +89,4 @@ export async function fetchResumenDiario(
     return { data: null, error: `Error de red: ${msg}` }
   }
 }
+
