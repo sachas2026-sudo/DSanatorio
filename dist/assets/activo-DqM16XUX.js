@@ -1,0 +1,1 @@
+function e(e){return e.activo!==!1}function t(e){return e.activo!==!1}function n(t){return t.filter(e)}function r(e){return e.filter(t)}function i(t){return t.filter(t=>!e(t))}function a(e){return e.filter(e=>!t(e))}export{i as a,n as i,r as n,a as r,t};

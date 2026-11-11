@@ -1,0 +1,1 @@
+import{n as e}from"./chunk-CilyBKbf.js";import{i as t}from"./core-BAkq8kE-.js";var n=e({openUrl:()=>r});async function r(e,n){await t(`plugin:opener|open_url`,{url:e,with:n})}export{r as n,n as t};

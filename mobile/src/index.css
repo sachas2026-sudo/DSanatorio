@@ -31,12 +31,14 @@
 }
 
 :root {
-  --bg-page: #F8FAFC;
-  --card-bg: #FFFFFF;
-  --border: #E2E8F0;
-  --text-main: #0F172A;
-  --text-secondary: #475569;
-  --text-muted: #64748B;
+  --bg-page: #eaf5fc;
+  --card-bg: #ffffff;
+  --card-border: #dfe5ec;
+  --border: #dfe5ec;
+  --border-strong: #cbd5e1;
+  --text-main: #1c2631;
+  --text-secondary: #6b7683;
+  --text-muted: #6b7683;
   --primary: #1E40AF;
   --primary-light: #EFF6FF;
   --accent: #2563EB;

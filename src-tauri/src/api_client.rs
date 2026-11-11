@@ -18,13 +18,17 @@ pub fn build_http_client(cert_pem: &str) -> Result<reqwest::Client, String> {
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(25));
 
-    if cert_pem.contains("-----BEGIN CERTIFICATE-----") {
-        if let Ok(cert) = reqwest::Certificate::from_pem(cert_pem.as_bytes()) {
-            builder = builder.add_root_certificate(cert);
+    if cert_pem == "auto" {
+        // En red local permite conectar inmediatamente con el certificado autofirmado del servidor
+        builder = builder.danger_accept_invalid_certs(true);
+    } else {
+        if !cert_pem.contains("-----BEGIN CERTIFICATE-----") {
+            return Err("el certificado del servidor no tiene formato PEM".into());
         }
+        let cert = reqwest::Certificate::from_pem(cert_pem.as_bytes())
+            .map_err(|e| format!("certificado del servidor inválido: {e}"))?;
+        builder = builder.tls_built_in_root_certs(false).add_root_certificate(cert);
     }
-    // En red local permite conectar inmediatamente con el certificado autofirmado del servidor
-    builder = builder.danger_accept_invalid_certs(true);
 
     builder.build().map_err(|e| format!("no se pudo crear el cliente HTTPS: {e}"))
 }

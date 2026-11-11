@@ -7,6 +7,7 @@ import { formatMonto } from '../../../lib/formatMonto'
 import {
   buildDistribucionFilas,
   consolidarPorMedico,
+  esPlanCoberturaCantidad,
   repartoDeFila,
   textoFechaColumna,
   textoMotivosResumen,
@@ -14,6 +15,8 @@ import {
   PCT_CUIDAR_POR_DEFECTO,
   type DistribucionModo,
 } from '../../../lib/distribucionObrasSocialesFilas'
+import { normalizeOsName } from '../../../lib/turnoMonto'
+import { formatPorcentajeAr } from '../../../lib/obrasSocialesCatalog'
 import type { Doctor, Payment } from '../../../types'
 import './distribucion-os.css'
 
@@ -23,9 +26,10 @@ type Props = {
   doctorById: (id: string) => Doctor | undefined
   /** Obra social efectiva de un pago (override si tiene, si no la del paciente). */
   obraSocialDe: (p: Payment) => string
-  /** Motivos de consulta de un pago, ya resueltos a texto. Si el turno tiene
-   *  motivo 1 y motivo 2, llegan los dos y cada uno va en su propia fila. */
+  /** Motivos de consulta de un pago, ya resueltos a texto. */
   motivosDe: (p: Payment) => string[]
+  /** Prestación de un pago, si tiene cargada. */
+  prestacionDe?: (p: Payment) => string
   /** "resumen" agrupa por médico + motivo; "completo" muestra cada consulta. */
   modo: DistribucionModo
   onModoChange: (modo: DistribucionModo) => void
@@ -52,10 +56,20 @@ type FilaView = {
   mostrarPaciente: boolean
   especialidad: string
   motivo: string
+  prestacion: string
   /** Tooltip de la celda de motivo (en RESUMEN, todos los motivos). */
   motivoTitle: string
+  prestacionTitle: string
   monto: number
+  /** Arancel del catálogo de Obras Sociales de los pagos que aporta la fila. */
+  arancel: number
   porObraSocial: Map<string, number>
+  cantidadesPorObraSocial?: Map<string, number>
+  obras?: Set<string>
+  impBanco: number
+  impFactura: number
+  gastosAdm: number
+  totalCuidar: number
   total: number
 }
 
@@ -71,7 +85,14 @@ type FilaView = {
  *  "Presurometria" y el dato se corrige en la base. */
 function titleCaseMotivo(value: string): string {
   if (!value) return value
-  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase()
+  return value
+    .split(/\s*\+\s*/)
+    .map((part) => {
+      const trimmed = part.trim()
+      if (!trimmed) return ''
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+    })
+    .join(' + ')
 }
 
 export function DistribucionObrasSociales({
@@ -79,16 +100,38 @@ export function DistribucionObrasSociales({
   doctorById,
   obraSocialDe,
   motivosDe,
+  prestacionDe,
   modo,
   onModoChange,
   onExportarPdf,
 }: Props) {
-  const { data, setDistribucionOSPorcentaje } = useAppState()
+  const { data, obrasSocialesCatalog } = useAppState()
   const { confirm } = useConfirm()
 
   const porcentajes = useMemo(
     () => data.distribucionOSPercentajes ?? [],
     [data.distribucionOSPercentajes],
+  )
+
+  /**
+   * % de una obra social.
+   * Fuente de verdad: obrasSocialesCatalog (la opción Obras Sociales, imagen 2).
+   * En el catálogo `cuidar` se almacena en centésimas (ej. 3000 = 30%).
+   * Si no tiene valor configurado (> 0), recurre a distribucionOSPercentajes o 30% por defecto.
+   */
+  const pctDe = useCallback(
+    (obraSocial: string): number => {
+      const norm = normalizeOsName(obraSocial)
+      const catalogItem = (obrasSocialesCatalog ?? []).find(
+        (c) => normalizeOsName(c.nombre) === norm,
+      )
+      if (catalogItem && catalogItem.cuidar > 0) {
+        return catalogItem.cuidar / 100
+      }
+      const f = porcentajes.find((p) => normalizeOsName(p.obraSocial) === norm)
+      return f ? f.porcentaje : PCT_CUIDAR_POR_DEFECTO
+    },
+    [obrasSocialesCatalog, porcentajes],
   )
 
   /**
@@ -102,7 +145,6 @@ export function DistribucionObrasSociales({
     () =>
       new Set(
         (data.planesAfiliados ?? [])
-          .filter((p) => p.activo)
           .map((p) => p.nombre.trim().toLowerCase())
           .filter(Boolean),
       ),
@@ -110,7 +152,11 @@ export function DistribucionObrasSociales({
   )
 
   const esPlan = useCallback(
-    (obraSocial: string): boolean => nombresDePlan.has(obraSocial.trim().toLowerCase()),
+    (obraSocial: string): boolean => {
+      const norm = obraSocial.trim().toLowerCase()
+      if (!norm) return false
+      return nombresDePlan.has(norm) || norm.startsWith('plan ')
+    },
     [nombresDePlan],
   )
 
@@ -123,13 +169,27 @@ export function DistribucionObrasSociales({
       doctorById,
       patientById: (id) => pacientesPorId.get(id),
       citaById: (id) => citasPorId.get(id),
-      // Un plan se devuelve como cobertura vacía: el pago sigue sumando al
-      // Monto de su fila, pero sin obras no hay reparto, así que ese importe
-      // queda entero en el Total en vez de desaparecer de la tabla.
-      obraSocialDe: (p) => (esPlan(obraSocialDe(p)) ? '' : obraSocialDe(p)),
+      // Cobertura efectiva del pago o turno (incluyendo planes y coberturas)
+      obraSocialDe,
       motivosDe,
+      prestacionDe,
+      // El % Cuidar se calcula sobre el Arancel del catálogo de Obras Sociales.
+      arancelDe: (os) => {
+        const norm = normalizeOsName(os)
+        const item = (obrasSocialesCatalog ?? []).find((c) => normalizeOsName(c.nombre) === norm)
+        return Math.round(Number(item?.arancel || 0))
+      },
+      impuestosDe: (os) => {
+        const norm = normalizeOsName(os)
+        const item = (obrasSocialesCatalog ?? []).find((c) => normalizeOsName(c.nombre) === norm)
+        return {
+          impBancoPct: (item?.impBanco || 0) / 100,
+          impFacturaPct: (item?.impFactura || 0) / 100,
+          gastosAdmPct: (item?.gastosAdm || 0) / 100,
+        }
+      },
     })
-  }, [pagos, doctorById, obraSocialDe, motivosDe, esPlan, data.patients, data.appointments])
+  }, [pagos, doctorById, obraSocialDe, motivosDe, prestacionDe, data.patients, data.appointments, obrasSocialesCatalog])
 
   /**
    * RESUMEN consolida el detalle en una fila por médico; COMPLETO lo muestra
@@ -138,15 +198,14 @@ export function DistribucionObrasSociales({
    */
   const resumenFilas = useMemo(
     () => consolidarPorMedico(detalle, pctDe),
-    // pctDe sólo lee `porcentajes`, que ya está en la lista de deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [detalle, porcentajes],
+    [detalle, pctDe],
   )
 
   /** Las dos vistas, proyectadas a la misma forma: el render no sabe cuál es. */
   const filas = useMemo<FilaView[]>(() => {
     if (modo === 'resumen') {
       return resumenFilas.map((f) => ({
+        arancel: f.arancel,
         id: f.id,
         nombre: f.nombre,
         fecha: textoFechaColumna(f.fecha),
@@ -155,9 +214,16 @@ export function DistribucionObrasSociales({
         mostrarPaciente: true,
         especialidad: f.especialidad,
         motivo: f.motivo,
+        prestacion: f.prestacion || '—',
         motivoTitle: textoMotivosResumen(f, formatMonto),
+        prestacionTitle: f.prestacion || '—',
         monto: f.monto,
         porObraSocial: f.porObraSocial,
+        cantidadesPorObraSocial: f.cantidadesPorObraSocial,
+        impBanco: f.impBanco,
+        impFactura: f.impFactura,
+        gastosAdm: f.gastosAdm,
+        totalCuidar: f.totalCuidar,
         total: f.total,
       }))
     }
@@ -165,10 +231,14 @@ export function DistribucionObrasSociales({
       // Mismo reparto que la consolidada: fila por fila, no el total por %.
       const porObraSocial = new Map<string, number>()
       for (const o of f.obras) {
-        porObraSocial.set(o, repartoDeFila(f.monto, f.obras, pctDe, o))
+        porObraSocial.set(o, repartoDeFila(f.arancel, f.obras, pctDe, o))
       }
-      const repartido = [...porObraSocial.values()].reduce((s, v) => s + v, 0)
+      const repartido = [...porObraSocial.entries()]
+        .filter(([o]) => !esPlanCoberturaCantidad(o))
+        .reduce((s, [, v]) => s + v, 0)
+      const totalCuidar = repartido + f.impBanco + f.impFactura + f.gastosAdm
       return {
+        arancel: f.arancel,
         id: f.id,
         nombre: f.nombre,
         fecha: textoFechaColumna(f.fecha),
@@ -177,15 +247,21 @@ export function DistribucionObrasSociales({
         mostrarPaciente: f.mostrarPaciente,
         especialidad: f.especialidad,
         motivo: f.motivo,
+        prestacion: f.prestacion || '—',
         motivoTitle: f.motivo,
+        prestacionTitle: f.prestacion || '—',
         monto: f.monto,
         porObraSocial,
-        total: f.monto - repartido,
+        cantidadesPorObraSocial: f.cantidadesPorObraSocial,
+        obras: f.obras,
+        impBanco: f.impBanco,
+        impFactura: f.impFactura,
+        gastosAdm: f.gastosAdm,
+        totalCuidar,
+        total: f.arancel - totalCuidar,
       }
     })
-    // pctDe sólo lee `porcentajes`, que ya está en la lista de deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modo, resumenFilas, detalle, porcentajes])
+  }, [modo, resumenFilas, detalle, pctDe])
 
   const doctorRanks = useMemo(() => {
     const map = new Map<string, number>()
@@ -309,7 +385,7 @@ export function DistribucionObrasSociales({
           _orden: p.fecha,
           paciente: pac ? `${pac.apellido}, ${pac.nombre}` : '—',
           medico: doc ? `${doc.apellido}, ${doc.nombre}` : '—',
-          motivo: motivosDe(p)[0] || '—',
+          motivo: motivosDe(p).filter(Boolean).join(' + ') || '—',
           plan: obraSocialDe(p),
           monto: formatMonto(p.monto),
           montoNum: p.monto,
@@ -323,40 +399,66 @@ export function DistribucionObrasSociales({
 
 
 /**
- * Obras sociales del listado actual, más las que ya tengan % configurado.
+ * Columnas de obras sociales a mostrar:
  *
- * Los planes NO entran como columna: en esta tabla sólo se reparte entre
- * obras sociales. Un plan es una suscripción, no un receptor de la
- * distribución, así que tampoco se resta del Total. El consumo de los planes
- * se mira en las secciones de abajo.
+ * Se incluyen las obras sociales que tengan porcentaje asignado en la
+ * configuración (incluso si ningún pago del filtro actual las usó) MÁS las que
+ * hayan aparecido en los pagos de este listado.
+ *
+ * "Particular" queda afuera: representa el dinero que el médico cobró directo
+ * del paciente y no pasa por el Sanatorio ni se le cobra porcentaje.
+ *
+ * Los planes de afiliados tampoco van como obras sociales acá: son suscripciones.
  */
   const obras = useMemo(() => {
     const s = new Set<string>()
-    // Ni "Particular" (es dinero del bolsillo, no se reparte) ni los planes
-    // (son suscripciones, no obras sociales) llegan a ser columna.
+    // "Particular" queda afuera: representa el dinero que el médico cobró directo
+    // del paciente y no pasa por el Sanatorio ni se le cobra porcentaje.
+    // Las coberturas de planes (Individual, Familiar) sí se incluyen.
     for (const f of filas)
-      for (const o of f.porObraSocial.keys()) if (!esParticular(o) && !esPlan(o)) s.add(o)
+      for (const o of f.porObraSocial.keys()) if (!esParticular(o)) s.add(o)
     for (const p of porcentajes)
-      if (p.porcentaje > 0 && !esParticular(p.obraSocial) && !esPlan(p.obraSocial))
+      if (p.porcentaje > 0 && !esParticular(p.obraSocial))
         s.add(p.obraSocial)
+    for (const c of obrasSocialesCatalog ?? [])
+      if (c.cuidar > 0 && !esParticular(c.nombre))
+        s.add(c.nombre)
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
-  }, [filas, porcentajes, esPlan])
+  }, [filas, porcentajes, obrasSocialesCatalog])
 
-  /** % de una obra social. Sin valor guardado arranca en el 30 % por defecto,
-   *  el mismo que usa el PDF: si difieren, la pantalla y el archivo muestran
-   *  números distintos. */
-  function pctDe(obraSocial: string): number {
-    const f = porcentajes.find(p => p.obraSocial === obraSocial)
-    return f ? f.porcentaje : PCT_CUIDAR_POR_DEFECTO
-  }
+  const impuestosPcts = useMemo(() => {
+    for (const o of obras) {
+      const norm = normalizeOsName(o)
+      const item = (obrasSocialesCatalog ?? []).find((c) => normalizeOsName(c.nombre) === norm)
+      if (item && (item.impBanco > 0 || item.impFactura > 0 || item.gastosAdm > 0)) {
+        return {
+          banco: item.impBanco ? `${formatPorcentajeAr(item.impBanco)}%` : '2,5%',
+          factura: item.impFactura ? `${formatPorcentajeAr(item.impFactura)}%` : '3,3%',
+          gastos: item.gastosAdm ? `${formatPorcentajeAr(item.gastosAdm)}%` : '5%',
+        }
+      }
+    }
+    const anyItem = (obrasSocialesCatalog ?? []).find(
+      (c) => c.impBanco > 0 || c.impFactura > 0 || c.gastosAdm > 0,
+    )
+    if (anyItem) {
+      return {
+        banco: anyItem.impBanco ? `${formatPorcentajeAr(anyItem.impBanco)}%` : '2,5%',
+        factura: anyItem.impFactura ? `${formatPorcentajeAr(anyItem.impFactura)}%` : '3,3%',
+        gastos: anyItem.gastosAdm ? `${formatPorcentajeAr(anyItem.gastosAdm)}%` : '5%',
+      }
+    }
+    return {
+      banco: '2,5%',
+      factura: '3,3%',
+      gastos: '5%',
+    }
+  }, [obras, obrasSocialesCatalog])
 
   const totalMonto = filas.reduce((s, f) => s + f.monto, 0)
   const totalRepartido = filas.reduce((s, f) => s + f.total, 0)
-  /** Suma de los totales de cada columna de obra social: lo que reparte Cuidar. */
-  const totalCuidar = obras.reduce(
-    (acc, o) => acc + filas.reduce((s, f) => s + (f.porObraSocial.get(o) ?? 0), 0),
-    0,
-  )
+  /** Suma de Total Cuidar de todas las filas. */
+  const totalCuidar = filas.reduce((s, f) => s + f.totalCuidar, 0)
   const cantidadMedicos = new Set(filas.map((f) => f.id)).size
   /** Cuenta los motivos/prestaciones del DETALLE en las dos vistas. */
   const cantidadMotivos = detalle.length
@@ -372,6 +474,19 @@ export function DistribucionObrasSociales({
       ayuda: 'Una fila por consulta, con el paciente y el motivo de cada una.',
     },
   ]
+
+  const renderNombreObraSocial = (nombre: string) => {
+    const parts = nombre.split(' ')
+    if (parts.length >= 2 && (nombre.length > 12 || nombre.toUpperCase().includes('PREVENCION'))) {
+      return (
+        <>
+          <div>{parts[0]}</div>
+          <div>{parts.slice(1).join(' ')}</div>
+        </>
+      )
+    }
+    return <div>{nombre}</div>
+  }
 
   /** Estado del botón de exportar: generando / aviso con la ruta. */
   const [exportando, setExportando] = useState(false)
@@ -439,7 +554,7 @@ export function DistribucionObrasSociales({
           className="dist-os__export-btn"
           onClick={handleExportar}
           disabled={exportando}
-          title="Guarda el PDF de la vista Resumen (una fila por médico)."
+          title="Guarda el PDF de la distribución (Fac Obras Sociales)."
         >
           {exportando ? 'Generando PDF…' : 'Exportar PDF'}
         </button>
@@ -478,64 +593,61 @@ export function DistribucionObrasSociales({
             por cada médico del listado actual.
           </caption>
           <thead>
-            <tr className="dist-os__pct-row">
-              {/* Cubre Médico, Paciente, Especialidad, Motivo y Monto: son las
-                  columnas fijas, las de obras sociales son las que llevan %. */}
-              <th scope="col" colSpan={6} className="dist-os__pct-label" style={{ textAlign: 'right', paddingRight: '0.5rem' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#f59e0b' }}>
-                  Total Cuidar: {formatMonto(totalCuidar)}
-                </span>{' '}
-                · % Cuidar
-              </th>
-              {obras.map(o => (
-                <th key={o} scope="col" className="dist-os__pct-cell">
-                  <label className="sr-only" htmlFor={`dist-pct-${o}`}>Porcentaje de {o}</label>
-                  <span aria-hidden="true">%</span>
-                  <input
-                    id={`dist-pct-${o}`}
-                    className="dist-os__pct-input"
-                    type="number"
-                    min={0}
-                    max={100}
-                    step="any"
-                    inputMode="numeric"
-                    defaultValue={pctDe(o)}
-                    onBlur={e => {
-                      // Campo vacío: se guarda el 30 del predeterminado en vez
-                      // de un 0 silencioso, que dejaba la obra social sin reparto.
-                      const n = e.target.value.trim() === '' ? 30 : Number(e.target.value)
-                      if (Number.isFinite(n)) setDistribucionOSPorcentaje(o, n)
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') e.currentTarget.blur()
-                    }}
-                  />
-                </th>
-              ))}
-              <th scope="col" className="text-right dist-os__total-col">
-                    <span className="sr-only">Total médico</span>
-                  </th>
-            </tr>
             <tr>
               <th scope="col" className="dist-os__fecha-col">Fecha</th>
               <th scope="col" className="dist-os__med-col">Médico</th>
               <th scope="col" className="dist-os__pac-col">Paciente</th>
-              <th scope="col" className="dist-os__esp-col">Especialidad</th>
-              <th scope="col" className="dist-os__motivo-col">Motivo de la Consulta</th>
-              <th scope="col" className="text-right">Monto</th>
-              {obras.map(o => (
-                <th key={o} scope="col" className="text-right dist-os__os-cell">
-                  {o}
-                </th>
-              ))}
-              <th scope="col" className="text-right dist-os__total-col">Total Medico</th>
+              <th scope="col" className="dist-os__motivo-col">Motivo</th>
+              <th scope="col" className="dist-os__prestacion-col">Prestación</th>
+              <th scope="col" className="text-right">Plus</th>
+              <th scope="col" className="text-right">Arancel</th>
+              {obras.map(o => {
+                const isMultiLine = o.toUpperCase().includes('PREVENCION') || o.length > 12
+                const esPlan = esPlanCoberturaCantidad(o)
+                return (
+                  <th key={o} scope="col" className="text-right dist-os__os-cell dist-os__pct-header">
+                    <div className="dist-os__header-title">
+                      {renderNombreObraSocial(o)}
+                    </div>
+                    <div className={`dist-os__header-pct ${isMultiLine ? 'dist-os__header-pct--tight' : 'dist-os__header-pct--spaced'}`}>
+                      {esPlan ? 'Cant.' : `${pctDe(o)}%`}
+                    </div>
+                  </th>
+                )
+              })}
+              <th scope="col" className="text-right dist-os__pct-header">
+                <div className="dist-os__header-title">
+                  <div>Imp. Banco</div>
+                </div>
+                <div className="dist-os__header-pct dist-os__header-pct--spaced">
+                  {impuestosPcts.banco}
+                </div>
+              </th>
+              <th scope="col" className="text-right dist-os__pct-header">
+                <div className="dist-os__header-title">
+                  <div>Imp. Fact.</div>
+                </div>
+                <div className="dist-os__header-pct dist-os__header-pct--spaced">
+                  {impuestosPcts.factura}
+                </div>
+              </th>
+              <th scope="col" className="text-right dist-os__pct-header">
+                <div className="dist-os__header-title">
+                  <div>Gastos Adm.</div>
+                </div>
+                <div className="dist-os__header-pct dist-os__header-pct--spaced">
+                  {impuestosPcts.gastos}
+                </div>
+              </th>
+              <th scope="col" className="text-right" style={{ fontWeight: 700, color: '#f59e0b', verticalAlign: 'top' }}>Total Cuidar</th>
+              <th scope="col" className="text-right dist-os__total-col" style={{ verticalAlign: 'top' }}>Total Medico</th>
             </tr>
           </thead>
 
           <tbody>
             {filas.length === 0 && (
               <tr>
-                <td colSpan={obras.length + 7} className="empty-hint" style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+                <td colSpan={obras.length + 12} className="empty-hint" style={{ textAlign: 'center', padding: '2rem 1rem' }}>
                   No hay pagos con obra social en el filtro actual.
                 </td>
               </tr>
@@ -559,34 +671,50 @@ export function DistribucionObrasSociales({
                   {f.mostrarPaciente ? <span className="dist-os__clip">{f.paciente}</span> : ''}
                 </td>
 
-                <td className="dist-os__esp-col" title={isFirst ? f.especialidad : undefined}>
-                  {isFirst ? <span className="dist-os__clip">{f.especialidad}</span> : ''}
-                </td>
-
                 <td className="dist-os__motivo" title={f.motivoTitle}>
                   {titleCaseMotivo(f.motivo)}
                 </td>
 
+                <td className="dist-os__prestacion" title={f.prestacionTitle}>
+                  {titleCaseMotivo(f.prestacion || '—')}
+                </td>
+
                 <td className="text-right">{f.monto === 0 ? '' : formatMonto(f.monto)}</td>
 
+                <td className="text-right">{f.arancel === 0 ? '' : formatMonto(f.arancel)}</td>
+
                 {obras.map(o => {
-                  if (!f.porObraSocial.has(o)) {
+                  const esPlan = esPlanCoberturaCantidad(o)
+                  if (!f.porObraSocial.has(o) && !f.cantidadesPorObraSocial?.has(o) && !f.obras?.has(o)) {
                     return (
                       <td key={o} className="text-right dist-os__os-cell" />
                     )
                   }
+                  if (esPlan) {
+                    const cant = f.cantidadesPorObraSocial?.get(o) ?? (f.obras?.has(o) ? 1 : 0)
+                    return (
+                      <td key={o} className="text-right dist-os__os-cell" style={{ color: '#2563eb', fontWeight: 600 }}>
+                        {cant === 0 ? '' : cant}
+                      </td>
+                    )
+                  }
                   const val = f.porObraSocial.get(o) ?? 0
                   return (
-                    <td key={o} className="text-right dist-os__os-cell">
+                    <td key={o} className="text-right dist-os__os-cell" style={{ color: '#2563eb', fontWeight: 600 }}>
                       {val === 0 ? '' : formatMonto(val)}
                     </td>
                   )
                 })}
 
+                <td className="text-right" style={{ color: '#2563eb', fontWeight: 600 }}>{f.impBanco === 0 ? '' : formatMonto(f.impBanco)}</td>
+                <td className="text-right" style={{ color: '#2563eb', fontWeight: 600 }}>{f.impFactura === 0 ? '' : formatMonto(f.impFactura)}</td>
+                <td className="text-right" style={{ color: '#2563eb', fontWeight: 600 }}>{f.gastosAdm === 0 ? '' : formatMonto(f.gastosAdm)}</td>
+                <td className="text-right" style={{ fontWeight: 700, color: '#f59e0b' }}>
+                  {f.totalCuidar === 0 ? '' : formatMonto(f.totalCuidar)}
+                </td>
+
                 <td className="text-right dist-os__total-col">
-                  {/* Total = Monto − todo lo que se repartió entre obras sociales.
-                      Lo que no se reparte (incluido lo particular) queda acá. */}
-                  <span className="dist-os__suma">
+                  <span className="dist-os__suma" style={{ color: '#1f2937' }}>
                     {f.total === 0 ? '' : formatMonto(f.total)}
                   </span>
                 </td>
@@ -600,15 +728,36 @@ export function DistribucionObrasSociales({
               <td className="dist-os__foot-label">TOTALES</td>
               <td></td>
               <td></td>
-              <td></td>
               <td>{cantidadMotivos} motivo{cantidadMotivos !== 1 ? 's' : ''}</td>
+              <td></td>
               <td className="text-right">{formatMonto(totalMonto)}</td>
-              {obras.map(o => (
-                <td key={o} className="text-right dist-os__os-cell">
-                  {formatMonto(filas.reduce((s, f) => s + (f.porObraSocial.get(o) ?? 0), 0))}
-                </td>
-              ))}
-              <td className="text-right dist-os__total-col">{formatMonto(totalRepartido)}</td>
+              <td className="text-right">{formatMonto(filas.reduce((s, f) => s + f.arancel, 0))}</td>
+              {obras.map(o => {
+                const esPlan = esPlanCoberturaCantidad(o)
+                if (esPlan) {
+                  const totalCant = filas.reduce((s, f) => {
+                    const c = f.cantidadesPorObraSocial?.get(o) ?? (f.obras?.has(o) ? 1 : 0)
+                    return s + c
+                  }, 0)
+                  return (
+                    <td key={o} className="text-right dist-os__os-cell" style={{ color: '#2563eb', fontWeight: 700 }}>
+                      {totalCant}
+                    </td>
+                  )
+                }
+                return (
+                  <td key={o} className="text-right dist-os__os-cell" style={{ color: '#2563eb', fontWeight: 700 }}>
+                    {formatMonto(filas.reduce((s, f) => s + (f.porObraSocial.get(o) ?? 0), 0))}
+                  </td>
+                )
+              })}
+              <td className="text-right" style={{ color: '#2563eb', fontWeight: 700 }}>{formatMonto(filas.reduce((s, f) => s + f.impBanco, 0))}</td>
+              <td className="text-right" style={{ color: '#2563eb', fontWeight: 700 }}>{formatMonto(filas.reduce((s, f) => s + f.impFactura, 0))}</td>
+              <td className="text-right" style={{ color: '#2563eb', fontWeight: 700 }}>{formatMonto(filas.reduce((s, f) => s + f.gastosAdm, 0))}</td>
+              <td className="text-right" style={{ fontWeight: 700, color: '#f59e0b' }}>
+                {formatMonto(totalCuidar)}
+              </td>
+              <td className="text-right dist-os__total-col" style={{ color: '#1f2937', fontWeight: 700 }}>{formatMonto(totalRepartido)}</td>
             </tr>
           </tfoot>
         </table>

@@ -48,3 +48,25 @@ export async function getAppModeInfo(): Promise<AppModeInfo> {
 export async function isClientMode(): Promise<boolean> {
   return (await getAppModeInfo()).mode === 'client'
 }
+
+export function clearAppModeCache(): void {
+  cached = null
+  pending = null
+}
+
+export async function setModeLocal(): Promise<void> {
+  if (isTauri()) {
+    await invoke('set_mode_local')
+  }
+  clearAppModeCache()
+}
+
+export async function autoConnectServer(): Promise<{ serverUrl: string; serverName: string }> {
+  if (isTauri()) {
+    const res = await invoke<{ serverUrl: string; serverName: string }>('auto_connect_sanatorio_server')
+    clearAppModeCache()
+    return res
+  }
+  return { serverUrl: 'http://localhost:8787', serverName: 'Local' }
+}
+

@@ -273,6 +273,7 @@ export function ConfiguracionPage({ backupOnly = false }: { backupOnly?: boolean
       mostrarAccionesEnListaPagos: form.mostrarAccionesEnListaPagos === true,
       supabaseUrl: form.supabaseUrl?.trim(),
       supabaseAnonKey: form.supabaseAnonKey?.trim(),
+      supabaseServiceRoleKey: form.supabaseServiceRoleKey?.trim(),
       supabaseAutoSync: form.supabaseAutoSync !== false,
     })
     await new Promise((r) => window.setTimeout(r, 400))

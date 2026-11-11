@@ -1,4 +1,6 @@
 import { parseAppDataJson, parseAppDataRecordWithReport, hasIntegrityIssues, formatIntegrityAlert } from './parseAppData'
+import { buildObrasSocialesCatalog } from './obrasSocialesCatalog'
+import { buildPrestacionesCatalog } from './prestacionesCatalog'
 import {
   loadStorageRaw,
   saveStorageRaw,
@@ -22,6 +24,7 @@ export const EMPTY_APP_DATA: AppData = {
     pagosCancelados: [],
     pagosDeudasMedicos: [],
   especialidadesCustom: [],
+  obrasSociales: buildObrasSocialesCatalog([]),
   obrasSocialesCustom: [],
   localidadesCustom: [],
   motivosConsultaCustom: [],
@@ -34,6 +37,7 @@ export const EMPTY_APP_DATA: AppData = {
     cuit: '',
     supabaseUrl: 'https://mzfyzabgdlzqkvufqrxh.supabase.co',
     supabaseAnonKey: 'sb_publishable_5E4thTDbweeAZOd4wcypsw_I5O7F4fM',
+    supabaseServiceRoleKey: 'sb_secret_4HAhss-rRoYWNVg9ui1haQ_v1vywr4_',
     supabaseAutoSync: true,
     supabaseUltimaSync: '',
   },
@@ -41,6 +45,8 @@ export const EMPTY_APP_DATA: AppData = {
   afiliados: [],
   cuotasAfiliados: [],
   distribucionOSPercentajes: [],
+  prestacionesAfiliados: buildPrestacionesCatalog([]),
+  ordenesMedicas: [],
 }
 
 export function parseStoredData(raw: string): AppData {
@@ -106,7 +112,15 @@ export async function enrichLoadedData(data: AppData): Promise<AppData> {
     afiliados: data.afiliados ?? [],
     cuotasAfiliados: data.cuotasAfiliados ?? [],
     distribucionOSPercentajes: data.distribucionOSPercentajes ?? [],
-    settings: { ...data.settings, clave },
+    settings: {
+      ...data.settings,
+      clave,
+      supabaseUrl: data.settings?.supabaseUrl?.trim() || 'https://mzfyzabgdlzqkvufqrxh.supabase.co',
+      supabaseAnonKey: data.settings?.supabaseAnonKey?.trim() || 'sb_publishable_5E4thTDbweeAZOd4wcypsw_I5O7F4fM',
+      supabaseAutoSync: data.settings?.supabaseAutoSync !== false,
+      supabaseServiceRoleKey: data.settings?.supabaseServiceRoleKey?.trim() || 'sb_secret_4HAhss-rRoYWNVg9ui1haQ_v1vywr4_',
+      supabaseUltimaSync: data.settings?.supabaseUltimaSync || '',
+    },
   }
 }
 

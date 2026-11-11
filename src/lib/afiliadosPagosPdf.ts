@@ -1,7 +1,7 @@
 import { format } from 'date-fns'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import type { Afiliado, CuotaMensual, Patient, PlanAfiliado } from '../types'
+import type { AdherenteAfiliado, Afiliado, CuotaMensual, Patient, PlanAfiliado } from '../types'
 import { drawPdfHeader, pdfBodyStartYAfterHeader } from './pdfHeader'
 
 const MESES_CORTOS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -18,9 +18,10 @@ function formaPagoLabel(formaPago: CuotaMensual['formaPago']): string {
 }
 
 type Row = {
-  paciente: Patient
+  paciente: Patient | undefined
   plan: PlanAfiliado | undefined
   cuotas: Map<number, CuotaMensual>
+  adherentes: AdherenteAfiliado[]
 }
 
 export function buildAfiliadosPagosPdf(params: {
@@ -40,7 +41,7 @@ export function buildAfiliadosPagosPdf(params: {
     planes,
     cuotas,
     anio,
-    titulo = 'CENTRO MEDICO - PLAN DE SALUD',
+    titulo = 'CENTRO MEDICO - COBERTURA DE SALUD',
     encabezadoSecundario = `Cuotas ${anio}`,
     showSinglePatientDetails = true,
   } = params
@@ -55,12 +56,13 @@ export function buildAfiliadosPagosPdf(params: {
     cuotasByAfiliado.set(cuota.afiliadoId, byMonth)
   }
 
-  const rows: Row[] = afiliados
+  const rows = afiliados
     .filter(a => a.activo)
     .map(a => ({
       paciente: patientById.get(a.patientId),
       plan: planById.get(a.planId),
       cuotas: cuotasByAfiliado.get(a.id) ?? new Map(),
+      adherentes: Array.isArray(a.adherentes) ? a.adherentes : [],
     }))
     .filter((row): row is Row & { paciente: Patient } => Boolean(row.paciente))
     .sort((a, b) => `${a.paciente.apellido} ${a.paciente.nombre}`.localeCompare(`${b.paciente.apellido} ${b.paciente.nombre}`, 'es', { sensitivity: 'base' }))
@@ -89,14 +91,16 @@ export function buildAfiliadosPagosPdf(params: {
   const totalsPaid = rows.map(row => [...row.cuotas.values()]
     .filter(cuota => cuota.estado === 'pagado')
     .reduce((total, cuota) => total + cuota.monto, 0))
-  const body = rows.map((row, rowIndex) => [
+  const body = rows.map((row, rowIndex) => {
+    return [
       `${row.paciente.apellido}, ${row.paciente.nombre}`,
       row.paciente.dni || '-',
       row.plan?.nombre?.replace(/^Plan\s+/i, '') || '-',
       row.plan ? `$${row.plan.precio.toLocaleString('es-AR', { maximumFractionDigits: 0, minimumFractionDigits: 0 })}` : '-',
       ...MESES_CORTOS.map(() => ''),
       `$${totalsPaid[rowIndex]!.toLocaleString('es-AR', { maximumFractionDigits: 0, minimumFractionDigits: 0 })}`,
-    ])
+    ]
+  })
   let tableStartY = pdfBodyStartYAfterHeader(headerBottom, 4)
 
   if (rows.length === 1 && showSinglePatientDetails) {
@@ -124,7 +128,7 @@ export function buildAfiliadosPagosPdf(params: {
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(8)
     doc.setTextColor(35, 76, 101)
-    ;['Cuotas Adeudadas', 'Cuotas Pagadas', 'Total Adeudado', 'Total Pagado', 'Total Plan'].forEach((label, index) => {
+    ;['Cuotas Adeudadas', 'Cuotas Pagadas', 'Total Adeudado', 'Total Pagado', 'Total Cobertura'].forEach((label, index) => {
       doc.text(label, margin + itemW * index + itemW / 2, boxY + 7, { align: 'center' })
     })
     doc.setFontSize(11)
@@ -142,13 +146,13 @@ export function buildAfiliadosPagosPdf(params: {
 
   autoTable(doc, {
     startY: tableStartY,
-    head: [['Paciente', 'DNI', 'Plan', 'Valor', ...MESES_CORTOS, 'Total']],
-    body: body.length ? body : [['No hay pacientes afiliados', '', '', '', ...MESES_CORTOS.map(() => ''), '']],
+    head: [['Paciente', 'DNI', 'Cobertura', 'Valor', ...MESES_CORTOS, 'Total']],
+    body: body.length ? body : [['No hay contratantes registrados', '', '', '', ...MESES_CORTOS.map(() => ''), '']],
     margin: { left: margin, right: margin },
     tableWidth: tableW,
     columnStyles: Object.fromEntries(widths.map((cellWidth, index) => [index, {
       cellWidth,
-      halign: index >= 3 ? 'center' : 'left',
+      halign: index >= 4 && index <= 15 ? 'center' : 'left',
     }])),
     styles: {
       font: 'helvetica',
@@ -209,7 +213,56 @@ export function buildAfiliadosPagosPdf(params: {
     const cuotasDelAnio = [...cuotaRow.cuotas.values()]
     const cuotasPorMes = Array.from({ length: 12 }, (_, index) => cuotaRow.cuotas.get(index + 1))
     const montosPorMes = cuotasPorMes.map(cuota => cuota?.monto ?? cuotaRow.plan?.precio ?? 0)
-    const finalY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 60
+    let finalY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 60
+    const adherentes = cuotaRow.plan?.tipo === 'familiar'
+      ? cuotaRow.adherentes
+        .map((adherente) => {
+          const paciente = patientById.get(adherente.patientId)
+          return paciente
+            ? [`${paciente.apellido}, ${paciente.nombre}`, paciente.dni || '—', adherente.relacion || '—']
+            : null
+        })
+        .filter((adherente): adherente is [string, string, string] => adherente !== null)
+      : []
+
+    if (adherentes.length > 0) {
+      const adherentesTitleY = finalY + 7
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(8.5)
+      doc.setTextColor(35, 76, 101)
+      doc.text('Adherentes incluidos en el plan familiar', margin, adherentesTitleY)
+      autoTable(doc, {
+        startY: adherentesTitleY + 3,
+        head: [['Adherente', 'DNI', 'Relación']],
+        body: adherentes,
+        margin: { left: margin, right: margin },
+        tableWidth: tableW,
+        columnStyles: {
+          0: { cellWidth: 88 },
+          1: { cellWidth: 42 },
+          2: { cellWidth: tableW - 130 },
+        },
+        styles: {
+          font: 'helvetica',
+          fontSize: 7.5,
+          textColor: [49, 65, 84],
+          lineColor: [222, 231, 241],
+          lineWidth: 0.15,
+          cellPadding: { top: 1.8, right: 2, bottom: 1.8, left: 2 },
+        },
+        headStyles: {
+          fillColor: [39, 111, 137],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+        },
+        alternateRowStyles: { fillColor: [247, 250, 253] },
+        didDrawPage: data => {
+          if (data.pageNumber > 1) drawHeader()
+        },
+      })
+      finalY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? finalY
+    }
+
     const boxY = finalY + 7
     const boxW = pageW - margin * 2
 

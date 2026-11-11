@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Command;
@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::{
-    extract::{DefaultBodyLimit, State},
+    extract::{DefaultBodyLimit, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::get,
@@ -16,15 +16,16 @@ use axum_server::tls_rustls::RustlsConfig;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use pbkdf2::pbkdf2_hmac;
 use rcgen::generate_simple_self_signed;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::core::config::settings;
 use crate::core::db;
-use crate::modules::configuracion::dto::{Afiliado, AppData, CuotaAfiliado, Patient, PatientWriteResult, PlanAfiliado, WriteResult};
-use crate::modules::configuracion::service;
+use crate::core::error::AppError;
+use crate::modules::configuracion::dto::{Afiliado, AppData, CuotaAfiliado, ObraSocialCatalog, ObraSocialWriteResult, Patient, PatientWriteResult, PlanAfiliado, WriteResult};
+use crate::modules::configuracion::{repository, service};
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 struct Account {
@@ -62,7 +63,7 @@ struct AppState {
 }
 
 #[derive(Serialize)]
-struct Health { status: &'static str, version: &'static str }
+struct Health { status: &'static str, version: &'static str, app: &'static str, server_name: String }
 
 #[derive(Deserialize)]
 struct LoginReq { username: String, password: String }
@@ -155,6 +156,8 @@ struct PatientReq {
     fecha_nacimiento: String,
     #[serde(default)]
     obra_social: String,
+    #[serde(default)]
+    obra_social_anterior: Option<String>,
     #[serde(default)]
     notas: String,
     #[serde(default)]
@@ -324,13 +327,24 @@ fn role_allowed(role: &str, path: &str) -> bool {
 /// - secretaria: todo excepto el módulo Afiliados.
 /// - afiliado: Pacientes + módulo Afiliados (sin settings).
 fn app_data_key_allowed(role: &str, key: &str) -> bool {
-    const AFILIADOS_KEYS: [&str; 3] = ["afiliados", "planesAfiliados", "cuotasAfiliados"];
+    const AFILIADOS_KEYS: [&str; 5] = [
+        "afiliados",
+        "planesAfiliados",
+        "cuotasAfiliados",
+        "prestacionesAfiliados",
+        "ordenesMedicas",
+    ];
     match role {
         "admin" => true,
         "secretaria" => !AFILIADOS_KEYS.contains(&key),
         "afiliado" => matches!(
             key,
-            "patients" | "afiliados" | "planesAfiliados" | "cuotasAfiliados"
+            "patients"
+                | "afiliados"
+                | "planesAfiliados"
+                | "cuotasAfiliados"
+                | "prestacionesAfiliados"
+                | "ordenesMedicas"
         ),
         _ => false,
     }
@@ -352,6 +366,11 @@ fn filter_app_data_for_role(role: &str, mut value: serde_json::Value) -> serde_j
             obj.insert(key, serde_json::json!([]));
         }
     }
+    if role != "admin" {
+        if let Some(settings_obj) = obj.get_mut("settings").and_then(|v| v.as_object_mut()) {
+            settings_obj.insert("supabaseAutoSync".to_string(), serde_json::Value::Bool(false));
+        }
+    }
     value
 }
 
@@ -361,10 +380,22 @@ fn merge_app_data_for_role(
     mut current: serde_json::Value,
     incoming: &serde_json::Value,
 ) -> serde_json::Value {
+    let prev_auto_sync = current
+        .get("settings")
+        .and_then(|s| s.get("supabaseAutoSync"))
+        .cloned();
     if let (Some(cur), Some(inc)) = (current.as_object_mut(), incoming.as_object()) {
         for (key, val) in inc {
             if app_data_key_allowed(role, key) {
                 cur.insert(key.clone(), val.clone());
+            }
+        }
+        if role != "admin" {
+            if let (Some(prev), Some(settings_obj)) = (
+                prev_auto_sync,
+                cur.get_mut("settings").and_then(|v| v.as_object_mut()),
+            ) {
+                settings_obj.insert("supabaseAutoSync".to_string(), prev);
             }
         }
     }
@@ -398,7 +429,8 @@ async fn check_write_enabled(state: &AppState) -> Result<(), (StatusCode, axum::
 }
 
 async fn health() -> Json<Health> {
-    Json(Health { status: "ok", version: "16.0.0" })
+    let server_name = option_env!("SAN_NAME").unwrap_or("Sanatorio").to_string();
+    Json(Health { status: "ok", version: env!("CARGO_PKG_VERSION"), app: "sanatorio", server_name })
 }
 
 async fn login(State(state): State<AppState>, Json(body): Json<LoginReq>) -> Result<Json<LoginRes>, StatusCode> {
@@ -486,6 +518,7 @@ async fn get_pacientes(State(state): State<AppState>, headers: HeaderMap) -> Res
     if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
     if !role_allowed(&session.role, "/api/pacientes") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
     let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+
     // Los dados de baja no se exponen por la API (load_patients ya los filtra en SQL;
     // se deja el filtro explícito como defensa).
     let activos: Vec<Patient> = data
@@ -502,6 +535,7 @@ async fn get_medicos(State(state): State<AppState>, headers: HeaderMap) -> Resul
     if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
     if !role_allowed(&session.role, "/api/medicos") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
     let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+
     Ok(Json(data.doctors))
 }
 
@@ -511,6 +545,7 @@ async fn get_agenda(State(state): State<AppState>, headers: HeaderMap) -> Result
     if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
     if !role_allowed(&session.role, "/api/agenda") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
     let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+
     Ok(Json(data.appointments))
 }
 
@@ -520,6 +555,7 @@ async fn get_pagos(State(state): State<AppState>, headers: HeaderMap) -> Result<
     if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
     if !role_allowed(&session.role, "/api/pagos") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
     let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+
     Ok(Json(data.payments))
 }
 
@@ -529,6 +565,7 @@ async fn get_afiliados(State(state): State<AppState>, headers: HeaderMap) -> Res
     if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
     if !role_allowed(&session.role, "/api/afiliados") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
     let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+
     Ok(Json(data.afiliados.unwrap_or_default()))
 }
 
@@ -537,8 +574,8 @@ async fn get_obras_sociales(State(state): State<AppState>, headers: HeaderMap) -
     check_password_change_required(&session)?;
     if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
     if !role_allowed(&session.role, "/api/obras-sociales") { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
-    let data = service::load_app_data().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
-    Ok(Json(data.obras_sociales_custom))
+
+    Ok(Json(service::load_obras_sociales().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?))
 }
 
 /// Estado completo de la aplicación para el modo cliente, filtrado por rol.
@@ -758,6 +795,11 @@ fn can_write_pacientes(role: &str) -> bool {
     matches!(role, "admin" | "secretaria" | "afiliado")
 }
 
+/// Crear y editar obras sociales: admin y secretaria.
+fn can_write_obras_sociales(role: &str) -> bool {
+    matches!(role, "admin" | "secretaria")
+}
+
 /// Baja lógica de pacientes: solo admin.
 fn can_baja_pacientes(role: &str) -> bool {
     matches!(role, "admin")
@@ -816,6 +858,7 @@ fn patient_from_req(req: PatientReq, id: String, version: i32) -> Patient {
         localidad: req.localidad,
         fecha_nacimiento: req.fecha_nacimiento,
         obra_social: req.obra_social,
+        obra_social_anterior: req.obra_social_anterior,
         notas: req.notas,
         activo: req.activo,
         version,
@@ -1059,6 +1102,46 @@ async fn post_afiliado(
                 |row| Ok(serde_json::json!({"id": row.get::<_, String>(0)?, "nombre": row.get::<_, String>(1)?, "version": row.get::<_, i32>(2)?})),
             ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
             Err(conflict_response(current))
+        }
+    }
+}
+
+async fn post_afiliado_con_paciente_nuevo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<crate::modules::configuracion::dto::RegistrarContratanteConPacienteNuevoReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if !can_write_afiliados(&session.role) {
+        let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        let tx = conn.transaction().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        service::write_audit_log(
+            &tx,
+            &session.username,
+            &session.role,
+            "PERMISO_DENEGADO",
+            "afiliados",
+            Some(&body.patient_id),
+            Some("intento de registrar contratante con paciente nuevo sin rol afiliado o admin"),
+        ).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        tx.commit().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "db error"}))))?;
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
+    }
+    check_write_enabled(&state).await?;
+
+    match service::registrar_contratante_con_paciente_nuevo(&body, &session.username, &session.role) {
+        Ok((patient, afiliado)) => {
+            Ok(Json(serde_json::json!({
+                "patient": patient,
+                "afiliado": afiliado,
+            })))
+        }
+        Err(AppError::Validation(msg)) => {
+            Err((StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "validation", "message": msg}))))
+        }
+        Err(e) => {
+            Err((StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))))
         }
     }
 }
@@ -1376,6 +1459,729 @@ async fn put_cuota(
     }
 }
 
+fn conflict_obra_social_response(current: Option<ObraSocialCatalog>) -> (StatusCode, axum::Json<serde_json::Value>) {
+    (
+        StatusCode::CONFLICT,
+        axum::Json(serde_json::json!({
+            "error": "conflict",
+            "message": "La obra social fue modificada por otro usuario",
+            "current": current
+        })),
+    )
+}
+
+async fn post_obra_social(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ObraSocialCatalog>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !can_write_obras_sociales(&session.role) { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    check_write_enabled(&state).await?;
+
+    let nombre = body.nombre.trim();
+    if nombre.is_empty() {
+        return Err(validation_response("nombre es requerido"));
+    }
+    if body.plus < 0 || body.plus > 100_000_000 {
+        return Err(validation_response("plus fuera de rango"));
+    }
+    if body.arancel < 0 || body.arancel > 100_000_000 {
+        return Err(validation_response("arancel fuera de rango"));
+    }
+    if body.cuidar < 0 || body.cuidar > 10000 {
+        return Err(validation_response("cuidar fuera de rango"));
+    }
+    if body.imp_banco < 0 || body.imp_banco > 10000 {
+        return Err(validation_response("imp_banco fuera de rango"));
+    }
+    if body.imp_factura < 0 || body.imp_factura > 10000 {
+        return Err(validation_response("imp_factura fuera de rango"));
+    }
+    if body.gastos_adm < 0 || body.gastos_adm > 10000 {
+        return Err(validation_response("gastos_adm fuera de rango"));
+    }
+
+    let existing = service::load_obras_sociales().map_err(|_| internal_error_response())?;
+    if existing.iter().any(|o| o.nombre.trim().eq_ignore_ascii_case(nombre)) {
+        return Err((StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "validation", "message": "Esa obra social ya existe."}))));
+    }
+
+    let mut to_save = body.clone();
+    to_save.nombre = nombre.to_string();
+    to_save.version = 1;
+
+    match service::save_obra_social(&to_save).map_err(|_| internal_error_response())? {
+        ObraSocialWriteResult::Saved(saved) => Ok(Json(serde_json::to_value(&saved).unwrap())),
+        ObraSocialWriteResult::Conflict { current } => Err(conflict_obra_social_response(current)),
+    }
+}
+
+async fn put_obra_social(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(nombre): axum::extract::Path<String>,
+    Json(body): Json<ObraSocialCatalog>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !can_write_obras_sociales(&session.role) { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    check_write_enabled(&state).await?;
+
+    let nombre_norm = nombre.trim();
+    if nombre_norm.is_empty() {
+        return Err(validation_response("nombre es requerido"));
+    }
+    if body.plus < 0 || body.plus > 100_000_000 {
+        return Err(validation_response("plus fuera de rango"));
+    }
+    if body.arancel < 0 || body.arancel > 100_000_000 {
+        return Err(validation_response("arancel fuera de rango"));
+    }
+    if body.cuidar < 0 || body.cuidar > 10000 {
+        return Err(validation_response("cuidar fuera de rango"));
+    }
+    if body.imp_banco < 0 || body.imp_banco > 10000 {
+        return Err(validation_response("imp_banco fuera de rango"));
+    }
+    if body.imp_factura < 0 || body.imp_factura > 10000 {
+        return Err(validation_response("imp_factura fuera de rango"));
+    }
+    if body.gastos_adm < 0 || body.gastos_adm > 10000 {
+        return Err(validation_response("gastos_adm fuera de rango"));
+    }
+
+    let mut to_save = body.clone();
+    to_save.nombre = nombre_norm.to_string();
+
+    match service::save_obra_social(&to_save).map_err(|_| internal_error_response())? {
+        ObraSocialWriteResult::Saved(saved) => Ok(Json(serde_json::to_value(&saved).unwrap())),
+        ObraSocialWriteResult::Conflict { current } => Err(conflict_obra_social_response(current)),
+    }
+}
+
+async fn delete_obra_social(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(nombre): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None).map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if session.must_change_password { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "must_change_password"})))); }
+    if !can_write_obras_sociales(&session.role) { return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"})))); }
+    check_write_enabled(&state).await?;
+
+    let nombre_norm = nombre.trim();
+    if nombre_norm.is_empty() {
+        return Err(validation_response("nombre es requerido"));
+    }
+
+    match service::delete_obra_social(nombre_norm).map_err(|_| internal_error_response())? {
+        Ok(()) => Ok(Json(serde_json::json!({"ok": true}))),
+        Err(msg) => Err((StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "en_uso", "message": msg})))),
+    }
+}
+
+// ── Pagos de afiliados (pantalla reducida de cobranza) ────────────────────────
+
+/// Ver y cobrar cuotas de afiliados: administración y secretaría.
+fn puede_cobrar_afiliados(role: &str) -> bool {
+    matches!(role, "admin" | "secretaria")
+}
+
+#[derive(Deserialize)]
+struct PagosAfiliadosQuery {
+    #[serde(default)]
+    q: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CuotaPendienteResp {
+    anio: i32,
+    mes: u32,
+    monto: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cuota_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeudorResp {
+    afiliado_id: String,
+    nombre: String,
+    dni: String,
+    cobertura: String,
+    adeudado: f64,
+    cuotas: Vec<CuotaPendienteResp>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListadoPagosAfiliadosResp {
+    deudores: Vec<DeudorResp>,
+    total_adeudado: f64,
+    cantidad: usize,
+    sin_deuda: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CobrarCuotaReq {
+    anio: i32,
+    mes: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CobrarPagosAfiliadosReq {
+    afiliado_id: String,
+    cuotas: Vec<CobrarCuotaReq>,
+    forma_pago: String,
+}
+
+struct MesPendiente {
+    anio: i32,
+    mes: u32,
+    monto: f64,
+    cuota_data: Option<serde_json::Value>,
+}
+
+fn json_str(value: &serde_json::Value, key: &str) -> String {
+    value.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+}
+
+fn json_num(value: &serde_json::Value, key: &str) -> f64 {
+    value.get(key).and_then(|x| x.as_f64()).unwrap_or(0.0)
+}
+
+fn json_i64(value: &serde_json::Value, key: &str) -> Option<i64> {
+    value.get(key).and_then(|x| x.as_i64())
+}
+
+/// Normaliza para buscar sin distinguir mayúsculas ni tildes.
+fn normalizar_busqueda(texto: &str) -> String {
+    texto
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' | 'ä' | 'â' => 'a',
+            'é' | 'è' | 'ë' | 'ê' => 'e',
+            'í' | 'ì' | 'ï' | 'î' => 'i',
+            'ó' | 'ò' | 'ö' | 'ô' => 'o',
+            'ú' | 'ù' | 'ü' | 'û' => 'u',
+            'ñ' => 'n',
+            otro => otro,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn parse_anio_mes(fecha: &str) -> Option<(i32, u32)> {
+    let mut partes = fecha.split('-');
+    let anio: i32 = partes.next()?.trim().parse().ok()?;
+    let mes: u32 = partes.next()?.trim().parse().ok()?;
+    if !(1..=12).contains(&mes) {
+        return None;
+    }
+    Some((anio, mes))
+}
+
+/// Fecha de hoy según el reloj local del servidor (misma que usa la UI).
+fn fecha_local_hoy(conn: &rusqlite::Connection) -> Result<(i32, u32, String), AppError> {
+    conn.query_row(
+        "SELECT CAST(strftime('%Y','now','localtime') AS INTEGER),
+                CAST(strftime('%m','now','localtime') AS INTEGER),
+                date('now','localtime')",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )
+    .map_err(AppError::from)
+}
+
+/// Fecha y hora UTC en ISO 8601, para `registradoEn`.
+fn ahora_utc_iso(conn: &rusqlite::Connection) -> Result<String, AppError> {
+    conn.query_row(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(AppError::from)
+}
+
+fn mapa_cuotas<'a>(
+    cuotas: &'a [serde_json::Value],
+) -> HashMap<(String, i32, u32), &'a serde_json::Value> {
+    let mut mapa = HashMap::new();
+    for cuota in cuotas {
+        let afiliado_id = json_str(cuota, "afiliadoId");
+        let (Some(anio), Some(mes)) = (json_i64(cuota, "anio"), json_i64(cuota, "mes")) else {
+            continue;
+        };
+        mapa.entry((afiliado_id, anio as i32, mes as u32)).or_insert(cuota);
+    }
+    mapa
+}
+
+/// Meses impagos desde la fecha de contratación. Hasta el mes actual se
+/// infieren las cuotas faltantes; para meses futuros del año sólo se incluyen
+/// cuotas pendientes que ya estén registradas.
+fn meses_pendientes(
+    afiliado_id: &str,
+    fecha_inicio: &str,
+    precio_plan: f64,
+    cuotas_por_mes: &HashMap<(String, i32, u32), &serde_json::Value>,
+    anio_actual: i32,
+    mes_actual: u32,
+) -> Vec<MesPendiente> {
+    let Some((anio_inicio, mes_inicio)) = parse_anio_mes(fecha_inicio) else {
+        return Vec::new();
+    };
+    if (anio_inicio, mes_inicio) > (anio_actual, mes_actual) {
+        return Vec::new();
+    }
+
+    let mut pendientes = Vec::new();
+    for anio in anio_inicio..=anio_actual {
+        let primer_mes = if anio == anio_inicio { mes_inicio } else { 1 };
+        let ultimo_mes = 12;
+        for mes in primer_mes..=ultimo_mes {
+            let clave = (afiliado_id.to_string(), anio, mes);
+            match cuotas_por_mes.get(&clave) {
+                Some(cuota) => {
+                    if json_str(cuota, "estado") == "pagado" {
+                        continue;
+                    }
+                    pendientes.push(MesPendiente {
+                        anio,
+                        mes,
+                        monto: json_num(cuota, "monto"),
+                        cuota_data: Some((*cuota).clone()),
+                    });
+                }
+                None => {
+                    let es_mes_futuro = anio == anio_actual && mes > mes_actual;
+                    if !es_mes_futuro {
+                        pendientes.push(MesPendiente {
+                            anio,
+                            mes,
+                            monto: precio_plan,
+                            cuota_data: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    pendientes
+}
+
+fn mes_en_rango(
+    inicio: (i32, u32),
+    actual: (i32, u32),
+    anio: i32,
+    mes: u32,
+) -> bool {
+    (anio, mes) >= inicio && (anio, mes) <= actual
+}
+
+fn auditar_permiso_denegado(
+    session: &Session,
+    entidad: &str,
+    entidad_id: Option<&str>,
+    detalle: &str,
+) {
+    let Ok(mut conn) = db::open_connection() else {
+        return;
+    };
+    let Ok(tx) = conn.transaction() else {
+        return;
+    };
+    let _ = service::write_audit_log(
+        &tx,
+        &session.username,
+        &session.role,
+        "PERMISO_DENEGADO",
+        entidad,
+        entidad_id,
+        Some(detalle),
+    );
+    let _ = tx.commit();
+}
+
+async fn get_pagos_afiliados(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<PagosAfiliadosQuery>,
+) -> Result<Json<ListadoPagosAfiliadosResp>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if !puede_cobrar_afiliados(&session.role) {
+        auditar_permiso_denegado(
+            &session,
+            "pagos_afiliados",
+            None,
+            "intento de ver deudores sin permiso",
+        );
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
+    }
+
+    let conn = db::open_connection().map_err(|_| internal_error_response())?;
+    let afiliados = repository::load_afiliados_table(&conn).map_err(|_| internal_error_response())?;
+    let planes = repository::load_planes_table(&conn).map_err(|_| internal_error_response())?;
+    let cuotas = repository::load_cuotas_table(&conn).map_err(|_| internal_error_response())?;
+    let patients = repository::load_patients(&conn).map_err(|_| internal_error_response())?;
+    let (anio_actual, mes_actual, _) = fecha_local_hoy(&conn).map_err(|_| internal_error_response())?;
+
+    let consulta = normalizar_busqueda(query.q.as_deref().unwrap_or(""));
+    let cuotas_por_mes = mapa_cuotas(&cuotas);
+    let planes_por_id: HashMap<&str, &serde_json::Value> = planes
+        .iter()
+        .map(|p| (p.get("id").and_then(|x| x.as_str()).unwrap_or(""), p))
+        .collect();
+    let pacientes_por_id: HashMap<&str, &Patient> =
+        patients.iter().map(|p| (p.id.as_str(), p)).collect();
+
+    let mut deudores: Vec<DeudorResp> = Vec::new();
+    let mut hubo_coincidencia_sin_deuda = false;
+
+    for afiliado in &afiliados {
+        let afiliado_id = json_str(afiliado, "id");
+        if afiliado_id.is_empty() {
+            continue;
+        }
+        let patient_id = json_str(afiliado, "patientId");
+        let paciente = pacientes_por_id.get(patient_id.as_str()).copied();
+
+        if !consulta.is_empty() {
+            let nombre = paciente
+                .map(|p| format!("{} {}", p.apellido, p.nombre))
+                .unwrap_or_default();
+            let dni = paciente.map(|p| p.dni.clone()).unwrap_or_default();
+            if !normalizar_busqueda(&nombre).contains(&consulta)
+                && !normalizar_busqueda(&dni).contains(&consulta)
+            {
+                continue;
+            }
+        }
+
+        let plan_id = json_str(afiliado, "planId");
+        let plan = planes_por_id.get(plan_id.as_str()).copied();
+        let precio_plan = plan.map(|p| json_num(p, "precio")).unwrap_or(0.0);
+        let cobertura = plan
+            .map(|p| json_str(p, "nombre"))
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| "—".to_string());
+
+        let pendientes = meses_pendientes(
+            &afiliado_id,
+            &json_str(afiliado, "fechaInicio"),
+            precio_plan,
+            &cuotas_por_mes,
+            anio_actual,
+            mes_actual,
+        );
+        if pendientes.is_empty() {
+            if !consulta.is_empty() {
+                hubo_coincidencia_sin_deuda = true;
+            }
+            continue;
+        }
+
+        let adeudado = pendientes.iter().map(|c| c.monto).sum::<f64>();
+        deudores.push(DeudorResp {
+            afiliado_id,
+            nombre: paciente
+                .map(|p| {
+                    let apellido = p.apellido.trim();
+                    let nombre = p.nombre.trim();
+                    if !apellido.is_empty() && !nombre.is_empty() {
+                        format!("{apellido}, {nombre}")
+                    } else if !apellido.is_empty() {
+                        apellido.to_string()
+                    } else if !nombre.is_empty() {
+                        nombre.to_string()
+                    } else {
+                        "—".to_string()
+                    }
+                })
+                .unwrap_or_else(|| "—".to_string()),
+            dni: paciente
+                .map(|p| p.dni.trim())
+                .filter(|d| !d.is_empty())
+                .unwrap_or("—")
+                .to_string(),
+            cobertura,
+            adeudado,
+            cuotas: pendientes
+                .into_iter()
+                .map(|c| CuotaPendienteResp {
+                    anio: c.anio,
+                    mes: c.mes,
+                    monto: c.monto,
+                    cuota_id: c
+                        .cuota_data
+                        .as_ref()
+                        .map(|v| json_str(v, "id"))
+                        .filter(|id| !id.is_empty()),
+                })
+                .collect(),
+        });
+    }
+
+    deudores.sort_by(|a, b| {
+        b.adeudado
+            .partial_cmp(&a.adeudado)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                a.nombre
+                    .to_lowercase()
+                    .cmp(&b.nombre.to_lowercase())
+            })
+    });
+
+    let total_adeudado = deudores.iter().map(|d| d.adeudado).sum::<f64>();
+    Ok(Json(ListadoPagosAfiliadosResp {
+        cantidad: deudores.len(),
+        total_adeudado,
+        sin_deuda: !consulta.is_empty() && deudores.is_empty() && hubo_coincidencia_sin_deuda,
+        deudores,
+    }))
+}
+
+fn marcar_cuota_pagada(
+    original: Option<&serde_json::Value>,
+    afiliado_id: &str,
+    anio: i32,
+    mes: u32,
+    monto: f64,
+    forma_pago: &str,
+    fecha_pago: &str,
+    registrado_en: &str,
+    usuario: &str,
+) -> serde_json::Value {
+    let mut obj = original
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let id = obj
+        .get("id")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    obj.insert("id".to_string(), serde_json::json!(id));
+    obj.insert("afiliadoId".to_string(), serde_json::json!(afiliado_id));
+    obj.insert("anio".to_string(), serde_json::json!(anio));
+    obj.insert("mes".to_string(), serde_json::json!(mes));
+    obj.insert("monto".to_string(), serde_json::json!(monto));
+    obj.insert("estado".to_string(), serde_json::json!("pagado"));
+    obj.insert("fechaPago".to_string(), serde_json::json!(fecha_pago));
+    obj.insert("formaPago".to_string(), serde_json::json!(forma_pago));
+    obj.insert("comprobante".to_string(), serde_json::json!(true));
+    obj.insert("cobradoPor".to_string(), serde_json::json!(usuario));
+    obj.insert("registradoEn".to_string(), serde_json::json!(registrado_en));
+    obj.entry("notas".to_string()).or_insert_with(|| serde_json::json!(""));
+    obj.entry("usos".to_string()).or_insert_with(|| serde_json::json!(0));
+
+    serde_json::Value::Object(obj)
+}
+
+async fn post_cobrar_pagos_afiliados(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CobrarPagosAfiliadosReq>,
+) -> Result<Json<serde_json::Value>, (StatusCode, axum::Json<serde_json::Value>)> {
+    let session = authenticate_request(&state, &headers, None)
+        .map_err(|e| (e, axum::Json(serde_json::json!({"error": e.to_string()}))))?;
+    check_password_change_required(&session)?;
+    if !puede_cobrar_afiliados(&session.role) {
+        auditar_permiso_denegado(
+            &session,
+            "pagos_afiliados",
+            Some(&body.afiliado_id),
+            "intento de cobrar cuotas sin permiso",
+        );
+        return Err((StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "role_forbidden"}))));
+    }
+
+    // Igual que `/api/app-data` (el camino normal de escritura del modo
+    // cliente), el cobro no depende de `write_enabled`: ese interruptor no se
+    // administra desde la app y por defecto está apagado.
+    let forma_pago = body.forma_pago.trim().to_lowercase();
+    if !matches!(
+        forma_pago.as_str(),
+        "efectivo" | "transferencia" | "deposito" | "mercadopago" | "debito"
+    ) {
+        return Err(validation_response("Forma de pago inválida"));
+    }
+
+    let mut seleccion: Vec<(i32, u32)> = Vec::new();
+    let mut vistas = HashSet::new();
+    for cuota in &body.cuotas {
+        if !(1..=12).contains(&cuota.mes) {
+            return Err(validation_response("Mes inválido"));
+        }
+        if vistas.insert((cuota.anio, cuota.mes)) {
+            seleccion.push((cuota.anio, cuota.mes));
+        }
+    }
+    if seleccion.is_empty() {
+        return Err(validation_response("Seleccioná al menos una cuota"));
+    }
+
+    let mut conn = db::open_connection().map_err(|_| internal_error_response())?;
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| internal_error_response())?;
+
+    let afiliados = repository::load_afiliados_table(&tx).map_err(|_| internal_error_response())?;
+    let planes = repository::load_planes_table(&tx).map_err(|_| internal_error_response())?;
+    let cuotas = repository::load_cuotas_table(&tx).map_err(|_| internal_error_response())?;
+    let (anio_actual, mes_actual, fecha_hoy) =
+        fecha_local_hoy(&tx).map_err(|_| internal_error_response())?;
+    let registrado_en = ahora_utc_iso(&tx).map_err(|_| internal_error_response())?;
+
+    let afiliado = afiliados
+        .iter()
+        .find(|a| json_str(a, "id") == body.afiliado_id)
+        .ok_or_else(not_found_response)?;
+
+    let plan_id = json_str(afiliado, "planId");
+    let precio_plan = planes
+        .iter()
+        .find(|p| json_str(p, "id") == plan_id)
+        .map(|p| json_num(p, "precio"))
+        .unwrap_or(0.0);
+    let pendientes = meses_pendientes(
+        &body.afiliado_id,
+        &json_str(afiliado, "fechaInicio"),
+        precio_plan,
+        &mapa_cuotas(&cuotas),
+        anio_actual,
+        mes_actual,
+    );
+    let pendientes_por_mes: HashMap<(i32, u32), &MesPendiente> = pendientes
+        .iter()
+        .map(|c| ((c.anio, c.mes), c))
+        .collect();
+
+    // Si alguna cuota ya fue paga, se rechaza todo el cobro (sin doble cobro).
+    for (anio, mes) in &seleccion {
+        if !pendientes_por_mes.contains_key(&(*anio, *mes)) {
+            return Err((
+                StatusCode::CONFLICT,
+                axum::Json(serde_json::json!({
+                    "error": "cuota_ya_pagada",
+                    "anio": anio,
+                    "mes": mes
+                })),
+            ));
+        }
+    }
+
+    // Validar que los meses seleccionados sean consecutivos desde el primer mes impago.
+    // Obtener el primer mes impago de la lista `pendientes`.
+    let primer_mes_impuesto = pendientes.first().map(|p| (p.anio, p.mes));
+    if let Some((start_anio, start_mes)) = primer_mes_impuesto {
+        // Los meses seleccionados deben ser un subconjunto consecutivo empezando desde el primer mes impago.
+        // Ordenar la selección por año/mes para validar la secuencia.
+        let mut seleccion_ordenada: Vec<(i32, u32)> = seleccion.iter().cloned().collect();
+        seleccion_ordenada.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+        let mut expected_mes = start_mes;
+        let mut expected_anio = start_anio;
+        for (anio, mes) in &seleccion_ordenada {
+            if (*anio, *mes) != (expected_anio, expected_mes) {
+                return Err((
+                    StatusCode::CONFLICT,
+                    axum::Json(serde_json::json!({
+                        "error": "meses_no_consecutivos",
+                        "message": "Las cuotas seleccionadas deben ser meses consecutivos desde el primer mes impago."
+                    })),
+                ));
+            }
+            // Avanzar al siguiente mes
+            if *mes == 12 {
+                expected_anio += 1;
+                expected_mes = 1;
+            } else {
+                expected_mes += 1;
+            }
+        }
+    }
+
+    let mut pagadas: Vec<serde_json::Value> = Vec::new();
+    let mut total = 0.0;
+    for (anio, mes) in &seleccion {
+        let pendiente = pendientes_por_mes
+            .get(&(*anio, *mes))
+            .expect("la selección fue validada");
+        total += pendiente.monto;
+
+        let cuota = marcar_cuota_pagada(
+            pendiente.cuota_data.as_ref(),
+            &body.afiliado_id,
+            *anio,
+            *mes,
+            pendiente.monto,
+            &forma_pago,
+            &fecha_hoy,
+            &registrado_en,
+            &session.username,
+        );
+        let id = json_str(&cuota, "id");
+        let data = serde_json::to_string(&cuota).map_err(|_| internal_error_response())?;
+
+        if pendiente.cuota_data.is_some() {
+            tx.execute(
+                "UPDATE cuotas_afiliados
+                 SET monto = ?1, version = COALESCE(version, 1) + 1, data = ?2
+                 WHERE id = ?3",
+                params![pendiente.monto, data, id],
+            )
+            .map_err(|_| internal_error_response())?;
+        } else {
+            tx.execute(
+                "INSERT INTO cuotas_afiliados (id, monto, version, data) VALUES (?1, ?2, 1, ?3)",
+                params![id, pendiente.monto, data],
+            )
+            .map_err(|_| internal_error_response())?;
+        }
+
+        pagadas.push(cuota);
+    }
+
+    service::write_audit_log(
+        &tx,
+        &session.username,
+        &session.role,
+        "COBRAR_CUOTAS_AFILIADO",
+        "pagos_afiliados",
+        Some(&body.afiliado_id),
+        Some(&format!(
+            "{} cuota(s), forma de pago {}",
+            seleccion.len(),
+            forma_pago
+        )),
+    )
+    .map_err(|_| internal_error_response())?;
+
+    tx.commit().map_err(|_| internal_error_response())?;
+
+    Ok(Json(serde_json::json!({
+        "cuotas": pagadas,
+        "total": total
+    })))
+}
+
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
@@ -1393,12 +2199,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/pagos", get(get_pagos))
         .route("/api/afiliados", get(get_afiliados))
         .route("/api/afiliados", axum::routing::post(post_afiliado))
+        .route("/api/pagos-afiliados", get(get_pagos_afiliados))
+        .route("/api/pagos-afiliados/cobrar", axum::routing::post(post_cobrar_pagos_afiliados))
+        .route("/api/afiliados/con-paciente-nuevo", axum::routing::post(post_afiliado_con_paciente_nuevo))
         .route("/api/afiliados/:id", axum::routing::put(put_afiliado))
         .route("/api/planes", axum::routing::post(post_plan))
         .route("/api/planes/:id", axum::routing::put(put_plan))
         .route("/api/cuotas", axum::routing::post(post_cuota))
         .route("/api/cuotas/:id", axum::routing::put(put_cuota))
-        .route("/api/obras-sociales", get(get_obras_sociales))
+        .route("/api/obras-sociales", get(get_obras_sociales).post(post_obra_social))
+        .route("/api/obras-sociales/:nombre", axum::routing::put(put_obra_social).delete(delete_obra_social))
         // Sincronización del estado completo para el modo cliente (PC2/PC3).
         .route(
             "/api/app-data",
@@ -1530,11 +2340,11 @@ pub fn start_background_server() {
             {
                 use std::os::windows::process::CommandExt;
                 let _ = Command::new("netsh")
-                    .args(["advfirewall", "firewall", "add", "rule", "name=Sanatorio Server", "dir=in", "action=allow", "protocol=TCP", "localport=8787"])
+                    .args(["advfirewall", "firewall", "add", "rule", "name=Sanatorio Server", "dir=in", "action=allow", "protocol=TCP", "localport=8787", "profile=any"])
                     .creation_flags(0x08000000)
                     .status();
                 let _ = Command::new("netsh")
-                    .args(["advfirewall", "firewall", "add", "rule", "name=Sanatorio Discovery", "dir=in", "action=allow", "protocol=UDP", "localport=8788"])
+                    .args(["advfirewall", "firewall", "add", "rule", "name=Sanatorio Discovery", "dir=in", "action=allow", "protocol=UDP", "localport=8788", "profile=any"])
                     .creation_flags(0x08000000)
                     .status();
             }
@@ -3369,6 +4179,215 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["error"], "validation");
         assert_eq!(json["message"], "id inválido");
+
+        drop(test);
+    }
+
+    /// Carga un contratante con deuda en el mes actual y otro al día.
+    /// Devuelve (año, mes) del período pendiente.
+    fn seed_pagos_afiliados() -> (i32, u32) {
+        let mut conn = db::open_connection().unwrap();
+        let (anio, mes, fecha_hoy) = fecha_local_hoy(&conn).unwrap();
+        let inicio = format!("{anio}-{mes:02}-01");
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+
+        repository::save_patients(
+            &tx,
+            &[
+                Patient {
+                    id: "pac-1".to_string(),
+                    nombre: "Ana".to_string(),
+                    apellido: "Perez".to_string(),
+                    dni: "12345678".to_string(),
+                    telefono: String::new(),
+                    email: String::new(),
+                    domicilio: String::new(),
+                    localidad: String::new(),
+                    fecha_nacimiento: "1990-01-01".to_string(),
+                    obra_social: String::new(),
+                    obra_social_anterior: None,
+                    notas: String::new(),
+                    activo: Some(true),
+                    version: 1,
+                    deleted_at: None,
+                },
+                Patient {
+                    id: "pac-2".to_string(),
+                    nombre: "Bruno".to_string(),
+                    apellido: "Gomez".to_string(),
+                    dni: "87654321".to_string(),
+                    telefono: String::new(),
+                    email: String::new(),
+                    domicilio: String::new(),
+                    localidad: String::new(),
+                    fecha_nacimiento: "1985-01-01".to_string(),
+                    obra_social: String::new(),
+                    obra_social_anterior: None,
+                    notas: String::new(),
+                    activo: Some(true),
+                    version: 1,
+                    deleted_at: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        repository::save_planes_table(
+            &tx,
+            &[serde_json::json!({
+                "id": "plan-1",
+                "nombre": "Plan Familiar",
+                "precio": 1000.0,
+                "activo": true,
+                "tipo": "familiar"
+            })],
+        )
+        .unwrap();
+
+        repository::save_afiliados_table(
+            &tx,
+            &[
+                serde_json::json!({
+                    "id": "afil-1",
+                    "patientId": "pac-1",
+                    "planId": "plan-1",
+                    "fechaInicio": inicio,
+                    "activo": true
+                }),
+                serde_json::json!({
+                    "id": "afil-2",
+                    "patientId": "pac-2",
+                    "planId": "plan-1",
+                    "fechaInicio": inicio,
+                    "activo": true
+                }),
+            ],
+        )
+        .unwrap();
+
+        // afil-1 no tiene cuota del mes actual: debe.
+        // afil-2 tiene la cuota del mes actual paga: está al día.
+        repository::save_cuotas_table(
+            &tx,
+            &[serde_json::json!({
+                "id": "cuota-2",
+                "afiliadoId": "afil-2",
+                "anio": anio,
+                "mes": mes,
+                "monto": 1000.0,
+                "estado": "pagado",
+                "fechaPago": fecha_hoy,
+                "formaPago": "efectivo",
+                "comprobante": true,
+                "notas": "",
+                "usos": 0
+            })],
+        )
+        .unwrap();
+
+        tx.commit().unwrap();
+        (anio, mes)
+    }
+
+    #[tokio::test]
+    async fn test_pagos_afiliados_secretaria_ve_solo_deudores_y_sin_historial() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let (anio, mes) = seed_pagos_afiliados();
+        let token = test.login_as("secretaria").await;
+
+        let (status, body) = test.get("/api/pagos-afiliados", Some(&token)).await;
+        assert_eq!(status, StatusCode::OK, "GET pagos afiliados: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["cantidad"], 1);
+        assert_eq!(json["sinDeuda"], false);
+        let deudor = &json["deudores"][0];
+        assert_eq!(deudor["nombre"], "Perez, Ana");
+        assert_eq!(deudor["dni"], "12345678");
+        assert_eq!(deudor["cobertura"], "Plan Familiar");
+        assert_eq!(deudor["cuotas"][0]["anio"], anio);
+        assert_eq!(deudor["cuotas"][0]["mes"], mes);
+        assert_eq!(deudor["cuotas"][0]["monto"], 1000.0);
+        // La respuesta reducida no expone estado, historial, adherentes ni paciente.
+        assert!(deudor.get("patientId").is_none());
+        assert!(deudor.get("estado").is_none());
+        assert!(deudor.get("adherentes").is_none());
+
+        // Buscar al contratante al día devuelve sólo el aviso "Sin deuda".
+        let (status, body) = test
+            .get("/api/pagos-afiliados?q=Gomez", Some(&token))
+            .await;
+        assert_eq!(status, StatusCode::OK, "GET búsqueda sin deuda: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["cantidad"], 0);
+        assert_eq!(json["sinDeuda"], true);
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_pagos_afiliados_afiliado_no_puede_ver_ni_cobrar() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        seed_pagos_afiliados();
+        let token = test.login_as("afiliado").await;
+
+        let (status, body) = test.get("/api/pagos-afiliados", Some(&token)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "afiliado GET: {}", body);
+
+        let (status, body) = test
+            .post(
+                "/api/pagos-afiliados/cobrar",
+                r#"{"afiliadoId":"afil-1","cuotas":[{"anio":2026,"mes":1}],"formaPago":"efectivo"}"#,
+                Some(&token),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "afiliado POST: {}", body);
+
+        drop(test);
+    }
+
+    #[tokio::test]
+    async fn test_pagos_afiliados_cobrar_y_doble_cobro_409() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        let (anio, mes) = seed_pagos_afiliados();
+        // No se habilita `write_enabled`: el cobro debe funcionar igual que el
+        // guardado normal del modo cliente (`/api/app-data`).
+        let token = test.login_as("secretaria").await;
+
+        let body_req = serde_json::json!({
+            "afiliadoId": "afil-1",
+            "cuotas": [{ "anio": anio, "mes": mes }],
+            "formaPago": "transferencia"
+        })
+        .to_string();
+
+        let (status, body) = test
+            .post("/api/pagos-afiliados/cobrar", &body_req, Some(&token))
+            .await;
+        assert_eq!(status, StatusCode::OK, "primer cobro: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["total"], 1000.0);
+        let cuota = &json["cuotas"][0];
+        assert_eq!(cuota["estado"], "pagado");
+        assert_eq!(cuota["formaPago"], "transferencia");
+        assert_eq!(cuota["comprobante"], true);
+        assert_eq!(cuota["cobradoPor"], "Mary");
+        assert!(cuota["registradoEn"].as_str().unwrap_or("").contains('T'));
+
+        // La deuda bajó a cero: el contratante ya no aparece.
+        let (status, body) = test.get("/api/pagos-afiliados", Some(&token)).await;
+        assert_eq!(status, StatusCode::OK, "GET después del cobro: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["cantidad"], 0);
+
+        // Un segundo cobro de la misma cuota se rechaza completo.
+        let (status, body) = test
+            .post("/api/pagos-afiliados/cobrar", &body_req, Some(&token))
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT, "doble cobro: {}", body);
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "cuota_ya_pagada");
 
         drop(test);
     }

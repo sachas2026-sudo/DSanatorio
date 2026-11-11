@@ -99,17 +99,22 @@ pub fn load_config_from(path: &std::path::Path) -> Result<ClientConfig, String> 
     let mut value: serde_json::Value = serde_json::from_str(content)
         .map_err(|e| format!("client-config inválido: {e}"))?;
     quitar_claves_duplicadas(&mut value);
-    let cfg: ClientConfig = serde_json::from_value(value)
+    let mut cfg: ClientConfig = serde_json::from_value(value)
         .map_err(|e| format!("client-config inválido: {e}"))?;
 
     if cfg.mode == AppMode::Client {
-        let url = cfg.server_url.as_deref().unwrap_or("");
-        if !url.starts_with("https://") {
-            return Err("Modo Client requiere server_url con https://".into());
+        if let Some(ref mut url) = cfg.server_url {
+            let trimmed = url.trim();
+            if trimmed.is_empty() {
+                cfg.server_url = None;
+            } else if trimmed.starts_with("http://") {
+                *url = trimmed.replacen("http://", "https://", 1);
+            } else if !trimmed.starts_with("https://") {
+                *url = format!("https://{trimmed}");
+            }
         }
-        let cert = cfg.server_cert_pem.as_deref().unwrap_or("");
-        if cert.trim().is_empty() {
-            return Err("Modo Client requiere server_cert_pem no vacío".into());
+        if cfg.server_url.is_some() && cfg.server_cert_pem.as_deref().unwrap_or("").trim().is_empty() {
+            cfg.server_cert_pem = Some("auto".to_string());
         }
     }
     Ok(cfg)
@@ -242,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn client_sin_https_retorna_err() {
+    fn client_sin_https_se_corrige_a_https() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("config.json");
         let cfg = ClientConfig {
@@ -251,13 +256,12 @@ mod tests {
             server_cert_pem: Some("cert".into()),
         };
         save_config_to(&path, &cfg).unwrap();
-        let result = load_config_from(&path);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("https://"));
+        let loaded = load_config_from(&path).unwrap();
+        assert_eq!(loaded.server_url.as_deref(), Some("https://192.168.1.10:8787"));
     }
 
     #[test]
-    fn client_sin_certificado_retorna_err() {
+    fn client_sin_certificado_usa_auto() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("config.json");
         let cfg = ClientConfig {
@@ -266,9 +270,8 @@ mod tests {
             server_cert_pem: None,
         };
         save_config_to(&path, &cfg).unwrap();
-        let result = load_config_from(&path);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("server_cert_pem"));
+        let loaded = load_config_from(&path).unwrap();
+        assert_eq!(loaded.server_cert_pem.as_deref(), Some("auto"));
     }
 
     #[test]

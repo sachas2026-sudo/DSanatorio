@@ -9,7 +9,7 @@
   width: 100%;
   min-height: 0;
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 0.25rem 0.85rem 1rem 0;
   background: transparent;
   gap: 0.5rem;
@@ -114,11 +114,11 @@
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
-  padding: 0.85rem;
+  padding: 0.75rem;
   width: 290px;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.55rem;
 }
 
 .pagos-date-popover__presets {
@@ -149,39 +149,248 @@
 .pagos-date-popover__inputs {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.5rem;
   border-top: 1px solid #f1f5f9;
-  padding-top: 0.65rem;
+  padding-top: 0.55rem;
 }
 
-.pagos-date-popover__field {
+/* Selector de pestañas Desde / Hasta */
+.pagos-date-targets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.pagos-date-target-tab {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-}
-
-.pagos-date-popover__field label {
-  font-size: 0.76rem;
-  font-weight: 600;
-  color: #475569;
-}
-
-.pagos-date-popover__field input {
-  padding: 0.4rem 0.6rem;
+  align-items: flex-start;
+  padding: 0.3rem 0.5rem;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  font-size: 0.82rem;
-  color: #1e293b;
-  outline: none;
+  background: #f8fafc;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
 }
 
-.pagos-date-popover__field input:focus {
+.pagos-date-target-tab.is-active {
   border-color: #0284c7;
+  background: #f0f9ff;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+.pagos-date-target-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.pagos-date-target-tab.is-active .pagos-date-target-label {
+  color: #0284c7;
+}
+
+.pagos-date-target-value {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+/* Calendario integrado con fondo amarillito (o verde suave cuando rango está listo) */
+.pagos-calendar-box {
+  background: #fffdf0;
+  border: 1px solid #fde047;
+  border-radius: 8px;
+  padding: 0.55rem 0.5rem 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  box-shadow: 0 2px 5px rgba(180, 83, 9, 0.05);
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.pagos-calendar-box.is-range-ready {
+  background: #f0fdf4;
+  border-color: #86efac;
+  box-shadow: 0 2px 5px rgba(22, 101, 52, 0.06);
+}
+
+.pagos-calendar-step-hint {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #0284c7;
+  background: #f0f9ff;
+  border-radius: 4px;
+  padding: 0.2rem 0.4rem;
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+
+.pagos-calendar-step-hint--ready {
+  color: #15803d;
+  background: #dcfce7;
+  font-weight: 700;
+  display: inline-block;
+  width: 100%;
+}
+
+.pagos-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.2rem;
+}
+
+.pagos-calendar-month-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #1e293b;
+  text-transform: capitalize;
+}
+
+.pagos-calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.pagos-calendar-nav-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  transition: all 0.15s;
+  line-height: 1;
+}
+
+.pagos-calendar-nav-btn:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.pagos-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #64748b;
+  margin-top: 0.1rem;
+}
+
+.pagos-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  row-gap: 2px;
+  column-gap: 0;
+}
+
+.pagos-calendar-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: #1e293b;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.12s;
+  position: relative;
+}
+
+.pagos-calendar-day:hover:not(.is-outside):not(.is-range-start):not(.is-range-end):not(.is-in-range) {
+  background: #e2e8f0;
+  border-radius: 4px;
+}
+
+.pagos-calendar-day.is-outside {
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.pagos-calendar-day.is-outside:hover:not(.is-range-start):not(.is-range-end):not(.is-in-range) {
+  background: #f1f5f9;
+  color: #475569;
+  border-radius: 4px;
+}
+
+.pagos-calendar-day.is-today:not(.is-range-start):not(.is-range-end) {
+  background: #475569;
+  color: #ffffff;
+  font-weight: 700;
+  border-radius: 4px;
+}
+
+.pagos-calendar-day.is-in-range {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+  font-weight: 600;
+  border-radius: 0;
+}
+
+.pagos-calendar-day.is-range-start {
+  background: #0284c7 !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  border-top-left-radius: 6px !important;
+  border-bottom-left-radius: 6px !important;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  z-index: 1;
+}
+
+.pagos-calendar-day.is-range-end {
+  background: #0284c7 !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  border-top-right-radius: 6px !important;
+  border-bottom-right-radius: 6px !important;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  z-index: 1;
+}
+
+.pagos-calendar-day.is-single-day,
+.pagos-calendar-day.is-range-start.is-range-end {
+  border-radius: 6px !important;
+}
+
+.pagos-calendar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.2rem 0.2rem 0;
+}
+
+.pagos-calendar-footer-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #0284c7;
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.pagos-calendar-footer-btn:hover {
+  background: #e2e8f0;
+  color: #0369a1;
 }
 
 .pagos-date-popover__apply-btn {
-  margin-top: 0.25rem;
-  padding: 0.45rem 0.7rem;
+  margin-top: 0.1rem;
+  padding: 0.4rem 0.7rem;
   background: #0284c7;
   color: #ffffff !important;
   border: 1px solid #0284c7;
@@ -196,6 +405,12 @@
 .pagos-date-popover__apply-btn:hover {
   background: #0369a1;
   border-color: #0369a1;
+}
+
+.pagos-date-popover__apply-btn.is-ready {
+  background: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.35);
+  font-weight: 700;
 }
 
 /* KPI / Metrics Grid */
@@ -993,6 +1208,39 @@
 .pagos-os-shortfilter:focus-within {
   border-color: #0284c7;
   box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.16);
+}
+
+.pagos-os-btn-manage {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  height: 28px;
+  width: auto;
+  padding: 0 0.65rem;
+  margin-left: 0.4rem;
+  border: 1px solid #0284c7;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #0284c7;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.pagos-os-btn-manage:hover {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.pagos-os-btn-manage:focus-visible {
+  outline: 2px solid rgba(2, 132, 199, 0.35);
+  outline-offset: 2px;
 }
 
 .pagos-table-title {

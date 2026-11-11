@@ -1,6 +1,22 @@
 /* Afiliados Modern UI — diseño "planes arriba" + tabla con filas expandibles.
    Reusa los tokens globales de index.css (--card, --border, --muted, --heading…). */
 
+:root,
+.af-page,
+.af-modal-backdrop {
+  --af-primary: #0891b2;
+  --af-primary-dark: #0e7490;
+  --af-primary-soft: #e0f4f8;
+  --af-primary-mid: #63adbc;
+  --af-ok: #16a34a;
+  --af-ok-soft: #dcfce7;
+  --af-warn: #d97706;
+  --af-warn-soft: #fef3c7;
+  --af-danger: #dc2626;
+  --af-danger-soft: #fee2e2;
+  --af-radius: 12px;
+}
+
 .af-page {
   display: flex;
   flex-direction: column;
@@ -16,18 +32,6 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
-
-  --af-primary: #0891b2;
-  --af-primary-dark: #0e7490;
-  --af-primary-soft: #e0f4f8;
-  --af-primary-mid: #63adbc;
-  --af-ok: #16a34a;
-  --af-ok-soft: #dcfce7;
-  --af-warn: #d97706;
-  --af-warn-soft: #fef3c7;
-  --af-danger: #dc2626;
-  --af-danger-soft: #fee2e2;
-  --af-radius: 12px;
 }
 
 /* ── Encabezado de página ─────────────────────────────────────────── */
@@ -77,13 +81,13 @@
   cursor: not-allowed;
 }
 .af-btn--primary {
-  background: var(--af-primary);
-  border-color: var(--af-primary);
+  background: var(--af-primary, #0891b2);
+  border-color: var(--af-primary, #0891b2);
   color: #fff;
 }
 .af-btn--primary:hover:not(:disabled) {
-  background: var(--af-primary-dark);
-  border-color: var(--af-primary-dark);
+  background: var(--af-primary-dark, #0e7490);
+  border-color: var(--af-primary-dark, #0e7490);
   color: #fff;
 }
 .af-btn--soft {
@@ -182,12 +186,29 @@
    bajar sólo los botones. */
 .af-card__actions .af-btn {
   transform: translateY(0.5rem);
-  padding: 0.3rem 0.6rem;
+  padding: 0.32rem 0.65rem;
   font-size: 0.78rem;
+  font-weight: 600;
   border-radius: 8px;
   /* El título de la tarjeta va en mayúsculas; los botones no deben heredarlo. */
   text-transform: none;
   letter-spacing: normal;
+  background: #e0f2fe;
+  border: 1px solid #7dd3fc;
+  color: #0369a1;
+  box-shadow: 0 1px 2px rgba(2, 132, 199, 0.08);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.af-card__actions .af-btn:hover:not(:disabled) {
+  background: #bae6fd;
+  border-color: #38bdf8;
+  color: #0c4a6e;
+  box-shadow: 0 2px 4px rgba(2, 132, 199, 0.15);
+}
+.af-card__actions .af-btn:active:not(:disabled) {
+  background: #7dd3fc;
+  border-color: #0284c7;
+  color: #0369a1;
 }
 .af-card__actions .af-btn--primary {
   padding: 0.24rem 0.5rem;
@@ -212,11 +233,11 @@
   flex-wrap: wrap;
 }
 .af-planes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  display: flex;
+  align-items: stretch;
   gap: 0.7rem;
-  flex: 1 1 auto;
-  min-width: 0;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 .af-plan {
   position: relative;
@@ -231,6 +252,8 @@
   text-align: left;
   font: inherit;
   color: var(--text);
+  width: 295px;
+  flex: 0 0 295px;
   transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
 }
 .af-plan:hover {
@@ -305,16 +328,59 @@
   margin-right: 0.25rem;
   white-space: nowrap;
 }
-.af-plan--new {
+.af-plan--todas {
+  width: 115px;
+  min-width: 115px;
+  max-width: 115px;
+  flex: 0 0 115px;
   align-items: center;
   justify-content: center;
+  text-align: center;
+  gap: 0.15rem;
+  min-height: 66px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.af-plan--todas .af-plan-todas__title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--heading);
+  line-height: 1.2;
+}
+.af-plan--todas .af-plan-todas__count {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--muted);
+  line-height: 1.2;
+}
+.af-plan--todas.af-plan--active {
+  border-color: var(--af-primary, #0891b2);
+  box-shadow: 0 0 0 2px rgba(8, 145, 178, 0.16);
+  background: #f0f9ff;
+}
+.af-plan--todas.af-plan--active .af-plan-todas__title {
+  color: var(--af-primary-dark, #0e7490);
+}
+.af-plan--todas.af-plan--active .af-plan-todas__count {
+  color: var(--af-primary, #0891b2);
+}
+.af-plan--new {
+  margin-left: 1.25rem;
+  width: 115px;
+  min-width: 115px;
+  max-width: 115px;
+  flex: 0 0 115px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 0.15rem;
   min-height: 66px;
   border-style: dashed;
   background: #fbfeff;
   color: var(--af-primary-dark);
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 .af-plan--new:hover {
   background: var(--af-primary-soft);
@@ -329,12 +395,214 @@
    lo centra contra las tarjetas. */
 .af-filter {
   display: flex;
-  gap: 0.35rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
   align-items: center;
   align-self: center;
   justify-content: flex-end;
   margin-left: auto;
+}
+.af-filter .af-chip,
+.af-filter .af-btn {
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 8px;
+  line-height: 1;
+  vertical-align: middle;
+}
+.af-filter .af-btn--orden-medica {
+  padding: 0 0.75rem;
+  gap: 0.35rem;
+}
+.af-filter .af-btn--orden-medica svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* ── Toolbar de Afiliados (Modelo A: una sola fila) ──────────────── */
+.afil-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1 1 auto;
+  margin-left: auto;
+}
+
+.afil-toolbar-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.afil-toolbar-chip {
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.85rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border-radius: 8px;
+  line-height: 1;
+  background: #ffffff;
+  border: 1px solid #D5DBE3;
+  color: #6B7A8C;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.afil-toolbar-chip:hover:not(.afil-toolbar-chip--active) {
+  border-color: #9ED3EA;
+  color: #1F7AA6;
+}
+
+.afil-toolbar-chip--active {
+  background: #0C8DAE;
+  border-color: #0C8DAE;
+  color: #ffffff;
+}
+
+.afil-toolbar-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.afil-toolbar-actions .af-btn {
+  min-height: 66px;
+  height: 100%;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border-radius: 8px;
+  line-height: 1.2;
+  padding: 0 1rem;
+}
+
+.afil-toolbar-actions .af-btn--orden-medica {
+  padding: 0 0.75rem;
+  gap: 0.35rem;
+}
+
+.afil-toolbar-actions .af-btn--orden-medica svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.afil-toolbar-menu-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.afil-toolbar-btn-pdf {
+  min-height: 66px;
+  height: 100%;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 1rem;
+  background: #E6F4FB;
+  border: 1px solid #9ED3EA;
+  color: #1F7AA6;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.afil-toolbar-btn-pdf:hover,
+.afil-toolbar-btn-pdf[aria-expanded="true"] {
+  background: #d4eef9;
+  border-color: #6bc2e2;
+  color: #166085;
+}
+
+.afil-toolbar-btn-pdf svg {
+  flex-shrink: 0;
+}
+
+.afil-toolbar-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 200px;
+  background: var(--card, #ffffff);
+  border: 1px solid #9ED3EA;
+  border-radius: 10px;
+  padding: 6px 0;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.1);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  animation: afil-menu-pop 0.15s ease-out;
+}
+
+@keyframes afil-menu-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.afil-toolbar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1F7AA6;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.afil-toolbar-item:hover,
+.afil-toolbar-item:focus-visible {
+  background: #E6F4FB;
+  outline: none;
+}
+
+.afil-toolbar-divider {
+  height: 1px;
+  background: #E2E8F0;
+  margin: 4px 0;
 }
 .af-filter__label {
   font-size: 0.72rem;
@@ -387,21 +655,30 @@
   pointer-events: none;
 }
 .af-input,
-.af-select {
+.af-select,
+.af-textarea {
   width: 100%;
-  padding: 0.45rem 0.6rem;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--card);
   color: var(--text);
   font: inherit;
   font-size: 0.88rem;
+  line-height: 1.4;
+}
+.af-textarea {
+  resize: vertical;
+  min-height: 72px;
+  font-family: inherit;
 }
 .af-search .af-input {
   padding-left: 1.95rem;
 }
 .af-input:focus,
-.af-select:focus {
+.af-select:focus,
+.af-textarea:focus {
   outline: none;
   border-color: var(--af-primary);
   box-shadow: 0 0 0 2px rgba(8, 145, 178, 0.16);
@@ -513,6 +790,20 @@
 .af-caret--open {
   transform: rotate(90deg);
   color: var(--af-primary-dark);
+}
+.af-btn-caret {
+  background: transparent;
+  border: none;
+  padding: 0.25rem;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+.af-btn-caret:hover {
+  background: rgba(8, 145, 178, 0.12);
 }
 .af-num {
   text-align: right;
@@ -784,6 +1075,9 @@
   max-height: 90vh;
   overflow-y: auto;
 }
+.af-modal--wide {
+  max-width: 620px;
+}
 .af-modal__title {
   margin: 0 0 0.9rem;
   font-size: 1.02rem;
@@ -840,3 +1134,398 @@
     margin-left: 0;
   }
 }
+
+/* ── Selección de Fila y Botón Orden Médica ────────────────────────── */
+.af-row--selected {
+  background: #f0f9ff !important;
+  box-shadow: inset 4px 0 0 #0284c7;
+}
+
+.af-row--selected:hover {
+  background: #e0f2fe !important;
+}
+
+.af-btn--orden-medica {
+  background: #f0f9ff;
+  border-color: #7dd3fc;
+  color: #0369a1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.af-btn--orden-medica:hover {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #0284c7;
+}
+
+.af-btn--orden-medica-highlight {
+  background: #0284c7 !important;
+  color: #ffffff !important;
+  border-color: #0369a1 !important;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.45);
+  animation: af-pulse-btn 1.8s infinite ease-in-out;
+}
+
+@keyframes af-pulse-btn {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+  }
+}
+
+.af-selected-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 0.5rem 0.85rem;
+  margin-bottom: 0.75rem;
+  color: #1e40af;
+  font-size: 0.86rem;
+}
+
+.af-selected-banner__text {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.af-selected-banner__action {
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.af-selected-banner__adherentes {
+  color: #1e40af;
+  font-size: 0.85rem;
+}
+
+.af-selected-banner__adherentes strong {
+  color: #0369a1;
+  font-weight: 600;
+}
+
+.af-selected-banner__btn-clear {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Ventanas emergentes y Modales (Orden Médica, Prestaciones, etc.) ─ */
+.af-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: af-fade-in 0.16s ease-out;
+}
+
+@keyframes af-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.af-modal-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 580px;
+  max-height: 92vh;
+  background: var(--card, #ffffff);
+  border-radius: 14px;
+  border: 1px solid var(--border, #e2e8f0);
+  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  animation: af-zoom-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes af-zoom-in {
+  from {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.af-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.95rem 1.25rem;
+  background: #ffffff;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.af-modal-backdrop .af-modal {
+  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.35);
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.af-selected-banner__btn-clear:hover {
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
+/* Bloque Nuevo Paciente dentro de Registrar Contratante */
+.af-nuevo-paciente-box {
+  background: #F3FAFD;
+  border: 1px solid #BFE6F0;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.af-nuevo-paciente-box__title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #0e7490;
+  margin: 0 0 0.15rem 0;
+}
+
+.af-nuevo-paciente-box__subtitle {
+  font-size: 0.78rem;
+  color: #64748b;
+  margin: 0 0 0.75rem 0;
+}
+
+.af-nuevo-paciente-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem 0.85rem;
+}
+
+.af-field-error {
+  font-size: 0.76rem;
+  color: #dc2626;
+  font-weight: 600;
+  margin-top: 0.25rem;
+  display: block;
+}
+
+.af-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #0891b2;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  display: inline-block;
+  margin-top: 0.35rem;
+  text-align: left;
+}
+
+.af-link-btn:hover {
+  color: #0e7490;
+}
+
+.af-success-banner {
+  padding: 0.65rem 0.85rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  color: #15803d;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.85rem;
+}
+
+/* ── Estados Suspendido (violeta suave) y Baja (gris) ─────────────── */
+.af-badge--violet {
+  background: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+}
+
+.af-badge--gray {
+  background: #e2e8f0;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.af-cambio-prog-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 6px;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+  color: #0369a1;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.af-cambio-prog-pill__cancel {
+  border: none;
+  background: transparent;
+  color: #0284c7;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+
+.af-cambio-prog-pill__cancel:hover {
+  color: #dc2626;
+}
+
+/* ── Acciones en Barra Seleccionado y en Fila Desplegada ─────────── */
+.af-selected-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.af-selected-banner__actions .af-btn {
+  padding: 0.28rem 0.65rem;
+  font-size: 0.78rem;
+  border-radius: 7px;
+}
+
+.af-btn--ghost {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.af-btn--danger-ghost {
+  background: #ffffff;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
+.af-btn--danger-ghost:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
+  color: #b91c1c;
+}
+
+.af-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem 1.25rem 1.15rem;
+  overflow-y: auto;
+}
+
+.af-modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+/* ── Historial de movimientos en fila desplegada ─────────────────── */
+.af-historial-box {
+  margin: 0 0.85rem 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.af-historial-box__title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.45rem;
+}
+
+.af-historial-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.af-historial-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.32rem 0.55rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #1e293b;
+}
+
+/* ── Toast verde abajo a la derecha ──────────────────────────────── */
+.af-toast {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 480px;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  box-shadow: 0 12px 28px rgba(6, 95, 70, 0.18);
+  color: #065f46;
+  font-size: 0.86rem;
+  font-weight: 600;
+  animation: af-fade-in 0.18s ease-out;
+}
+
+.af-toast__close {
+  border: none;
+  background: transparent;
+  color: #047857;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 0.15rem 0.35rem;
+  border-radius: 5px;
+  line-height: 1;
+}
+
+.af-toast__close:hover {
+  background: #d1fae5;
+  color: #064e3b;
+}
+

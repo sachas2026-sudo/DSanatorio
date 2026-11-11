@@ -20,6 +20,7 @@ function detalleDe(
     paciente: string
     motivo: string
     monto: number
+    arancel?: number
     fecha?: string
     obras?: string[]
   }[],
@@ -33,6 +34,13 @@ function detalleDe(
     mostrarPaciente: true,
     motivo: f.motivo,
     monto: f.monto,
+    // Sin arancel explícito, la base del % es el monto (como antes).
+    arancel: f.arancel ?? f.monto,
+    impBanco: 0,
+    impFactura: 0,
+    gastosAdm: 0,
+    totalCuidar: 0,
+    total: 0,
     obras: new Set(f.obras ?? []),
     cantidadPagos: 1,
   }))
@@ -289,7 +297,7 @@ describe('consolidarPorMedico', () => {
       { id: 'd1', nombre: 'A', paciente: 'P', motivo: 'Control', monto: 60000, obras: ['OS1'] },
     ])
     const [fila] = consolidarPorMedico(detalle, pct)
-    const porFila = detalle.map((f) => repartoDeFila(f.monto, f.obras, pct, 'OS1'))
+    const porFila = detalle.map((f) => repartoDeFila(f.arancel, f.obras, pct, 'OS1'))
     expect(porFila[0] + porFila[1]).toBeCloseTo(fila!.porObraSocial.get('OS1')!, 10)
     expect(fila!.repartido).toBeCloseTo(porFila[0] + porFila[1], 10)
     expect(fila!.total).toBeCloseTo(160000 - fila!.repartido, 10)
@@ -325,7 +333,7 @@ describe('invariante de totales entre RESUMEN y COMPLETO', () => {
    * (CABALLERO con 3 motivos, BUSTAMANTE y VELAZQUEZ con 2), que es el "19
    * motivos" del pie. Suma 3.447.000 en las dos vistas.
    */
-  const detalle: DistribucionFila[] = [
+  const detalle: DistribucionFila[] = ([
     { id: 'm01', nombre: 'Aguirre, Rafael', especialidad: 'Diabetología', paciente: 'P1', mostrarPaciente: true, motivo: 'Consulta', monto: 250000, obras: new Set(['OS1']), cantidadPagos: 1 },
     { id: 'm02', nombre: 'Bustamante, Jazmin Belen', especialidad: 'Psicología', paciente: 'P2', mostrarPaciente: true, motivo: 'Consulta', monto: 105000, obras: new Set(['OS1']), cantidadPagos: 1 },
     { id: 'm02', nombre: 'Bustamante, Jazmin Belen', especialidad: 'Psicología', paciente: 'Acosta, Arnaldo', mostrarPaciente: true, motivo: 'Ecografía', monto: 0, obras: new Set(['OS1']), cantidadPagos: 1 },
@@ -345,7 +353,15 @@ describe('invariante de totales entre RESUMEN y COMPLETO', () => {
     { id: 'm13', nombre: 'Velazquez, Roberto', especialidad: 'Clínica médica', paciente: 'P14', mostrarPaciente: true, motivo: 'Ecografía', monto: 55000, obras: new Set(['OS1']), cantidadPagos: 1 },
     { id: 'm14', nombre: 'Venezuelo, Evelin', especialidad: 'Psicopedagogía', paciente: 'P15', mostrarPaciente: true, motivo: 'Consulta', monto: 75000, obras: new Set(['OS1']), cantidadPagos: 1 },
     { id: 'm15', nombre: 'Vidondo, Matias', especialidad: 'Otorrinolaringología', paciente: 'P16', mostrarPaciente: true, motivo: 'Consulta', monto: 50000, obras: new Set(['OS1']), cantidadPagos: 1 },
-  ]
+  ] as Omit<DistribucionFila, 'arancel' | 'impBanco' | 'impFactura' | 'gastosAdm' | 'totalCuidar' | 'total'>[]).map((f) => ({
+    ...f,
+    arancel: f.monto,
+    impBanco: 0,
+    impFactura: 0,
+    gastosAdm: 0,
+    totalCuidar: 0,
+    total: 0,
+  }))
 
   it('la suma del detalle es 3.447.000', () => {
     expect(detalle.reduce((s, f) => s + f.monto, 0)).toBe(TOTAL_ESPERADO)
@@ -379,8 +395,8 @@ describe('invariante de totales entre RESUMEN y COMPLETO', () => {
     const resumen = consolidarPorMedico(detalle, pct)
     const desdeResumen = resumen.reduce((s, f) => s + f.total, 0)
     const desdeDetalle = detalle.reduce((s, f) => {
-      const repartido = [...f.obras].reduce((t, o) => t + repartoDeFila(f.monto, f.obras, pct, o), 0)
-      return s + (f.monto - repartido)
+      const repartido = [...f.obras].reduce((t, o) => t + repartoDeFila(f.arancel, f.obras, pct, o), 0)
+      return s + (f.arancel - repartido)
     }, 0)
     expect(desdeResumen).toBeCloseTo(desdeDetalle, 10)
   })
@@ -507,5 +523,18 @@ describe('buildDistribucionFilas (detalle)', () => {
 
   it('sin pagos devuelve una lista vacía', () => {
     expect(buildDistribucionFilas({ ...common, pagos: [] })).toEqual([])
+  })
+})
+describe('el % se calcula sobre el Arancel', () => {
+  it('repartoDeFila usa la base recibida (arancel), no el monto', () => {
+    const detalle = detalleDe([
+      { id: 'd1', nombre: 'A', paciente: 'P', motivo: 'Consulta', monto: 20000, arancel: 9000, obras: ['IPS'] },
+    ])
+    const pct = () => 30
+    expect(repartoDeFila(detalle[0]!.arancel, detalle[0]!.obras, pct, 'IPS')).toBe(2700)
+    const [fila] = consolidarPorMedico(detalle, pct)
+    expect(fila!.porObraSocial.get('IPS')).toBe(2700)
+    expect(fila!.arancel).toBe(9000)
+    expect(fila!.total).toBe(9000 - 2700)
   })
 })

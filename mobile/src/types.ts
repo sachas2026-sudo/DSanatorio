@@ -1,11 +1,26 @@
 export interface MedicoResumenItem {
-  id: string
+  id?: string
   nombre: string
   especialidad?: string
   pacientes: number
-  totalCobrado: number
-  totalCentro: number
-  totalMedico: number
+  monto?: number
+  totalCobrado?: number
+  totalCentro?: number
+  totalMedico?: number
+}
+
+export interface TurnosClasificacionItem {
+  obra_social: number
+  individual: number
+  familiar: number
+  plan_plus: number // legacy
+  particular: number
+}
+
+export interface TurnosClasificacion {
+  atendidos: TurnosClasificacionItem
+  pendientes: TurnosClasificacionItem
+  cancelados: TurnosClasificacionItem
 }
 
 export interface ResumenDiario {
@@ -25,6 +40,7 @@ export interface ResumenDiario {
   recaudacion_mary: number
   recaudacion_andrea: number
   medicos_detalle: MedicoResumenItem[]
+  turnos_clasificacion?: TurnosClasificacion
   ultima_actualizacion: string // ISO
   origen: string
 }
@@ -34,3 +50,11 @@ export interface SupabaseConfig {
   anonKey: string
 }
 
+export interface MedicoDirectorio {
+  medico_id: string
+  nombre: string
+  especialidad: string
+  porcentaje_medico: number
+  activo: boolean
+  ultima_actualizacion?: string
+}

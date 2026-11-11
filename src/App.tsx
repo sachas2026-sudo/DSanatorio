@@ -40,6 +40,11 @@ const MantenimientoPage = lazy(() =>
 const AfiliadosPage = lazy(() =>
   import('./modules/afiliados/pages/AfiliadosPage').then((m) => ({ default: m.AfiliadosPage })),
 )
+const PagosAfiliadosPage = lazy(() =>
+  import('./modules/afiliados/pages/PagosAfiliadosPage').then((m) => ({
+    default: m.PagosAfiliadosPage,
+  })),
+)
 
 /** Inicio: el afiliado no tiene dashboard, va directo a su módulo. */
 function IndexRoute() {
@@ -109,6 +114,14 @@ export default function App() {
               element={
                 <ProtectedRoute path="/afiliados">
                   <AfiliadosPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="pagos-afiliados"
+              element={
+                <ProtectedRoute path="/pagos-afiliados">
+                  <PagosAfiliadosPage />
                 </ProtectedRoute>
               }
             />

@@ -1,12 +1,18 @@
-import { useState, useRef, type FormEvent } from 'react'
+﻿import { useState, useRef, useEffect, type FormEvent } from 'react'
 import {
   getDefaultLoginUsername,
   getLoginUserOptions,
   formatLoginRateLimitMessage,
   type LoginAttemptResult,
+  isClientMode,
 } from '../../lib/auth'
 import { exitApp } from '../../lib/exitApp'
 import { APP_VERSION } from '../../lib/appVersion'
+import { autoConnectServer, setModeLocal } from '../../lib/appMode'
+import {
+  getNetworkConnectionStatus,
+  setManualServerUrl,
+} from '../../lib/networkDiscovery'
 import logoUrl from '../../assets/Logo.jpeg?url'
 import './login-screen.css'
 
@@ -23,8 +29,97 @@ export function LoginScreen({ onSuccess }: Props) {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [netMessage, setNetMessage] = useState<string | null>(null)
+  const [showNetModal, setShowNetModal] = useState(false)
   const userOptions = getLoginUserOptions()
   const userButtonRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  const [manualIp, setManualIp] = useState('')
+  const [manualStatus, setManualStatus] = useState<{ type: 'ok' | 'err' | 'connecting'; text: string } | null>(null)
+
+  useEffect(() => {
+    // Precargamos la última IP manual guardada en localStorage.
+    try {
+      const stored = window.localStorage.getItem('sanatorio.manualIp') ?? ''
+      if (stored.trim()) setManualIp(stored.trim())
+    } catch {
+      // localStorage no disponible o bloqueado; ignoramos.
+    }
+  }, [])
+
+  useEffect(() => {
+    // Determinamos si la PC actual es modo cliente (mostrar "Usar Servidor Local" solo en servidor)
+    isClientMode().then((client) => {
+      setIsClientMode(client)
+    }).catch(() => {
+      setIsClientMode(false) // Si falla, asumimos modo servidor para mostrar la opción
+    })
+  }, [])
+
+  async function handleManualConnect() {
+    const raw = manualIp.trim()
+    if (!raw) {
+      setManualStatus({ type: 'err', text: 'Ingresá la dirección IP del servidor.' })
+      return
+    }
+    const ipM = raw.match(
+      /^((?:https?:\/\/)?)((?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(?::([0-9]{1,5}))?$/)
+    if (!ipM) {
+      setManualStatus({ type: 'err', text: 'Formato inválido: IPv4 con opcional puerto.' })
+      return
+    }
+    const scheme = ipM[1] || 'https://'
+    const target = `${scheme}${ipM[2]}:${ipM[3] ?? '8787'}`
+    setManualStatus({ type: 'connecting', text: 'Conectando...' })
+    try {
+      await setManualServerUrl(target)
+      const info = await getNetworkConnectionStatus()
+      if (info.isOnline) {
+        // Guardamos la IP que respondió para precargarla luego.
+        try {
+          window.localStorage.setItem('sanatorio.manualIp', manualIp.trim())
+        } catch {
+          // localStorage no disponible; ignoramos.
+        }
+        setManualStatus({ type: 'ok', text: `Conectado en ${info.serverUrl ?? target}` })
+      } else {
+        setManualStatus({ type: 'err', text: `No respondió el servidor (${target})` })
+      }
+    } catch (e) {
+      setManualStatus({ type: 'err', text: typeof e === 'string' ? e : 'No se pudo conectar.' })
+    }
+  }
+
+  async function handleAutoConnect() {
+    setScanning(true)
+    setError(null)
+    setNetMessage('Buscando servidor en la red (Cable o Wi-Fi)...')
+    try {
+      const srv = await autoConnectServer()
+      setNetMessage(`¡Servidor conectado en ${srv.serverUrl}! Podés ingresar ahora.`)
+    } catch (e) {
+      setNetMessage(typeof e === 'string' ? e : 'No se encontró servidor en la red.')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  async function handleSetLocal() {
+    setScanning(true)
+    setError(null)
+    setNetMessage('Cambiando a modo Servidor Local...')
+    try {
+      await setModeLocal()
+      setIsClientMode(false)
+      setError(null)
+      setNetMessage('Esta PC quedó configurada como Servidor Local. Ingresá con tu contraseña.')
+    } catch (e) {
+      setNetMessage(typeof e === 'string' ? e : 'Error al cambiar modo.')
+    } finally {
+      setScanning(false)
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -128,6 +223,29 @@ export function LoginScreen({ onSuccess }: Props) {
           <p className="login-version">
             Versión instalada: <strong>v{APP_VERSION}</strong>
           </p>
+
+          <div style={{ marginTop: '10px' }}>
+            <button
+              type="button"
+              onClick={() => setShowNetModal(true)}
+              style={{
+                background: '#F0FDFA',
+                border: '1px solid #CCFBF1',
+                borderRadius: '8px',
+                color: '#0F766E',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 10px',
+              }}
+            >
+              <span>📶</span>
+              <span>Reconectar / Red WiFi</span>
+            </button>
+          </div>
         </div>
 
         {/* Columna derecha: formulario de contraseña y botones de acción */}
@@ -163,8 +281,68 @@ export function LoginScreen({ onSuccess }: Props) {
             </div>
 
             {error && (
-              <p className="login-error" role="alert">
-                {error}
+              <div>
+                <p className="login-error" role="alert" style={{ marginBottom: '8px' }}>
+                  {error}
+                </p>
+                {(error.toLowerCase().includes('servidor') ||
+                  error.toLowerCase().includes('request') ||
+                  error.toLowerCase().includes('url') ||
+                  error.toLowerCase().includes('conex')) && (
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => void handleSetLocal()}
+                      disabled={scanning}
+                      style={{
+                        background: '#0D766E',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '6px 12px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      💻 Usar Servidor Local (Esta PC)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleAutoConnect()}
+                      disabled={scanning}
+                      style={{
+                        background: '#2563EB',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '6px 12px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {scanning ? 'Buscando…' : '📡 Buscar Servidor en la red (Cable o Wi-Fi)'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {netMessage && (
+              <p
+                style={{
+                  fontSize: '0.82rem',
+                  color: '#0F766E',
+                  fontWeight: 700,
+                  background: '#F0FDFA',
+                  border: '1px solid #CCFBF1',
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  marginBottom: '10px',
+                }}
+              >
+                {netMessage}
               </p>
             )}
 
@@ -188,6 +366,174 @@ export function LoginScreen({ onSuccess }: Props) {
           </form>
         </div>
       </div>
+
+      {showNetModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px',
+          }}
+          onClick={() => setShowNetModal(false)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '14px',
+              padding: '24px',
+              maxWidth: '440px',
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.15)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>
+              Ajustes de Conexión de Red
+            </h2>
+            <p style={{ fontSize: '0.86rem', color: '#64748B', marginBottom: '16px' }}>
+              Elegí cómo debe conectarse este programa para evitar problemas de conexión:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSetLocal()
+                  setShowNetModal(false)
+                }}
+                disabled={scanning}
+                style={{
+                  textAlign: 'left',
+                  background: '#F0FDFA',
+                  border: '1.5px solid #0D766E',
+                  borderRadius: '10px',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontWeight: 800, color: '#0F766E', fontSize: '0.92rem' }}>
+                  💻 Modo Servidor Local (Esta PC)
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '3px' }}>
+                  Usar la base de datos de esta máquina directamente (ideal para la PC principal de Mesa de Entrada).
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  void handleAutoConnect()
+                  setShowNetModal(false)
+                }}
+                disabled={scanning}
+                style={{
+                  textAlign: 'left',
+                  background: '#EFF6FF',
+                  border: '1.5px solid #2563EB',
+                  borderRadius: '10px',
+                  padding: '12px 14px',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontWeight: 800, color: '#1E40AF', fontSize: '0.92rem' }}>
+                  📡 Buscar Servidor en la red (Cable o Wi-Fi)
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '3px' }}>
+                  Buscar automáticamente la PC Servidor encendida en la red local y reconectar.
+                </div>
+              </button>
+
+              {/* Tercera tarjeta: Conectar por IP manual */}
+              <div
+                className="modal-ip-card"
+                style={{
+                  textAlign: 'left',
+                  background: '#FFF7E6',
+                  border: '1.5px solid #F0A500',
+                  borderRadius: '10px',
+                  padding: '12px 14px',
+                }}
+              >
+                <div style={{ fontWeight: 800, color: '#C2410C', fontSize: '0.92rem' }}>
+                  🔧 Conectar por IP manual
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '3px' }}>
+                  Ingresar la dirección IP del servidor directamente (útil si la búsqueda automática no funciona).
+                </div>
+                <div
+                  style={{ display: 'flex', gap: '8px', marginTop: '10px', alignItems: 'center' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="text"
+                    className="modal-ip-input"
+                    value={manualIp}
+                    onChange={(e) => setManualIp(e.target.value)}
+                    placeholder="192.168.68.104:8787"
+                    style={{
+                      flex: 1,
+                      border: '1px solid #CBD5E1',
+                      borderRadius: '6px',
+                      padding: '6px 8px',
+                      fontFamily: 'Consolas, monospace',
+                      fontSize: '0.8rem',
+                      background: '#fff',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="modal-ip-btn"
+                    onClick={() => void handleManualConnect()}
+                    disabled={busy || manualStatus?.type === 'connecting' || !manualIp.trim()}
+                    style={{
+                      background: '#F0A500',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '6px 14px',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {manualStatus?.type === 'connecting' ? 'Conectando…' : 'Conectar'}
+                  </button>
+                </div>
+                {manualStatus && (
+                  <div
+                    className={`modal-ip-status modal-ip-status--${manualStatus.type}`}
+                    style={{ fontSize: '0.75rem', marginTop: '8px' }}
+                  >
+                    {manualStatus.text}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowNetModal(false)}
+              style={{
+                width: '100%',
+                padding: '10px',
+                borderRadius: '8px',
+                background: '#E2E8F0',
+                border: 'none',
+                color: '#334155',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -84,7 +84,6 @@ import {
   URGENCIA_DURACION_DEFAULT,
   URGENCIA_DURACION_OPCIONES,
   doctorDuracionTurno,
-  formatAgendaRanges,
   isDoctorAgendaMensual,
 } from '../lib/doctorAgenda'
 import {
@@ -1009,19 +1008,18 @@ export function AgendaPage() {
   const bookingScheduleHint = useMemo(() => {
     if (!bookingDate) return null
     if (!bookingDoctorId) {
-      return 'Seleccioná un médico para ver su horario'
+      return null
     }
     const doc = doctorById(bookingDoctorId)
     const plan = planDoctorDay(bookingDoctorId, bookingDate, data)
-    const mins = bookingDuracion || (doc ? doctorDuracionTurno(doc) : 30)
     if (plan.kind !== 'slots' || plan.ranges.length === 0) {
       if (isDoctorAgendaMensual(doc)) {
         return 'Sin atención configurada este día. Revisá la pestaña Atención mensual.'
       }
       return 'Sin franja horaria este día.'
     }
-    return `Turnos cada ${mins} min · Atiende ${formatAgendaRanges(plan.ranges)}`
-  }, [bookingDoctorId, bookingDate, bookingDuracion, data, doctorById])
+    return null
+  }, [bookingDoctorId, bookingDate, data, doctorById])
 
   const bookingDoctors = useMemo(() => {
     const list = !bookingDate
@@ -2837,7 +2835,7 @@ export function AgendaPage() {
                       <div className="booking-modal-col--left">
                         {/* 1. Selector Médico y aviso de agenda */}
                         <div className="booking-modal-row--medico">
-                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
+                          <div className="booking-field">
                             <label htmlFor="bk-doc">Médico</label>
                             <select
                               id="bk-doc"
@@ -2867,13 +2865,6 @@ export function AgendaPage() {
                               ))}
                             </select>
                           </div>
-                          {bookingScheduleHint ? (
-                            <div className="booking-schedule-badge">
-                              {bookingScheduleHint}
-                            </div>
-                          ) : (
-                            <div style={{ flex: 1, minWidth: 0 }} />
-                          )}
                         </div>
 
                         {bookingDoctors.length === 0 && (

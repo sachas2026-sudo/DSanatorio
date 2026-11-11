@@ -1,4 +1,4 @@
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{SocketAddr, UdpSocket, IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,6 @@ pub struct DiscoveryMessage {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct DiscoveredServer {
     pub ip: String,
     pub port: u16,
@@ -32,7 +31,6 @@ pub struct DiscoveredServer {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct NetworkStatusInfo {
     pub mode: String,
     pub is_online: bool,
@@ -95,7 +93,159 @@ pub fn start_udp_responder(server_name: String, cert_pem: String) {
         .ok();
 }
 
+/// Obtiene las interfaces IPv4 activas tanto cableadas (Ethernet) como inalámbricas (Wi-Fi).
+fn get_active_ipv4_interfaces() -> Vec<IpAddr> {
+    let mut interfaces: Vec<IpAddr> = Vec::new();
+
+    // 1. En Windows, consultar ipconfig para obtener todas las interfaces reales (Ethernet y Wi-Fi)
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        if let Ok(output) = Command::new("ipconfig")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                // Busca líneas con "IPv4" o "Direcci" (Dirección IPv4)
+                if line.contains("IPv4") || line.contains("Direcci") {
+                    if let Some(pos) = line.rfind(':') {
+                        let candidate = line[pos + 1..].trim();
+                        // Limpiar sufijos como "(Preferido)" o similares
+                        let clean_ip = candidate.split_whitespace().next().unwrap_or("");
+                        if let Ok(ip) = clean_ip.parse::<Ipv4Addr>() {
+                            let octets = ip.octets();
+                            // Filtrar loopback (127.x.x.x) y link-local APIPA (169.254.x.x)
+                            if octets[0] != 127 && !(octets[0] == 169 && octets[1] == 254) {
+                                let ip_addr = IpAddr::V4(ip);
+                                if !interfaces.contains(&ip_addr) {
+                                    interfaces.push(ip_addr);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback: conectar un socket UDP a un host externo para descubrir la interfaz default
+    if interfaces.is_empty() {
+        for target in &["8.8.8.8:80", "1.1.1.1:80", "192.168.1.1:80", "192.168.0.1:80"] {
+            if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+                if socket.connect(target).is_ok() {
+                    if let Ok(local) = socket.local_addr() {
+                        let ip = local.ip();
+                        if !ip.is_loopback() && !ip.is_unspecified() {
+                            if let IpAddr::V4(v4) = ip {
+                                let octets = v4.octets();
+                                if !(octets[0] == 169 && octets[1] == 254) && !interfaces.contains(&ip) {
+                                    interfaces.push(ip);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    interfaces
+}
+
+/// Calcula el broadcast address para una IP dada asumiendo máscara /24.
+fn calculate_broadcast(ip: IpAddr) -> Option<IpAddr> {
+    if let IpAddr::V4(ip_v4) = ip {
+        let octets = ip_v4.octets();
+        // Máscara /24: los primeros 3 octetos son la red, el último es el broadcast
+        let broadcast_ip = Ipv4Addr::new(octets[0], octets[1], octets[2], 255);
+        Some(IpAddr::V4(broadcast_ip))
+    } else {
+        None
+    }
+}
+
+/// Si el broadcast UDP no devolvió ningún servidor, escanea la subred /24 por TCP
+/// probando el puerto 8787 y el endpoint /api/health en paralelo.
+fn scan_subnets_health(interfaces: &[IpAddr]) -> Vec<DiscoveredServer> {
+    use std::net::TcpStream;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    let discovered = Arc::new(Mutex::new(Vec::new()));
+    let client = match reqwest::blocking::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_millis(700))
+        .build()
+    {
+        Ok(c) => Arc::new(c),
+        Err(_) => return Vec::new(),
+    };
+
+    for iface in interfaces {
+        if let IpAddr::V4(v4) = iface {
+            let octets = v4.octets();
+            let mut handles = Vec::new();
+            for last in 1..=254 {
+                if last == octets[3] {
+                    continue;
+                }
+                let target_ip = Ipv4Addr::new(octets[0], octets[1], octets[2], last);
+                let target_socket = SocketAddr::new(IpAddr::V4(target_ip), SERVER_PORT);
+                let disc = Arc::clone(&discovered);
+                let cli = Arc::clone(&client);
+
+                handles.push(thread::spawn(move || {
+                    if TcpStream::connect_timeout(&target_socket, Duration::from_millis(180)).is_ok() {
+                        let url = format!("https://{}:{SERVER_PORT}/api/health", target_ip);
+                        if let Ok(resp) = cli.get(&url).send() {
+                            if resp.status().is_success() {
+                                if let Ok(body) = resp.json::<serde_json::Value>() {
+                                    let is_sanatorio = body.get("app").and_then(|v| v.as_str()) == Some("sanatorio")
+                                        || body.get("status").and_then(|v| v.as_str()) == Some("ok");
+                                    if is_sanatorio {
+                                        let name = body.get("server_name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("Servidor Sanatorio")
+                                            .to_string();
+                                        let server_url = format!("https://{}:{SERVER_PORT}", target_ip);
+                                        let mut guard = disc.lock().unwrap();
+                                        guard.push(DiscoveredServer {
+                                            ip: target_ip.to_string(),
+                                            port: SERVER_PORT,
+                                            server_name: name,
+                                            server_url,
+                                            cert_pem: None,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }));
+
+                if handles.len() >= 64 {
+                    for h in handles.drain(..) {
+                        let _ = h.join();
+                    }
+                }
+            }
+            for h in handles {
+                let _ = h.join();
+            }
+        }
+    }
+
+    let result = discovered.lock().unwrap().clone();
+    result
+}
+
 /// Envía broadcast UDP en la red local buscando el servidor Sanatorio.
+/// Usa broadcast dinámico por cada interfaz IPv4 activa, además de 255.255.255.255.
+/// Incluye health check de respaldo por subred /24.
 pub fn discover_servers(timeout_ms: u64) -> Result<Vec<DiscoveredServer>, String> {
     let socket = UdpSocket::bind("0.0.0.0:0")
         .map_err(|e| format!("Error creando socket UDP discovery: {e}"))?;
@@ -103,7 +253,7 @@ pub fn discover_servers(timeout_ms: u64) -> Result<Vec<DiscoveredServer>, String
         .set_broadcast(true)
         .map_err(|e| format!("Error habilitando broadcast: {e}"))?;
     socket
-        .set_read_timeout(Some(Duration::from_millis(150)))
+        .set_read_timeout(Some(Duration::from_millis(300)))
         .map_err(|e| format!("Error seteando timeout: {e}"))?;
 
     let req = DiscoveryMessage {
@@ -115,13 +265,19 @@ pub fn discover_servers(timeout_ms: u64) -> Result<Vec<DiscoveredServer>, String
     let req_bytes = serde_json::to_vec(&req)
         .map_err(|e| format!("Error serializando request: {e}"))?;
 
-    let broadcast_addrs = [
-        format!("255.255.255.255:{DISCOVERY_PORT}"),
-        format!("192.168.1.255:{DISCOVERY_PORT}"),
-        format!("192.168.0.255:{DISCOVERY_PORT}"),
-        format!("192.168.100.255:{DISCOVERY_PORT}"),
-        format!("127.0.0.1:{DISCOVERY_PORT}"),
-    ];
+    let mut found_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut found: Vec<DiscoveredServer> = Vec::new();
+
+    // 1. Broadcast dinámico por cada interfaz IPv4 activa (Ethernet y Wi-Fi)
+    let active_ips = get_active_ipv4_interfaces();
+    let mut broadcast_addrs = Vec::new();
+
+    for ip in &active_ips {
+        if let Some(broadcast) = calculate_broadcast(*ip) {
+            broadcast_addrs.push(format!("{}:{DISCOVERY_PORT}", broadcast));
+        }
+    }
+    broadcast_addrs.push(format!("255.255.255.255:{DISCOVERY_PORT}"));
 
     for addr_str in &broadcast_addrs {
         if let Ok(addr) = addr_str.parse::<SocketAddr>() {
@@ -129,8 +285,8 @@ pub fn discover_servers(timeout_ms: u64) -> Result<Vec<DiscoveredServer>, String
         }
     }
 
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(600));
-    let mut found = Vec::new();
+    // 2. Esperar respuestas con timeout
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(1200));
     let mut buf = [0u8; 4096];
 
     while Instant::now() < deadline {
@@ -144,7 +300,8 @@ pub fn discover_servers(timeout_ms: u64) -> Result<Vec<DiscoveredServer>, String
                             .server_name
                             .unwrap_or_else(|| "Sanatorio Server".to_string());
                         let url = format!("https://{}:{}", ip, port);
-                        if !found.iter().any(|s: &DiscoveredServer| s.server_url == url) {
+                        if !found_set.contains(&url) && !found.iter().any(|s| s.server_url == url) {
+                            found_set.insert(url.clone());
                             found.push(DiscoveredServer {
                                 ip,
                                 port,
@@ -156,21 +313,45 @@ pub fn discover_servers(timeout_ms: u64) -> Result<Vec<DiscoveredServer>, String
                     }
                 }
             }
-            Err(_) => {}
+            Err(_) => break,
         }
     }
 
-    Ok(found)
+    // 3. Si por broadcast UDP no encontramos nada (ej. router bloquea broadcast UDP),
+    // hacer barrido TCP en las subredes de las interfaces activas
+    if found.is_empty() {
+        let tcp_servers = scan_subnets_health(&active_ips);
+        for s in tcp_servers {
+            if !found_set.contains(&s.server_url) {
+                found_set.insert(s.server_url.clone());
+                found.push(s);
+            }
+        }
+    }
+
+    // Eliminar duplicados manteniendo orden
+    let mut found_unique: Vec<DiscoveredServer> = Vec::new();
+    for s in &found {
+        if !found_unique.iter().any(|f| f.server_url == s.server_url) {
+            found_unique.push(s.clone());
+        }
+    }
+
+    Ok(found_unique)
 }
 
+/// Descubre servidores Sanatorio en la red local.
+/// El timeout por defecto es de 3000ms con 2 rondas de descubrimiento.
 #[tauri::command]
 pub fn discover_sanatorio_servers(timeout_ms: Option<u64>) -> Result<Vec<DiscoveredServer>, String> {
-    discover_servers(timeout_ms.unwrap_or(1200))
+    let timeout = timeout_ms.unwrap_or(3000);
+    discover_servers(timeout)
 }
 
+/// Intenta conectar automáticamente al servidor Sanatorio de la red.
 #[tauri::command]
 pub async fn auto_connect_sanatorio_server() -> Result<DiscoveredServer, String> {
-    let servers = discover_servers(1500)?;
+    let servers = discover_servers(3000)?;
     let first = servers.into_iter().next().ok_or_else(|| {
         "No se encontró ningún servidor Sanatorio en la red local. Asegurate de que la PC Servidor esté encendida con el programa abierto.".to_string()
     })?;
@@ -182,13 +363,14 @@ pub async fn auto_connect_sanatorio_server() -> Result<DiscoveredServer, String>
     });
     cfg.mode = AppMode::Client;
     cfg.server_url = Some(first.server_url.clone());
-    cfg.server_cert_pem = first.cert_pem.clone().or_else(|| Some("auto".to_string()));
+    cfg.server_cert_pem = Some("auto".to_string());
     client_mode::save_config(&cfg)?;
     client_mode::set_runtime_mode(AppMode::Client);
 
     Ok(first)
 }
 
+/// Devuelve el estado de la conexión de red.
 #[tauri::command]
 pub async fn get_network_connection_status() -> Result<NetworkStatusInfo, String> {
     let cfg = client_mode::load_config().unwrap_or(ClientConfig {
@@ -198,10 +380,17 @@ pub async fn get_network_connection_status() -> Result<NetworkStatusInfo, String
     });
 
     if cfg.mode == AppMode::Local {
+        let lan_ip = UdpSocket::bind("0.0.0.0:0")
+            .and_then(|s| {
+                s.connect("8.8.8.8:80").ok();
+                s.local_addr()
+            })
+            .map(|addr| addr.ip().to_string())
+            .unwrap_or_else(|_| "127.0.0.1".to_string());
         return Ok(NetworkStatusInfo {
             mode: "local".to_string(),
             is_online: true,
-            server_url: Some(format!("https://127.0.0.1:{SERVER_PORT}")),
+            server_url: Some(format!("https://{lan_ip}:{SERVER_PORT}")),
             server_name: "Servidor local (activo)".to_string(),
             is_server_host: true,
             message: "Esta PC actúa como Servidor principal en la red.".to_string(),
@@ -213,11 +402,11 @@ pub async fn get_network_connection_status() -> Result<NetworkStatusInfo, String
         Some(u) if !u.trim().is_empty() => u.clone(),
         _ => {
             // Intentar descubrimiento automático si no hay URL configurada
-            if let Ok(servers) = discover_servers(800) {
+            if let Ok(servers) = discover_servers(3000) {
                 if let Some(srv) = servers.into_iter().next() {
                     let mut updated = cfg.clone();
                     updated.server_url = Some(srv.server_url.clone());
-                    updated.server_cert_pem = srv.cert_pem.clone().or_else(|| Some("auto".to_string()));
+                    updated.server_cert_pem = Some("auto".to_string());
                     let _ = client_mode::save_config(&updated);
                     return Ok(NetworkStatusInfo {
                         mode: "client".to_string(),
@@ -262,7 +451,7 @@ pub async fn get_network_connection_status() -> Result<NetworkStatusInfo, String
                 if srv.server_url != url {
                     let mut updated = cfg.clone();
                     updated.server_url = Some(srv.server_url.clone());
-                    updated.server_cert_pem = srv.cert_pem.clone().or_else(|| Some("auto".to_string()));
+                    updated.server_cert_pem = Some("auto".to_string());
                     let _ = client_mode::save_config(&updated);
                     return Ok(NetworkStatusInfo {
                         mode: "client".to_string(),
@@ -291,6 +480,7 @@ pub async fn get_network_connection_status() -> Result<NetworkStatusInfo, String
     })
 }
 
+/// Establece la URL manual del servidor.
 #[tauri::command]
 pub fn set_manual_server_url(url: String) -> Result<(), String> {
     let clean = url.trim().trim_end_matches('/').to_string();
@@ -309,5 +499,18 @@ pub fn set_manual_server_url(url: String) -> Result<(), String> {
     }
     client_mode::save_config(&cfg)?;
     client_mode::set_runtime_mode(AppMode::Client);
+    Ok(())
+}
+
+/// Cambia la aplicación al modo servidor local.
+#[tauri::command]
+pub fn set_mode_local() -> Result<(), String> {
+    let cfg = ClientConfig {
+        mode: AppMode::Local,
+        server_url: None,
+        server_cert_pem: None,
+    };
+    client_mode::save_config(&cfg)?;
+    client_mode::set_runtime_mode(AppMode::Local);
     Ok(())
 }

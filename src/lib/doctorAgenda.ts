@@ -571,7 +571,7 @@ export type MedicoEspecialidadListRow = {
 
 function doctorObrasSocialesLista(doctor: Doctor): string[] {
   return (doctor.obrasSociales?.length
-    ? doctor.obrasSociales
+    ? doctor.obrasSociales.map((x) => (typeof x === 'string' ? x : x.nombre))
     : doctor.obraSocial
       ? [doctor.obraSocial]
       : []

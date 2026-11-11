@@ -1,0 +1,192 @@
+    Checking app v18.0.0 (D:\Proyectos\Sanatorio\src-tauri)
+warning: unused import: `std::path::Path`
+ --> src\server.rs:3:5
+  |
+3 | use std::path::Path;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `rcgen::generate_simple_self_signed`
+  --> src\server.rs:18:5
+   |
+18 | use rcgen::generate_simple_self_signed;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+   --> src\client_commands.rs:61:9
+    |
+ 61 |           /// Paso 1: Si hay URL configurada, hacer health check antes de usarla.
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 62 | /         if base_url_opt.is_some() {
+ 63 | |             let base = base_url_opt.as_ref().unwrap().clone();
+ 64 | |             let pem_for_check = pem_opt.as_deref().unwrap_or("auto").to_string();
+ 65 | |             let client_for_check = build_http_client(&pem_for_check).unwrap();
+...   |
+110 | |         }
+    | |_________- rustdoc does not generate documentation for expressions
+    |
+    = help: use `//` for a plain comment
+    = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1071:17
+     |
+1071 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1097:17
+     |
+1097 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1175:17
+     |
+1175 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1200:17
+     |
+1200 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1237:17
+     |
+1237 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1262:17
+     |
+1262 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1300:17
+     |
+1300 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1325:17
+     |
+1325 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1362:17
+     |
+1362 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1387:17
+     |
+1387 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1425:17
+     |
+1425 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1450:17
+     |
+1450 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+error[E0308]: mismatched types
+   --> src\client_commands.rs:151:33
+    |
+151 |   ...                   let (info2, active_client2) = self
+    |  ___________________________^^^^^^^^^^^^^^^^^^^^^^^___-
+    | |                           |
+    | |                           expected `SessionInfo`, found `(_, _)`
+152 | | ...                       .session
+153 | | ...                       .login(&new_client, &new_base, username, password)
+154 | | ...                       .await
+155 | | ...                       .map_err(|e2| format!("No se pudo conectar con el servidor: {e2}"))?;
+    | |______________________________________________________________________________________________- this expression has type `SessionInfo`
+    |
+    = note: expected struct `SessionInfo`
+                found tuple `(_, _)`
+
+warning: unused variable: `state`
+   --> src\server.rs:421:30
+    |
+421 | async fn check_write_enabled(state: &AppState) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
+    |                              ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1096:33
+     |
+1096 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1199:33
+     |
+1199 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1261:33
+     |
+1261 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1324:33
+     |
+1324 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1386:33
+     |
+1386 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1449:33
+     |
+1449 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+For more information about this error, try `rustc --explain E0308`.
+warning: `app` (lib) generated 22 warnings
+error: could not compile `app` (lib) due to 1 previous error; 22 warnings emitted

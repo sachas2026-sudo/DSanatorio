@@ -30,7 +30,7 @@ import {
   canViewDoctorPorcentaje,
   EXPORT_DENIED_MESSAGE,
 } from '../../../lib/exportPermissions'
-import type { Doctor } from '../../../types'
+import type { Doctor, DoctorObraSocial } from '../../../types'
 import type jsPDF from 'jspdf'
 import '../../../shared/styles/pages.css'
 import '../../pacientes/pages/PacientesModern.css'
@@ -43,9 +43,36 @@ import {
   parsePorcentajeInput,
   sanitizePorcentajeInput,
 } from '../../../lib/porcentajeInput'
+import {
+  formatMoneyDisplay,
+  parseMoneyInput,
+  sanitizeMoneyTyping,
+} from '../../../lib/moneyFormat'
+import {
+  calculateTotalParticular,
+  formatTotalParticularDisplay,
+  formatThousands,
+  parseThousands,
+  validateDoctorForm,
+  getDoctorInitials,
+  hasFormChanges,
+} from '../lib/registroProfesionalLogic'
 
-type MedicoFormState = Omit<Doctor, 'id' | 'porcentaje'> & {
+export interface MedicoObraSocialFormItem {
+  nombre: string
   porcentaje: string
+  monto: string
+}
+
+type MedicoFormState = Omit<
+  Doctor,
+  'id' | 'porcentaje' | 'valor' | 'particular' | 'cuidar' | 'obrasSociales'
+> & {
+  porcentaje: string
+  valor: string
+  particular: string
+  cuidar: string
+  obrasSociales: MedicoObraSocialFormItem[]
 }
 
 const emptyForm: MedicoFormState = {
@@ -61,6 +88,9 @@ const emptyForm: MedicoFormState = {
   email: '',
   alias: '',
   porcentaje: '',
+  valor: '',
+  particular: '',
+  cuidar: '',
 }
 
 export function MedicosPage() {
@@ -88,6 +118,9 @@ export function MedicosPage() {
   const puedeExportPdf = canExportMedicosListado(role)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [initialForm, setInitialForm] = useState(emptyForm)
+  const [validationErrors, setValidationErrors] = useState<Record<string, boolean | undefined>>({})
+  const [validationMsg, setValidationMsg] = useState<string | null>(null)
   const [espModalOpen, setEspModalOpen] = useState(false)
   const [osModalOpen, setOsModalOpen] = useState(false)
   const [locModalOpen, setLocModalOpen] = useState(false)
@@ -105,9 +138,16 @@ export function MedicosPage() {
   } | null>(null)
   const [exportingExcel, setExportingExcel] = useState(false)
 
+  const hasChanges = useMemo(() => {
+    return hasFormChanges(initialForm, form)
+  }, [initialForm, form])
+
   function startNew() {
     setEditingId(null)
     setForm(emptyForm)
+    setInitialForm(emptyForm)
+    setValidationErrors({})
+    setValidationMsg(null)
     setDniMsg(null)
     setFormOpen(true)
     requestAnimationFrame(() => apellidoRef.current?.focus())
@@ -116,21 +156,45 @@ export function MedicosPage() {
   function startEdit(d: Doctor) {
     setEditingId(d.id)
     setFormOpen(true)
-    setForm({
+    const obrasSociales: MedicoObraSocialFormItem[] = (
+      d.obrasSociales ??
+      (d.obraSocial
+        ? [{ nombre: d.obraSocial, porcentaje: 0, monto: 0 }]
+        : [])
+    ).map((os) => ({
+      nombre: typeof os === 'string' ? os : os.nombre,
+      porcentaje:
+        typeof os === 'object' && os.porcentaje != null && os.porcentaje > 0
+          ? String(os.porcentaje)
+          : '0',
+      monto:
+        typeof os === 'object' && os.monto != null && os.monto > 0
+          ? formatMoneyDisplay(os.monto)
+          : '',
+    }))
+
+    const initialData: MedicoFormState = {
       nombre: d.nombre,
       apellido: d.apellido,
       dni: d.dni ?? '',
       matricula: d.matricula,
       especialidad: d.especialidad,
       obraSocial: '',
-      obrasSociales:
-        d.obrasSociales ?? (d.obraSocial ? [d.obraSocial] : []),
+      obrasSociales,
       telefono: d.telefono,
       localidad: d.localidad ?? '',
       email: d.email,
       alias: d.alias ?? '',
       porcentaje: formatPorcentajeInput(d.porcentaje),
-    })
+      valor: d.valor != null && d.valor > 0 ? formatMoneyDisplay(d.valor) : '',
+      particular: d.particular != null && d.particular > 0 ? formatMoneyDisplay(d.particular) : '',
+      cuidar: d.cuidar != null && d.cuidar > 0 ? formatMoneyDisplay(d.cuidar) : '',
+    }
+
+    setForm(initialData)
+    setInitialForm(initialData)
+    setValidationErrors({})
+    setValidationMsg(null)
     setDniMsg(null)
   }
 
@@ -138,6 +202,9 @@ export function MedicosPage() {
     setFormOpen(false)
     setEditingId(null)
     setForm(emptyForm)
+    setInitialForm(emptyForm)
+    setValidationErrors({})
+    setValidationMsg(null)
     setDniMsg(null)
   }
 
@@ -207,30 +274,72 @@ export function MedicosPage() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.nombre.trim() || !form.apellido.trim()) return
+
+    const valResult = validateDoctorForm({
+      apellido: form.apellido,
+      nombre: form.nombre,
+      dni: form.dni,
+      especialidad: form.especialidad,
+      telefono: form.telefono,
+      email: form.email,
+    })
+
+    if (!valResult.isValid) {
+      setValidationErrors(valResult.errors)
+      setValidationMsg(valResult.summaryMessage || 'Revisá los campos marcados en rojo')
+      return
+    }
+
     const dniNorm = String(form.dni ?? '').trim()
     if (dniNorm) {
       const dup = data.doctors.find(
         (d) => (d.dni ?? '').trim() === dniNorm && d.id !== editingId,
       )
       if (dup) {
+        setValidationErrors((prev) => ({ ...prev, dni: true }))
         setDniMsg(
           dniMedDuplicadoMsg(dup.apellido, dup.nombre, true),
         )
+        setValidationMsg('Revisá los campos marcados en rojo')
         return
       }
     }
     setDniMsg(null)
+    setValidationErrors({})
+    setValidationMsg(null)
     const porcentaje = puedeVerPorcentaje
       ? parsePorcentajeInput(form.porcentaje)
       : editingId
         ? data.doctors.find((d) => d.id === editingId)?.porcentaje
         : undefined
+    const deduplicatedOs: DoctorObraSocial[] = []
+    const seenOs = new Set<string>()
+    for (const item of form.obrasSociales ?? []) {
+      const nombre = item.nombre.trim()
+      if (!nombre) continue
+      const k = nombre.toLowerCase()
+      if (seenOs.has(k)) continue
+      seenOs.add(k)
+      const rawPct = parseFloat(item.porcentaje.replace(',', '.'))
+      const pct = isNaN(rawPct)
+        ? 0
+        : Math.max(0, Math.min(100, Math.round(rawPct * 10) / 10))
+      const monto = parseMoneyInput(item.monto)
+      deduplicatedOs.push({
+        nombre,
+        porcentaje: pct,
+        monto,
+      })
+    }
+
     upsertDoctor({
       ...form,
       alias: form.alias?.trim() || undefined,
-      obrasSociales: (form.obrasSociales ?? []).map((x) => x.trim()).filter(Boolean),
+      obrasSociales: deduplicatedOs,
       porcentaje,
+      valor: parseMoneyInput(form.valor),
+      particular: parseMoneyInput(form.particular),
+      cuidar: parseMoneyInput(form.cuidar),
       id: editingId ?? undefined,
     })
     closeForm()
@@ -411,301 +520,535 @@ export function MedicosPage() {
 
       {formOpen && (
         <div className="pac-modal-overlay" onClick={closeForm}>
-          <div className="pac-modal pac-modal--doctor" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="pac-modal pac-modal--doctor"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {/* Encabezado */}
             <div className="pac-modal__header">
               <div className="pac-modal__header-left">
-                <div className="pac-modal__icon"><IconTileMedicos /></div>
+                <div className="doctor-avatar-initials">
+                  {getDoctorInitials(form.apellido, form.nombre)}
+                </div>
                 <div>
                   <p className="pac-modal__kicker">REGISTRO PROFESIONAL</p>
-                  <h2 className="pac-modal__title">
-                    {editingId ? `${form.apellido}, ${form.nombre}` : 'Nuevo médico'}
-                  </h2>
-                </div>
-              </div>
-              <button type="button" className="pac-modal__close" onClick={closeForm} aria-label="Cerrar">
-                &times;
-              </button>
-            </div>
-            <form onSubmit={submit} className="pac-modal__form">
-              <div className="pac-modal__body medicos-modern-form">
-          {dniMsg && <div className="msg msg-error">{dniMsg}</div>}
-          <div className="form-grid form-grid--medico-top">
-            <div className="field">
-              <label htmlFor="m-apellido">Apellido</label>
-              <input
-                id="m-apellido"
-                ref={apellidoRef}
-                value={form.apellido}
-                onChange={(e) => setForm((f) => ({ ...f, apellido: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="m-nombre">Nombre</label>
-              <input
-                id="m-nombre"
-                value={form.nombre}
-                onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="field field--pill field--medico-dni">
-              <label htmlFor="m-dni">{DNI_MED_LABEL}</label>
-              <div className="pill-input">
-                <input
-                  id="m-dni"
-                  value={form.dni}
-                  onChange={(e) => {
-                    setForm((f) => ({ ...f, dni: e.target.value }))
-                    if (dniMsg) setDniMsg(null)
-                  }}
-                  onBlur={() => {
-                    const dniNorm = String(form.dni ?? '').trim()
-                    if (!dniNorm) return
-                    const dup = data.doctors.find(
-                      (d) => (d.dni ?? '').trim() === dniNorm && d.id !== editingId,
-                    )
-                    if (dup) {
-                      setDniMsg(
-                        dniMedDuplicadoMsg(dup.apellido, dup.nombre),
-                      )
-                    }
-                  }}
-                />
-              </div>
-            </div>
-            <div className="field field--matricula">
-              <label htmlFor="m-mat">Matrícula</label>
-              <input
-                id="m-mat"
-                value={form.matricula}
-                onChange={(e) => setForm((f) => ({ ...f, matricula: e.target.value }))}
-              />
-            </div>
-            <div className="field field--pill field--esp-abm">
-              <label htmlFor="m-esp">Especialidad</label>
-              <div className="esp-select-row">
-                <div className="pill-select">
-                  <select
-                    id="m-esp"
-                    value={form.especialidad}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, especialidad: e.target.value }))
-                    }
-                  >
-                    <option value="">— Seleccionar —</option>
-                    {especialidadesOpciones.map((esp) => (
-                      <option key={esp} value={esp}>
-                        {esp}
-                      </option>
-                    ))}
-                    {form.especialidad &&
-                      !especialidadesOpciones.includes(form.especialidad) && (
-                        <option value={form.especialidad}>
-                          {form.especialidad}
-                        </option>
-                      )}
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  className="btn-abm btn-abm--inline"
-                  aria-label="Gestionar especialidades"
-                  title="Gestionar especialidades"
-                  onClick={() => setEspModalOpen(true)}
-                >
-                  <IconList />
-                </button>
-              </div>
-            </div>
-            {/* chips se muestran dentro de "Obras sociales" debajo de Teléfono */}
-          </div>
-          <div className="form-grid form-grid--medico-contact">
-            <div className="field field--pill field--os-abm">
-              <label htmlFor="m-loc">Localidad</label>
-              <div className="esp-select-row">
-                <div className="pill-select">
-                  <select
-                    id="m-loc"
-                    value={form.localidad}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, localidad: e.target.value }))
-                    }
-                  >
-                    <option value="">— Seleccionar —</option>
-                    {localidadesOpciones.map((l) => (
-                      <option key={l} value={l}>
-                        {l}
-                      </option>
-                    ))}
-                    {form.localidad &&
-                      !localidadesOpciones.includes(form.localidad) && (
-                        <option value={form.localidad}>{form.localidad}</option>
-                      )}
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  className="btn-abm btn-abm--inline"
-                  aria-label="Gestionar localidades"
-                  title="Gestionar localidades"
-                  onClick={() => setLocModalOpen(true)}
-                >
-                  <IconList />
-                </button>
-              </div>
-            </div>
-            <div className="field field--medico-email">
-              <label htmlFor="m-mail">Email</label>
-              <input
-                id="m-mail"
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-              />
-            </div>
-            <div className="field field--medico-tel">
-              <label htmlFor="m-tel">Teléfono</label>
-              <input
-                id="m-tel"
-                value={form.telefono}
-                onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
-              />
-            </div>
-            <div className="field field--medico-alias">
-              <label htmlFor="m-alias">Alias</label>
-              <input
-                id="m-alias"
-                value={form.alias ?? ''}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, alias: e.target.value }))
-                }
-                placeholder="Opcional"
-                maxLength={24}
-              />
-            </div>
-            {puedeVerPorcentaje && (
-            <div className="field field--medico-porcentaje">
-              <label htmlFor="m-pct">Porcentaje</label>
-              <input
-                id="m-pct"
-                type="text"
-                inputMode="decimal"
-                maxLength={6}
-                placeholder="0"
-                value={form.porcentaje}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    porcentaje: sanitizePorcentajeInput(e.target.value),
-                  }))
-                }
-              />
-            </div>
-            )}
-          </div>
-          <div className="field field--pill field--obra-medico">
-            <label htmlFor="m-obra">Obras sociales</label>
-            <div className="esp-select-row obras-sociales-row">
-              <div className="pill-select">
-                <select
-                  id="m-obra"
-                  value={form.obraSocial ?? ''}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      obraSocial: normalizeObraSocial(e.target.value),
-                    }))
-                  }
-                >
-                  <option value="">—</option>
-                  {obrasSocialesOpciones.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                  {form.obraSocial &&
-                    !obrasSocialesOpciones.includes(form.obraSocial) && (
-                      <option value={form.obraSocial}>{form.obraSocial}</option>
+                  <div className="doctor-header-title-row">
+                    <h2 className="pac-modal__title">
+                      {form.apellido.trim() || form.nombre.trim()
+                        ? `${form.apellido}, ${form.nombre}`.toUpperCase()
+                        : (editingId ? 'MÉDICO' : 'NUEVO MÉDICO')}
+                    </h2>
+                    {currentEditingDoctor?.activo === false && (
+                      <span className="doctor-badge doctor-badge--suspendido">
+                        Suspendido
+                      </span>
                     )}
-                </select>
+                    {hasChanges && (
+                      <span className="doctor-badge doctor-badge--dirty">
+                        ● Cambios sin guardar
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
               <button
                 type="button"
-                className="btn btn-ghost"
-                disabled={!form.obraSocial}
-                onClick={() => {
-                  const v = normalizeObraSocial(form.obraSocial ?? '')
-                  if (!v) return
-                  setForm((f) => ({
-                    ...f,
-                    obrasSociales: f.obrasSociales?.includes(v)
-                      ? f.obrasSociales
-                      : [...(f.obrasSociales ?? []), v],
-                    obraSocial: '',
-                  }))
-                }}
-                title="Agregar a la lista"
+                className="pac-modal__close"
+                onClick={closeForm}
+                aria-label="Cerrar"
               >
-                Agregar
+                &times;
               </button>
-              <div className="obras-sociales-row__tail">
-                <button
-                  type="button"
-                  className="btn-abm btn-abm--inline"
-                  aria-label="Gestionar obras sociales"
-                  title="Gestionar obras sociales"
-                  onClick={() => setOsModalOpen(true)}
-                >
-                  <IconList />
-                </button>
-                {form.obrasSociales && form.obrasSociales.length > 0 && (
-                  <div className="chip-row chip-row--inline">
-                    {form.obrasSociales.map((o) => (
-                      <button
-                        key={o}
-                        type="button"
-                        className="chip"
-                        title="Quitar"
-                        onClick={() =>
-                          setForm((f) => ({
-                            ...f,
-                            obrasSociales: (f.obrasSociales ?? []).filter((x) => x !== o),
-                          }))
-                        }
-                      >
-                        {o} <span aria-hidden>×</span>
-                      </button>
-                    ))}
+            </div>
+
+            <form onSubmit={submit} className="pac-modal__form">
+              <div className="pac-modal__body doctor-modal-body">
+                {(validationMsg || dniMsg) && (
+                  <div className="msg msg-error">
+                    {dniMsg || validationMsg}
                   </div>
                 )}
+
+                {/* 1. DATOS PERSONALES */}
+                <div className="doctor-card doctor-card--datos">
+                  <h3 className="doctor-card__title">DATOS PERSONALES</h3>
+                  <div className="doctor-card__grid">
+                    <div className="doctor-field">
+                      <label htmlFor="m-apellido">Apellido</label>
+                      <input
+                        id="m-apellido"
+                        ref={apellidoRef}
+                        value={form.apellido}
+                        className={validationErrors.apellido ? 'is-invalid' : ''}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, apellido: e.target.value }))
+                          if (validationErrors.apellido) {
+                            setValidationErrors((prev) => ({ ...prev, apellido: false }))
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-nombre">Nombre</label>
+                      <input
+                        id="m-nombre"
+                        value={form.nombre}
+                        className={validationErrors.nombre ? 'is-invalid' : ''}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, nombre: e.target.value }))
+                          if (validationErrors.nombre) {
+                            setValidationErrors((prev) => ({ ...prev, nombre: false }))
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-dni">{DNI_MED_LABEL}</label>
+                      <input
+                        id="m-dni"
+                        value={form.dni}
+                        className={validationErrors.dni ? 'is-invalid' : ''}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, dni: e.target.value }))
+                          if (validationErrors.dni) {
+                            setValidationErrors((prev) => ({ ...prev, dni: false }))
+                          }
+                          if (dniMsg) setDniMsg(null)
+                        }}
+                        onBlur={() => {
+                          const dniNorm = String(form.dni ?? '').trim()
+                          if (!dniNorm) return
+                          const dup = data.doctors.find(
+                            (d) => (d.dni ?? '').trim() === dniNorm && d.id !== editingId,
+                          )
+                          if (dup) {
+                            setDniMsg(dniMedDuplicadoMsg(dup.apellido, dup.nombre))
+                            setValidationErrors((prev) => ({ ...prev, dni: true }))
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-mat">Matrícula</label>
+                      <input
+                        id="m-mat"
+                        value={form.matricula}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, matricula: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-esp">Especialidad</label>
+                      <div className="doctor-input-with-button">
+                        <select
+                          id="m-esp"
+                          value={form.especialidad}
+                          className={validationErrors.especialidad ? 'is-invalid' : ''}
+                          onChange={(e) => {
+                            setForm((f) => ({ ...f, especialidad: e.target.value }))
+                            if (validationErrors.especialidad) {
+                              setValidationErrors((prev) => ({ ...prev, especialidad: false }))
+                            }
+                          }}
+                        >
+                          <option value="">— Seleccionar —</option>
+                          {especialidadesOpciones.map((esp) => (
+                            <option key={esp} value={esp}>
+                              {esp}
+                            </option>
+                          ))}
+                          {form.especialidad &&
+                            !especialidadesOpciones.includes(form.especialidad) && (
+                              <option value={form.especialidad}>
+                                {form.especialidad}
+                              </option>
+                            )}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn-list-square"
+                          aria-label="Gestionar especialidades"
+                          title="Gestionar especialidades"
+                          onClick={() => setEspModalOpen(true)}
+                        >
+                          <IconList />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. CONTACTO */}
+                <div className="doctor-card doctor-card--contacto">
+                  <h3 className="doctor-card__title">CONTACTO</h3>
+                  <div className="doctor-card__grid">
+                    <div className="doctor-field">
+                      <label htmlFor="m-loc">Localidad</label>
+                      <div className="doctor-input-with-button">
+                        <select
+                          id="m-loc"
+                          value={form.localidad}
+                          onChange={(e) =>
+                            setForm((f) => ({ ...f, localidad: e.target.value }))
+                          }
+                        >
+                          <option value="">— Seleccionar —</option>
+                          {localidadesOpciones.map((l) => (
+                            <option key={l} value={l}>
+                              {l}
+                            </option>
+                          ))}
+                          {form.localidad &&
+                            !localidadesOpciones.includes(form.localidad) && (
+                              <option value={form.localidad}>
+                                {form.localidad}
+                              </option>
+                            )}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn-list-square"
+                          aria-label="Gestionar localidades"
+                          title="Gestionar localidades"
+                          onClick={() => setLocModalOpen(true)}
+                        >
+                          <IconList />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-mail">Email</label>
+                      <input
+                        id="m-mail"
+                        type="email"
+                        value={form.email}
+                        className={validationErrors.email ? 'is-invalid' : ''}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, email: e.target.value }))
+                          if (validationErrors.email) {
+                            setValidationErrors((prev) => ({ ...prev, email: false }))
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-tel">Teléfono</label>
+                      <input
+                        id="m-tel"
+                        value={form.telefono}
+                        className={validationErrors.telefono ? 'is-invalid' : ''}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, telefono: e.target.value }))
+                          if (validationErrors.telefono) {
+                            setValidationErrors((prev) => ({ ...prev, telefono: false }))
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-alias">Alias</label>
+                      <input
+                        id="m-alias"
+                        value={form.alias ?? ''}
+                        placeholder="Opcional"
+                        maxLength={24}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, alias: e.target.value }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. HONORARIOS */}
+                <div className="doctor-card doctor-card--honorarios">
+                  <h3 className="doctor-card__title">HONORARIOS</h3>
+                  <div className="doctor-card__grid">
+                    {puedeVerPorcentaje && (
+                      <div className="doctor-field">
+                        <label htmlFor="m-pct">Porcentaje</label>
+                        <div className="doctor-affix-input-wrap">
+                          <input
+                            id="m-pct"
+                            type="text"
+                            inputMode="decimal"
+                            maxLength={6}
+                            placeholder="0"
+                            className="doctor-input-pct"
+                            value={form.porcentaje}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                porcentaje: sanitizePorcentajeInput(e.target.value),
+                              }))
+                            }
+                          />
+                          <span className="doctor-affix-symbol">%</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="doctor-field">
+                      <label htmlFor="m-valor">Monto Diario</label>
+                      <div className="doctor-affix-input-wrap doctor-affix--blue">
+                        <span className="doctor-affix-symbol-left">$</span>
+                        <input
+                          id="m-valor"
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="0"
+                          className="doctor-input-money-blue"
+                          value={form.valor ? form.valor.replace(/^\$\s*/, '') : ''}
+                          onChange={(e) => {
+                            const clean = sanitizeMoneyTyping(e.target.value)
+                            setForm((f) => ({
+                              ...f,
+                              valor: clean ? formatMoneyDisplay(clean) : '',
+                            }))
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-particular">Particular</label>
+                      <div className="doctor-affix-input-wrap doctor-affix--blue">
+                        <span className="doctor-affix-symbol-left">$</span>
+                        <input
+                          id="m-particular"
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="0"
+                          className="doctor-input-money-blue"
+                          value={form.particular ? form.particular.replace(/^\$\s*/, '') : ''}
+                          onChange={(e) => {
+                            const clean = sanitizeMoneyTyping(e.target.value)
+                            setForm((f) => ({
+                              ...f,
+                              particular: clean ? formatMoneyDisplay(clean) : '',
+                            }))
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="doctor-field">
+                      <label htmlFor="m-cuidar">Cuidar</label>
+                      <div className="doctor-affix-input-wrap doctor-affix--blue">
+                        <span className="doctor-affix-symbol-left">$</span>
+                        <input
+                          id="m-cuidar"
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="0"
+                          className="doctor-input-money-blue"
+                          value={form.cuidar ? form.cuidar.replace(/^\$\s*/, '') : ''}
+                          onChange={(e) => {
+                            const clean = sanitizeMoneyTyping(e.target.value)
+                            setForm((f) => ({
+                              ...f,
+                              cuidar: clean ? formatMoneyDisplay(clean) : '',
+                            }))
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="doctor-honorarios-total">
+                    Total consulta particular:{' '}
+                    <strong>{formatTotalParticularDisplay(form.particular, form.cuidar)}</strong>
+                  </div>
+                </div>
+
+                {/* 4. OBRAS SOCIALES */}
+                <div className="doctor-card doctor-card--os">
+                  <h3 className="doctor-card__title">OBRAS SOCIALES</h3>
+                  <div className="doctor-os-top-row">
+                    <select
+                      id="m-obra"
+                      value={form.obraSocial ?? ''}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          obraSocial: normalizeObraSocial(e.target.value),
+                        }))
+                      }
+                    >
+                      <option value="">— Seleccionar —</option>
+                      {obrasSocialesOpciones.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                      {form.obraSocial &&
+                        !obrasSocialesOpciones.includes(form.obraSocial) && (
+                          <option value={form.obraSocial}>{form.obraSocial}</option>
+                        )}
+                    </select>
+                    <button
+                      type="button"
+                      className="pac-btn pac-btn--gray btn-os-add"
+                      disabled={!form.obraSocial}
+                      onClick={() => {
+                        const v = normalizeObraSocial(form.obraSocial ?? '')
+                        if (!v) return
+                        const exists = (form.obrasSociales ?? []).some(
+                          (os) => os.nombre.trim().toLowerCase() === v.trim().toLowerCase(),
+                        )
+                        if (!exists) {
+                          setForm((f) => ({
+                            ...f,
+                            obrasSociales: [
+                              ...(f.obrasSociales ?? []),
+                              { nombre: v, porcentaje: '0', monto: '' },
+                            ],
+                            obraSocial: '',
+                          }))
+                        } else {
+                          setForm((f) => ({ ...f, obraSocial: '' }))
+                        }
+                      }}
+                    >
+                      Agregar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-list-square"
+                      aria-label="Gestionar obras sociales"
+                      title="Gestionar obras sociales"
+                      onClick={() => setOsModalOpen(true)}
+                    >
+                      <IconList />
+                    </button>
+                  </div>
+
+                  {form.obrasSociales && form.obrasSociales.length > 0 ? (
+                    <div className="doctor-os-table-container">
+                      <div className="doctor-os-table-header">
+                        <div>OBRA SOCIAL</div>
+                        <div style={{ textAlign: 'right' }}>%</div>
+                        <div style={{ textAlign: 'right' }}>MONTO</div>
+                        <div />
+                      </div>
+                      <div className="doctor-os-table-scroll">
+                        {form.obrasSociales.map((os, idx) => (
+                          <div key={os.nombre} className="doctor-os-table-row">
+                            <div>
+                              <span className="medico-os-chip">{os.nombre}</span>
+                            </div>
+                            <div>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                maxLength={6}
+                                className="doctor-os-input-pct"
+                                placeholder="0"
+                                aria-label={`Porcentaje para ${os.nombre}`}
+                                value={os.porcentaje}
+                                onChange={(e) => {
+                                  const val = sanitizePorcentajeInput(e.target.value)
+                                  setForm((f) => {
+                                    const next = [...f.obrasSociales]
+                                    next[idx] = { ...next[idx], porcentaje: val }
+                                    return { ...f, obrasSociales: next }
+                                  })
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <div className="doctor-affix-input-wrap doctor-affix-table-monto">
+                                <span className="doctor-affix-symbol-left">$</span>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  className="doctor-os-input-monto"
+                                  placeholder="0"
+                                  aria-label={`Monto para ${os.nombre}`}
+                                  value={os.monto ? os.monto.replace(/^\$\s*/, '') : ''}
+                                  onChange={(e) => {
+                                    const clean = sanitizeMoneyTyping(e.target.value)
+                                    const val = clean ? formatMoneyDisplay(clean) : ''
+                                    setForm((f) => {
+                                      const next = [...f.obrasSociales]
+                                      next[idx] = { ...next[idx], monto: val }
+                                      return { ...f, obrasSociales: next }
+                                    })
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'center' }}>
+                              <button
+                                type="button"
+                                className="medico-os-remove-btn"
+                                title={`Quitar ${os.nombre}`}
+                                aria-label={`Quitar ${os.nombre}`}
+                                onClick={() => {
+                                  setForm((f) => ({
+                                    ...f,
+                                    obrasSociales: f.obrasSociales.filter((_, i) => i !== idx),
+                                  }))
+                                }}
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="doctor-os-empty">
+                      Todavía no hay obras sociales asignadas
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </div>
-              </div>
+
+              {/* Pie del modal */}
               <div className="pac-modal__footer">
                 <div className="pac-modal__footer-left">
                   {currentEditingDoctor && (
                     <>
+                      <button
+                        type="button"
+                        className="pac-btn pac-btn--gray pac-btn--danger"
+                        onClick={() => void handleDelete(currentEditingDoctor)}
+                      >
+                        Eliminar médico
+                      </button>
                       {currentEditingDoctor.activo !== false ? (
-                        <button type="button" className="pac-btn pac-btn--gray" onClick={() => void handleSuspend(currentEditingDoctor.id)}>
-                          Suspender
+                        <button
+                          type="button"
+                          className="pac-btn pac-btn--gray"
+                          onClick={() => void handleSuspend(currentEditingDoctor.id)}
+                        >
+                          Suspender médico
                         </button>
                       ) : (
-                        <button type="button" className="pac-btn pac-btn--gray" onClick={() => handleReactivate(currentEditingDoctor.id)}>
-                          Reactivar
+                        <button
+                          type="button"
+                          className="pac-btn pac-btn--gray"
+                          onClick={() => handleReactivate(currentEditingDoctor.id)}
+                        >
+                          Reactivar médico
                         </button>
                       )}
-                      <button type="button" className="pac-btn pac-btn--gray" onClick={() => void handleDelete(currentEditingDoctor)}>
-                        Eliminar
-                      </button>
                     </>
                   )}
                 </div>
                 <div className="pac-modal__footer-right">
-                  <button type="button" className="pac-btn pac-btn--gray" onClick={closeForm}>Cancelar</button>
-                  <button type="submit" className="pac-btn pac-btn--gray pac-btn--strong">
-                    {editingId ? 'Guardar cambios' : 'Guardar médico'}
+                  <button
+                    type="button"
+                    className="pac-btn pac-btn--gray"
+                    onClick={closeForm}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="pac-btn pac-btn--primary"
+                    disabled={!hasChanges}
+                  >
+                    {editingId ? 'Guardar cambios' : 'Registrar médico'}
                   </button>
                 </div>
               </div>

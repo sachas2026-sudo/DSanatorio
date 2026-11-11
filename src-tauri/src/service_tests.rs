@@ -4,6 +4,7 @@ mod tests {
     use rusqlite::{params, Connection};
     use crate::core::db::open_connection;
     use crate::core::config::settings;
+    use crate::modules::configuracion::service;
     use std::fs;
 
     fn setup_temp_db() -> (rusqlite::Connection, std::path::PathBuf, std::sync::MutexGuard<'static, ()>) {
@@ -170,6 +171,7 @@ mod tests {
             localidad: String::new(),
             fecha_nacimiento: String::new(),
             obra_social: String::new(),
+            obra_social_anterior: None,
             notas: String::new(),
             activo: Some(true),
             version: 1,
@@ -300,5 +302,115 @@ mod tests {
             })
             .unwrap();
         assert_eq!(en_base, "Ana Editada");
+    }
+
+    #[test]
+    fn test_roundtrip_ordenes_medicas_y_prestaciones() {
+        let (_conn, _tmp, _guard) = setup_schema_temp_db();
+
+        let initial = service::load_app_data().unwrap();
+        let json = serde_json::to_string(&initial).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value["ordenesMedicas"] = serde_json::json!([
+            {
+                "id": "ord-1",
+                "numero": "OM-0001",
+                "patientId": "p-1",
+                "tipo": "consulta",
+                "fecha": "2026-11-09"
+            }
+        ]);
+        value["prestacionesAfiliados"] = serde_json::json!([
+            {
+                "id": "pr-1",
+                "nombre": "Radiografía de tórax",
+                "categoria": "Diagnóstico por imágenes"
+            }
+        ]);
+        let saved_json = serde_json::to_string(&value).unwrap();
+        service::save_app_data(&saved_json).unwrap();
+
+        let reloaded = service::load_app_data().unwrap();
+        let ords = reloaded.ordenes_medicas.unwrap_or_default();
+        assert_eq!(ords.len(), 1);
+        assert_eq!(ords[0]["id"], "ord-1");
+        assert_eq!(ords[0]["numero"], "OM-0001");
+
+        let prests = reloaded.prestaciones_afiliados.unwrap_or_default();
+        assert_eq!(prests.len(), 1);
+        assert_eq!(prests[0]["id"], "pr-1");
+    }
+
+    #[test]
+    fn test_roundtrip_contratante_movimientos_y_obra_social_anterior() {
+        let (conn, _tmp, _guard) = setup_schema_temp_db();
+
+        let initial = service::load_app_data().unwrap();
+        let json = serde_json::to_string(&initial).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value["patients"] = serde_json::json!([
+            {
+                "id": "p-tit",
+                "nombre": "JUAN",
+                "apellido": "GOMEZ",
+                "dni": "20111222",
+                "telefono": "",
+                "email": "",
+                "domicilio": "",
+                "localidad": "",
+                "fechaNacimiento": "1985-05-10",
+                "obraSocial": "Plan Familiar",
+                "obraSocialAnterior": "IOSFA",
+                "notas": "",
+                "activo": true,
+                "version": 1
+            }
+        ]);
+        value["afiliados"] = serde_json::json!([
+            {
+                "id": "af-1",
+                "patientId": "p-tit",
+                "planId": "plan-fam",
+                "fechaInicio": "2026-01-01",
+                "activo": true,
+                "obraSocialAnterior": "IOSFA",
+                "movimientos": [
+                    {
+                        "id": "mov-1",
+                        "afiliadoId": "af-1",
+                        "fecha": "2026-11-10",
+                        "tipo": "cambio_cobertura",
+                        "detalle": "Plan Individual -> Plan Familiar",
+                        "motivo": null,
+                        "usuario": "Recepción",
+                        "creadoEn": "2026-11-10T12:00:00Z"
+                    }
+                ]
+            }
+        ]);
+
+        let saved_json = serde_json::to_string(&value).unwrap();
+        service::save_app_data(&saved_json).unwrap();
+
+        let reloaded = service::load_app_data().unwrap();
+        assert_eq!(reloaded.patients.len(), 1);
+        assert_eq!(
+            reloaded.patients[0].obra_social_anterior.as_deref(),
+            Some("IOSFA")
+        );
+
+        let count_movs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM contratante_movimientos WHERE afiliado_id = 'af-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_movs, 1);
+
+        let afils = reloaded.afiliados.unwrap_or_default();
+        assert_eq!(afils.len(), 1);
+        assert_eq!(afils[0]["movimientos"][0]["id"], "mov-1");
+        assert_eq!(afils[0]["movimientos"][0]["tipo"], "cambio_cobertura");
     }
 }

@@ -99,8 +99,9 @@ export function notasFromMotivoConsulta(
   otroDetalle: string,
   custom: string[] = [],
 ): string {
-  if (motivo === 'Otro') return otroDetalle.trim()
-  if (isMotivoConsultaOption(motivo, custom)) return motivo
+  const m = (motivo ?? '').trim()
+  if (m === 'Otro') return otroDetalle.trim() || 'Otro'
+  if (m) return m
   return MOTIVO_CONSULTA_DEFAULT
 }
 
@@ -118,8 +119,10 @@ export function motivoConsulta2Texto(
   otroDetalle: string,
   custom: string[] = [],
 ): string {
-  if (motivo === MOTIVO_CONSULTA_2_NINGUNO) return ''
-  return notasFromMotivoConsulta(motivo, otroDetalle, custom)
+  const m = (motivo ?? '').trim()
+  if (!m || m === MOTIVO_CONSULTA_2_NINGUNO || m.toLowerCase() === 'sin motivo 2') return ''
+  if (m === 'Otro') return otroDetalle.trim()
+  return m
 }
 
 /** Separador con el que se muestran los dos motivos juntos en textos y reportes. */

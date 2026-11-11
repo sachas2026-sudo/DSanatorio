@@ -93,12 +93,19 @@ SkipSeedAuth:
   Delete "$INSTDIR\auth-accounts.json"
   Delete "$INSTDIR\resources\auth-accounts.json"
 
-  ; Abrir puertos en Firewall de Windows para permitir conexion de terminales en red local
-  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall delete rule name="Sanatorio Server" 2>nul'
-  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall delete rule name="Sanatorio Discovery" 2>nul'
-  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio Server" dir=in action=allow protocol=TCP localport=8787 profile=any'
-  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio Discovery" dir=in action=allow protocol=UDP localport=8788 profile=any'
-  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio App" dir=in action=allow program="$INSTDIR\app.exe" profile=any'
+  ; Re-aplicar las reglas de firewall si Windows / antivirus las bloquea.
+  ; Se copia el .cmd desde los recursos del bundle (evita escribir archivos con NSIS).
+  CopyFiles /SILENT "$INSTDIR\firewall-cmd.cmd" "C:\Sanatorio\Abrir puertos de Firewall.cmd"
+  Delete "$INSTDIR\firewall-cmd.cmd"
+
+  ; Log de resultado del netsh para diagnosticar fallas
+  nsExec::ExecToLog 'cmd /c echo == %DATE% %TIME% == >> "C:\Sanatorio\firewall-setup.log"'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall delete rule name="Sanatorio Server" >> "C:\Sanatorio\firewall-setup.log" 2>&1'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall delete rule name="Sanatorio Discovery" >> "C:\Sanatorio\firewall-setup.log" 2>&1'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall delete rule name="Sanatorio App" >> "C:\Sanatorio\firewall-setup.log" 2>&1'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio Server" dir=in action=allow protocol=TCP localport=8787 profile=any >> "C:\Sanatorio\firewall-setup.log" 2>&1'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio Discovery" dir=in action=allow protocol=UDP localport=8788 profile=any >> "C:\Sanatorio\firewall-setup.log" 2>&1'
+  nsExec::ExecToLog 'cmd /c netsh advfirewall firewall add rule name="Sanatorio App" dir=in action=allow program="$INSTDIR\app.exe" profile=any >> "C:\Sanatorio\firewall-setup.log" 2>&1'
 
   FileOpen $9 "C:\Sanatorio\Abrir Centro Medico.cmd" w
   FileWrite $9 "@echo off$\r$\n"
@@ -114,6 +121,11 @@ SkipSeedAuth:
   FileWrite $9 "$\r$\n"
   FileWrite $9 "Ejecute el instalador nuevo sobre la instalacion actual.$\r$\n"
   FileWrite $9 "No desinstale antes: solo se actualiza el programa.$\r$\n"
+  FileWrite $9 "$\r$\n"
+  FileWrite $9 "Firewall de Windows: el instalador abre los puertos TCP 8787 y UDP 8788$\r$\n"
+  FileWrite $9 "para conectar PCs en red. Si algo bloquea la conexion, ejecute como$\r$\n"
+  FileWrite $9 "administrador: C:\Sanatorio\Abrir puertos de Firewall.cmd$\r$\n"
+  FileWrite $9 "El resultado queda registrado en C:\Sanatorio\firewall-setup.log.$\r$\n"
   FileWrite $9 "$\r$\n"
   FileWrite $9 "Si tenia una version en Program Files, puede desinstalarla desde$\r$\n"
   FileWrite $9 "Configuracion de Windows (la app nueva queda en C:\Sanatorio\app).$\r$\n"

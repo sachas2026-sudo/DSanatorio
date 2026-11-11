@@ -60,6 +60,7 @@ pub fn load_app_data() -> Result<AppData, AppError> {
     let pagos_deudas_medicos = repository::load_pagos_deudas_medicos(&conn)?;
     
     let especialidades_custom = repository::load_custom_list(&conn, "especialidades_custom")?;
+    let obras_sociales = repository::load_obras_sociales(&conn).unwrap_or_default();
     let obras_sociales_custom = repository::load_custom_list(&conn, "obras_sociales_custom")?;
     let localidades_custom = repository::load_custom_list(&conn, "localidades_custom")?;
     let motivos_consulta_custom = repository::load_custom_list(&conn, "motivos_consulta_custom")?;
@@ -70,6 +71,8 @@ pub fn load_app_data() -> Result<AppData, AppError> {
     let planes_afiliados = repository::load_planes_table(&conn).unwrap_or_else(|_| repository::load_app_module(&conn, "planes_afiliados").unwrap_or_default());
     let cuotas_afiliados = repository::load_cuotas_table(&conn).unwrap_or_else(|_| repository::load_app_module(&conn, "cuotas_afiliados").unwrap_or_default());
     let distribucion_os_percentajes = repository::load_app_module(&conn, "distribucion_os_percentajes")?;
+    let ordenes_medicas = repository::load_app_module(&conn, "ordenes_medicas").unwrap_or_default();
+    let prestaciones_afiliados = repository::load_app_module(&conn, "prestaciones_afiliados").unwrap_or_default();
 
     Ok(AppData {
         patients,
@@ -83,6 +86,7 @@ pub fn load_app_data() -> Result<AppData, AppError> {
         pagos_cancelados,
         pagos_deudas_medicos,
         especialidades_custom,
+        obras_sociales,
         obras_sociales_custom,
         localidades_custom,
         motivos_consulta_custom,
@@ -91,6 +95,8 @@ pub fn load_app_data() -> Result<AppData, AppError> {
         planes_afiliados: Some(planes_afiliados),
         cuotas_afiliados: Some(cuotas_afiliados),
         distribucion_os_percentajes: Some(distribucion_os_percentajes),
+        ordenes_medicas: Some(ordenes_medicas),
+        prestaciones_afiliados: Some(prestaciones_afiliados),
     })
 }
 
@@ -128,6 +134,76 @@ pub fn save_cuota_afiliado(cuota: &CuotaAfiliado) -> Result<WriteResult, AppErro
     let mut conn = db::open_connection()?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let result = repository::save_cuota_afiliado(&tx, cuota)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+/// Registra atómicamente un paciente nuevo y su contratante.
+pub fn registrar_contratante_con_paciente_nuevo(
+    req: &RegistrarContratanteConPacienteNuevoReq,
+    usuario: &str,
+    rol: &str,
+) -> Result<(Patient, serde_json::Value), AppError> {
+    let dni = req.dni.trim();
+    if dni.is_empty() || !dni.chars().all(|c| c.is_ascii_digit()) || dni.len() > 8 {
+        return Err(AppError::Validation(
+            "DNI debe contener solo números de 1 a 8 dígitos".to_string(),
+        ));
+    }
+    if req.apellido.trim().is_empty() {
+        return Err(AppError::Validation("Apellido es obligatorio".to_string()));
+    }
+    if req.nombre.trim().is_empty() {
+        return Err(AppError::Validation("Nombre es obligatorio".to_string()));
+    }
+    if req.fecha_nacimiento.trim().is_empty() {
+        return Err(AppError::Validation(
+            "Fecha de nacimiento es obligatoria".to_string(),
+        ));
+    }
+    if req.fecha_inicio.trim().is_empty() {
+        return Err(AppError::Validation(
+            "Fecha de inicio es obligatoria".to_string(),
+        ));
+    }
+    if req.plan_id.trim().is_empty() {
+        return Err(AppError::Validation("Cobertura es obligatoria".to_string()));
+    }
+
+    let parts: Vec<&str> = req.fecha_nacimiento.trim().split('-').collect();
+    if parts.len() != 3 {
+        return Err(AppError::Validation(
+            "Formato de fecha de nacimiento inválido".to_string(),
+        ));
+    }
+    let year: i32 = parts[0]
+        .parse()
+        .map_err(|_| AppError::Validation("Año inválido".to_string()))?;
+    let month: u32 = parts[1]
+        .parse()
+        .map_err(|_| AppError::Validation("Mes inválido".to_string()))?;
+    let day: u32 = parts[2]
+        .parse()
+        .map_err(|_| AppError::Validation("Día inválido".to_string()))?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return Err(AppError::Validation("Fecha de nacimiento inválida".to_string()));
+    }
+    if year < 1900 {
+        return Err(AppError::Validation(
+            "Fecha de nacimiento no puede ser anterior a 1900".to_string(),
+        ));
+    }
+
+    let mut conn = db::open_connection()?;
+    let today: String = conn.query_row("SELECT date('now')", [], |r| r.get(0))?;
+    if req.fecha_nacimiento.trim() > today.as_str() {
+        return Err(AppError::Validation(
+            "Fecha de nacimiento no puede ser futura".to_string(),
+        ));
+    }
+
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let result = repository::registrar_contratante_con_paciente_nuevo(&tx, req, usuario, rol)?;
     tx.commit()?;
     Ok(result)
 }
@@ -234,6 +310,14 @@ fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppE
         Some(v) => v.clone(),
         None => repository::load_app_module(&conn, "distribucion_os_percentajes").unwrap_or_default(),
     };
+    let ordenes_to_save = match &data.ordenes_medicas {
+        Some(v) => v.clone(),
+        None => repository::load_app_module(&conn, "ordenes_medicas").unwrap_or_default(),
+    };
+    let prestaciones_to_save = match &data.prestaciones_afiliados {
+        Some(v) => v.clone(),
+        None => repository::load_app_module(&conn, "prestaciones_afiliados").unwrap_or_default(),
+    };
 
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
@@ -309,6 +393,51 @@ fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppE
     if !replace_all { tx.execute("DELETE FROM especialidades_custom", [])?; }
     repository::save_custom_list(&tx, "especialidades_custom", &data.especialidades_custom)?;
 
+    if replace_all {
+        tx.execute("DELETE FROM obras_sociales", [])?;
+    }
+    let obras_to_save: Vec<ObraSocialCatalog> = if !data.obras_sociales.is_empty() {
+        data.obras_sociales.clone()
+    } else {
+        let habituales = [
+            "IPS", "PAMI", "OSDE", "Swiss Medical", "Galeno", "IOMA",
+            "OMINT", "Medicus", "OSECAC", "Sancor Salud", "Accord Salud", "Particular",
+        ];
+        let mut list = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for h in habituales {
+            seen.insert(h.to_lowercase());
+            list.push(ObraSocialCatalog {
+                nombre: h.to_string(),
+                plus: 0,
+                arancel: 0,
+                cuidar: 0,
+                imp_banco: 0,
+                imp_factura: 0,
+                gastos_adm: 0,
+                suspendida: false,
+                version: 1,
+            });
+        }
+        for s in &data.obras_sociales_custom {
+            if seen.insert(s.to_lowercase()) {
+                list.push(ObraSocialCatalog {
+                    nombre: s.clone(),
+                    plus: 0,
+                    arancel: 0,
+                    cuidar: 0,
+                    imp_banco: 0,
+                    imp_factura: 0,
+                    gastos_adm: 0,
+                    suspendida: false,
+                    version: 1,
+                });
+            }
+        }
+        list
+    };
+    repository::save_obras_sociales(&tx, &obras_to_save)?;
+
     if !replace_all { tx.execute("DELETE FROM obras_sociales_custom", [])?; }
     repository::save_custom_list(&tx, "obras_sociales_custom", &data.obras_sociales_custom)?;
 
@@ -324,6 +453,8 @@ fn save_app_data_with_mode(data: &AppData, replace_all: bool) -> Result<(), AppE
     repository::save_planes_table(&tx, &planes_to_save)?;
     repository::save_cuotas_table(&tx, &cuotas_to_save)?;
     repository::save_app_module(&tx, "distribucion_os_percentajes", &distribucion_to_save)?;
+    repository::save_app_module(&tx, "ordenes_medicas", &ordenes_to_save)?;
+    repository::save_app_module(&tx, "prestaciones_afiliados", &prestaciones_to_save)?;
 
     tx.commit()?;
     Ok(())
@@ -422,10 +553,26 @@ pub fn prepare_storage_on_startup(app: &tauri::AppHandle) {
     }
 }
 
+pub fn load_obras_sociales() -> Result<Vec<ObraSocialCatalog>, AppError> {
+    let conn = db::open_connection()?;
+    repository::load_obras_sociales(&conn)
+}
+
+pub fn save_obra_social(item: &ObraSocialCatalog) -> Result<ObraSocialWriteResult, AppError> {
+    let conn = db::open_connection()?;
+    repository::save_obra_social_single(&conn, item)
+}
+
+pub fn delete_obra_social(nombre: &str) -> Result<Result<(), String>, AppError> {
+    let conn = db::open_connection()?;
+    repository::delete_obra_social(&conn, nombre)
+}
+
 #[cfg(test)]
 mod tests {
     include!("patient_tests.rs");
     include!("real_validation_ignored.rs");
+    include!("obras_sociales_tests.rs");
     use super::*;
     use tempfile::TempDir;
 }

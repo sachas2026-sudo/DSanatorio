@@ -60,6 +60,7 @@ describe('buildDistribucionObrasSocialesWorkbook', () => {
       'Médico',
       'Paciente',
       'Motivo de la Consulta',
+      'Prestación',
       'Monto',
       'OSDE · 30%',
       'PAMI · 25%',
@@ -72,6 +73,7 @@ describe('buildDistribucionObrasSocialesWorkbook', () => {
       'AGUIRRE, RAFAEL',
       'Varios',
       'Consulta',
+      '',
       100000,
       30000,
       '',
@@ -79,7 +81,35 @@ describe('buildDistribucionObrasSocialesWorkbook', () => {
     ])
 
     // Totales.
-    expect(aoa[8]).toEqual(['TOTALES', '', '', '', 100000, 30000, '', 70000])
+    expect(aoa[8]).toEqual(['TOTALES', '', '', '', '', 100000, 30000, '', 70000])
+  })
+
+  it('formatea columnas de cantidad como enteros y con encabezado · Cant.', () => {
+    const wb = buildDistribucionObrasSocialesWorkbook({
+      desde: '2026-05-01',
+      hasta: '2026-05-31',
+      filterLabel: '',
+      obras: [
+        { nombre: 'Individual', porcentaje: 0, esCantidad: true },
+        { nombre: 'IPS', porcentaje: 30 },
+      ],
+      rows: [
+        {
+          fecha: '13-05-26',
+          medico: 'AGUIRRE, RAFAEL',
+          paciente: 'AGUIAR, CRISTOPHER',
+          motivo: 'Consulta',
+          prestacion: 'Radiografía',
+          monto: '',
+          porObraSocial: ['1', ''],
+          total: '',
+        },
+      ],
+    })
+    const aoa = leer(wb, 'Resumen')
+    expect(aoa[6]?.[6]).toBe('Individual · Cant.')
+    expect(aoa[7]?.[6]).toBe(1)
+    expect(aoa[8]?.[6]).toBe(1)
   })
 
   it('agrega la hoja Completo sólo cuando se manda el detalle', () => {

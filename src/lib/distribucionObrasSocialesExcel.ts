@@ -77,8 +77,9 @@ function hojaDistribucion(params: {
       'Médico',
       'Paciente',
       'Motivo de la Consulta',
+      'Prestación',
       'Monto',
-      ...obras.map((o) => `${o.nombre} · ${o.porcentaje}%`),
+      ...obras.map((o) => (o.esCantidad ? `${o.nombre} · Cant.` : `${o.nombre} · ${o.porcentaje}%`)),
       'Total Médico',
     ],
   ]
@@ -90,8 +91,13 @@ function hojaDistribucion(params: {
       f.medico.toUpperCase(),
       f.paciente,
       f.motivo,
+      f.prestacion ?? '',
       celdaImporte(f.monto),
-      ...obras.map((_, i) => celdaImporte(f.porObraSocial[i] ?? '')),
+      ...obras.map((o, i) =>
+        o.esCantidad
+          ? (parseInt(f.porObraSocial[i] ?? '', 10) || '')
+          : celdaImporte(f.porObraSocial[i] ?? ''),
+      ),
       celdaImporte(f.total),
     ])
   }
@@ -101,11 +107,14 @@ function hojaDistribucion(params: {
     '',
     '',
     '',
+    '',
     celdaImporte(totales.facturado),
-    ...obras.map((_, i) =>
-      celdaImporte(
-        filas.reduce((s, f) => s + parseMoney(f.porObraSocial[i] ?? ''), 0),
-      ),
+    ...obras.map((o, i) =>
+      o.esCantidad
+        ? filas.reduce((s, f) => s + (parseInt(f.porObraSocial[i] ?? '', 10) || 0), 0)
+        : celdaImporte(
+            filas.reduce((s, f) => s + parseMoney(f.porObraSocial[i] ?? ''), 0),
+          ),
     ),
     celdaImporte(totales.medico),
   ])
@@ -120,8 +129,8 @@ function hojaDistribucion(params: {
 
   // Importes como número en formato de moneda. Se recorre sólo la zona de la
   // tabla (incluida la fila de TOTALES) más la línea de totales del encabezado.
-  const primeraColImporte = 4
-  const ultimaColImporte = 4 + obras.length + 1
+  const primeraColImporte = 5
+  const ultimaColImporte = 5 + obras.length + 1
   const primeraFilaDatos = filaEncabezado + 1
   for (let r = 0; r < aoa.length; r++) {
     const esFilaTotalesHeader = r === 3
@@ -132,6 +141,12 @@ function hojaDistribucion(params: {
       ? [1, 3, 5]
       : Array.from({ length: ultimaColImporte - primeraColImporte + 1 }, (_, i) => primeraColImporte + i)
     for (const c of columnas) {
+      if (!esFilaTotalesHeader) {
+        const idxObra = c - primeraColImporte - 1
+        if (idxObra >= 0 && idxObra < obras.length && obras[idxObra]?.esCantidad) {
+          continue
+        }
+      }
       const cell = sheet[XLSX.utils.encode_cell({ r, c })]
       if (cell && typeof cell.v === 'number') cell.z = FORMATO_MONEDA
     }
@@ -142,12 +157,13 @@ function hojaDistribucion(params: {
     { wch: 28 },
     { wch: 26 },
     { wch: 26 },
+    { wch: 26 },
     { wch: 14 },
     ...obras.map(() => ({ wch: 16 })),
     { wch: 14 },
   ]
   // Título y líneas de encabezado ocupando el ancho de la tabla.
-  const ultimaCol = 4 + obras.length + 1
+  const ultimaCol = 5 + obras.length + 1
   sheet['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: ultimaCol } },
     { s: { r: 1, c: 0 }, e: { r: 1, c: ultimaCol } },

@@ -15,6 +15,8 @@ pub struct Patient {
     pub localidad: String,
     pub fecha_nacimiento: String,
     pub obra_social: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obra_social_anterior: Option<String>,
     pub notas: String,
     pub activo: Option<bool>,
     #[serde(default = "default_version")]
@@ -23,7 +25,55 @@ pub struct Patient {
     pub deleted_at: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorObraSocial {
+    pub nombre: String,
+    #[serde(default)]
+    pub porcentaje: f64,
+    #[serde(default)]
+    pub monto: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DoctorObraSocialDe {
+    Legacy(String),
+    Object {
+        nombre: String,
+        #[serde(default)]
+        porcentaje: f64,
+        #[serde(default)]
+        monto: i64,
+    },
+}
+
+impl<'de> Deserialize<'de> for DoctorObraSocial {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let item = DoctorObraSocialDe::deserialize(deserializer)?;
+        match item {
+            DoctorObraSocialDe::Legacy(nombre) => Ok(DoctorObraSocial {
+                nombre,
+                porcentaje: 0.0,
+                monto: 0,
+            }),
+            DoctorObraSocialDe::Object {
+                nombre,
+                porcentaje,
+                monto,
+            } => Ok(DoctorObraSocial {
+                nombre,
+                porcentaje,
+                monto,
+            }),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Doctor {
     pub id: String,
@@ -33,7 +83,8 @@ pub struct Doctor {
     pub matricula: String,
     pub especialidad: String,
     pub obra_social: Option<String>,
-    pub obras_sociales: Option<Vec<String>>,
+    #[serde(default)]
+    pub obras_sociales: Option<Vec<DoctorObraSocial>>,
     pub telefono: String,
     pub localidad: String,
     pub email: String,
@@ -42,6 +93,12 @@ pub struct Doctor {
     pub duracion_turno_minutos: Option<u32>,
     pub tipo_agenda: Option<String>,
     pub activo: Option<bool>,
+    #[serde(default)]
+    pub valor: i64,
+    #[serde(default)]
+    pub particular: i64,
+    #[serde(default)]
+    pub cuidar: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -84,6 +141,14 @@ pub struct Appointment {
     pub estado: String,
     pub whatsapp_recordatorio_enviado_en: Option<String>,
     pub obra_social_override: Option<String>,
+    #[serde(default)]
+    pub motivo_consulta_2: Option<String>,
+    #[serde(default)]
+    pub creado_por: Option<String>,
+    #[serde(default)]
+    pub modificado_por: Option<String>,
+    #[serde(default)]
+    pub modificado_en: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -173,6 +238,38 @@ pub struct AppSettings {
     pub write_enabled: Option<bool>,
 }
 
+#[derive(Debug)]
+pub enum ObraSocialWriteResult {
+    Saved(ObraSocialCatalog),
+    Conflict { current: Option<ObraSocialCatalog> },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObraSocialCatalog {
+    pub nombre: String,
+    #[serde(default)]
+    pub plus: i64,
+    #[serde(default)]
+    pub arancel: i64,
+    #[serde(default)]
+    pub cuidar: i64,
+    #[serde(default)]
+    pub imp_banco: i64,
+    #[serde(default)]
+    pub imp_factura: i64,
+    #[serde(default)]
+    pub gastos_adm: i64,
+    #[serde(default)]
+    pub suspendida: bool,
+    #[serde(default = "default_version_one")]
+    pub version: i64,
+}
+
+fn default_version_one() -> i64 {
+    1
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct AppData {
@@ -190,6 +287,8 @@ pub struct AppData {
     #[serde(default)]
     pub especialidades_custom: Vec<String>,
     #[serde(default)]
+    pub obras_sociales: Vec<ObraSocialCatalog>,
+    #[serde(default)]
     pub obras_sociales_custom: Vec<String>,
     #[serde(default)]
     pub localidades_custom: Vec<String>,
@@ -204,6 +303,10 @@ pub struct AppData {
     pub cuotas_afiliados: Option<Vec<serde_json::Value>>,
     #[serde(default, rename = "distribucionOSPercentajes")]
     pub distribucion_os_percentajes: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub ordenes_medicas: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub prestaciones_afiliados: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -235,6 +338,21 @@ pub struct PlanAfiliado {
     pub nombre: String,
     #[serde(default = "default_version")]
     pub version: i32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistrarContratanteConPacienteNuevoReq {
+    pub patient_id: String,
+    pub dni: String,
+    pub apellido: String,
+    pub nombre: String,
+    pub fecha_nacimiento: String,
+    pub plan_id: String,
+    pub plan_nombre: String,
+    pub fecha_inicio: String,
+    #[serde(default)]
+    pub afiliado_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

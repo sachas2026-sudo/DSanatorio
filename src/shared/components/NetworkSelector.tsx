@@ -5,6 +5,7 @@ import {
   setManualServerUrl,
   type NetworkStatusInfo,
 } from '../../lib/networkDiscovery'
+import { setModeLocal } from '../../lib/appMode'
 import { APP_VERSION } from '../../lib/appVersion'
 import './network-selector.css'
 
@@ -37,16 +38,26 @@ export function NetworkSelector({ onOpenInfo, appVersion = APP_VERSION }: Networ
     return () => clearInterval(timer)
   }, [checkStatus])
 
-  async function handleAutoConnect() {
+  async function handleReconnect() {
     setBusy(true)
     setMessage(null)
     try {
-      const server = await autoConnectServer()
-      setMessage({
-        type: 'ok',
-        text: `¡Conectado exitosamente al servidor en ${server.ip}!`,
-      })
-      await checkStatus()
+      if (isHost) {
+        // En PC Servidor: verificar y refrescar estado del servidor local
+        await checkStatus()
+        setMessage({
+          type: 'ok',
+          text: 'Red y Servidor local verificados. En línea.',
+        })
+      } else {
+        // En terminal cliente: re-escanear y reconectar al servidor en red local
+        const server = await autoConnectServer()
+        setMessage({
+          type: 'ok',
+          text: `¡Reconectado exitosamente al servidor (${server.ip})!`,
+        })
+        await checkStatus()
+      }
     } catch (err) {
       setMessage({
         type: 'err',
@@ -55,6 +66,10 @@ export function NetworkSelector({ onOpenInfo, appVersion = APP_VERSION }: Networ
     } finally {
       setBusy(false)
     }
+  }
+
+  async function handleAutoConnect() {
+    await handleReconnect()
   }
 
   async function handleManualConnect() {
@@ -201,22 +216,13 @@ export function NetworkSelector({ onOpenInfo, appVersion = APP_VERSION }: Networ
 
             {!isHost && (
               <div className="network-dialog__actions">
-                <button
-                  type="button"
-                  className="network-action-btn network-action-btn--primary"
-                  onClick={() => void handleAutoConnect()}
-                  disabled={busy}
-                >
-                  {busy ? 'Buscando en red...' : 'Reconectar automáticamente'}
-                </button>
-
                 <div className="network-manual-box">
-                  <label htmlFor="manual-ip-input">O ingresar IP del Servidor:</label>
+                  <label htmlFor="manual-ip-input">Ingresar IP del Servidor manualmente:</label>
                   <div className="network-manual-row">
                     <input
                       id="manual-ip-input"
                       type="text"
-                      placeholder="192.168.1.100"
+                      placeholder="Ej: 192.168.1.100"
                       value={manualIp}
                       onChange={(e) => setManualIp(e.target.value)}
                       disabled={busy}
@@ -234,6 +240,31 @@ export function NetworkSelector({ onOpenInfo, appVersion = APP_VERSION }: Networ
             )}
 
             <div className="network-dialog__footer">
+              <button
+                type="button"
+                className="network-action-btn network-action-btn--primary"
+                onClick={() => void handleReconnect()}
+                disabled={busy}
+                title="Reconectar y verificar la conexión de red"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+                  <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                  <circle cx="12" cy="20" r="1.5" fill="currentColor" stroke="none" />
+                </svg>
+                {busy ? 'Reconectando...' : 'Reconectar red'}
+              </button>
               <button
                 type="button"
                 className="network-action-btn network-action-btn--secondary"

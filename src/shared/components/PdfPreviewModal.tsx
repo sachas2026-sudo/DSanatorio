@@ -8,6 +8,7 @@ type Props = {
   onClose: () => void
   onDownload: () => void
   onPrint?: () => void
+  hidePrint?: boolean
 }
 
 export function PdfPreviewModal({
@@ -17,6 +18,7 @@ export function PdfPreviewModal({
   onClose,
   onDownload,
   onPrint,
+  hidePrint,
 }: Props) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   useEffect(() => {
@@ -67,21 +69,23 @@ export function PdfPreviewModal({
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cerrar
           </button>
-          {onPrint ? (
-            <button type="button" className="btn btn-ghost" onClick={onPrint}>
-              Imprimir
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => {
-                frameRef.current?.contentWindow?.focus()
-                frameRef.current?.contentWindow?.print()
-              }}
-            >
-              Imprimir
-            </button>
+          {!hidePrint && (
+            onPrint ? (
+              <button type="button" className="btn btn-ghost" onClick={onPrint}>
+                Imprimir
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  frameRef.current?.contentWindow?.focus()
+                  frameRef.current?.contentWindow?.print()
+                }}
+              >
+                Imprimir
+              </button>
+            )
           )}
           <button type="button" className="btn btn-pdf" onClick={onDownload}>
             <span className="btn-pdf__icon" aria-hidden>

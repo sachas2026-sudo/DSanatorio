@@ -1,13 +1,14 @@
 import type { Afiliado, Patient, PlanAfiliado } from '../types'
+import { buscarAfiliacionYPlanPaciente } from './consumoAfiliados'
 
-/** Obra social efectiva: el plan activo del Sanatorio funciona como cobertura. */
+/** Obra social efectiva: el plan activo del Sanatorio funciona como cobertura (titular o adherente). */
 export function patientObraSocial(
   patient: Patient | undefined,
-  afiliados: Afiliado[] = [],
-  planes: PlanAfiliado[] = [],
+  afiliados: readonly Afiliado[] = [],
+  planes: readonly PlanAfiliado[] = [],
 ): string {
   if (!patient) return ''
-  const afiliado = afiliados.find(a => a.patientId === patient.id && a.activo)
-  const plan = afiliado ? planes.find(p => p.id === afiliado.planId) : undefined
-  return plan?.nombre?.trim() || patient.obraSocial?.trim() || ''
+  const info = buscarAfiliacionYPlanPaciente(patient.id, afiliados, planes)
+  if (info) return info.plan.nombre.trim()
+  return patient.obraSocial?.trim() || ''
 }

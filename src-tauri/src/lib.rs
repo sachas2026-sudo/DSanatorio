@@ -11,6 +11,7 @@ mod client_session;
 mod client_commands;
 mod client_request;
 pub mod discovery;
+pub mod tray;
 #[cfg(test)]
 mod test_support;
 
@@ -33,32 +34,41 @@ pub fn run() {
         || product_name.contains("administrador")
         || product_name.contains("admi");
 
-    use crate::client_mode::{load_config, StartupPlan, AppMode};
+    use crate::client_mode::{load_config, StartupPlan, AppMode, ClientConfig};
 
     let mut config = match load_config() {
         Ok(c) => c,
         Err(e) => {
-            rfd::MessageDialog::new()
-                .set_title("Sanatorio - Configuración inválida")
-                .set_description(&e)
-                .set_buttons(rfd::MessageButtons::Ok)
-                .show();
-            std::process::exit(1);
+            log::warn!("Aviso al cargar configuración ({e}). Se iniciará con valores seguros.");
+            ClientConfig {
+                mode: if is_client_flavor { AppMode::Client } else { AppMode::Local },
+                server_url: None,
+                server_cert_pem: None,
+            }
         }
     };
 
     if is_client_flavor {
         // En los instaladores cliente (Afiliados y Administrador) siempre opera en modo cliente
-        if !crate::client_mode::config_path().exists() || config.mode == AppMode::Local {
-            config.mode = AppMode::Client;
-            if let Ok(servers) = crate::discovery::discover_servers(800) {
-                if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
-                    config.server_url = Some(srv.server_url);
-                    config.server_cert_pem = srv.cert_pem.or_else(|| Some("auto".to_string()));
-                }
-            }
-            let _ = crate::client_mode::save_config(&config);
+        config.mode = AppMode::Client;
+        // Al iniciar siempre se busca el servidor por WiFi o cableada en la red local.
+        // Si lo encuentra, se guarda; si no, se borra la URL guardada para que la app
+        // no use una IP fija vieja (solo vuelve a intentar por descubrimiento o IP manual).
+        let mut discovered = None;
+        if let Ok(servers) = crate::discovery::discover_servers(1500) {
+            discovered = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127."));
         }
+        match discovered {
+            Some(srv) => {
+                config.server_url = Some(srv.server_url);
+                config.server_cert_pem = Some("auto".to_string());
+            }
+            None => {
+                config.server_url = None;
+                config.server_cert_pem = None;
+            }
+        }
+        let _ = crate::client_mode::save_config(&config);
     } else {
         // En sabor Server (Mesa de Entrada), si no hay configuración, busca si ya hay otro servidor o es local
         if !crate::client_mode::config_path().exists() {
@@ -66,7 +76,7 @@ pub fn run() {
                 if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
                     config.mode = AppMode::Client;
                     config.server_url = Some(srv.server_url);
-                    config.server_cert_pem = srv.cert_pem.or_else(|| Some("auto".to_string()));
+                    config.server_cert_pem = Some("auto".to_string());
                     let _ = crate::client_mode::save_config(&config);
                 }
             }
@@ -118,6 +128,7 @@ pub fn run() {
             
             modules::configuracion::commands::load_app_data,
             modules::configuracion::commands::save_app_data,
+            modules::configuracion::commands::registrar_contratante_con_paciente_nuevo,
             modules::configuracion::commands::get_app_data_file_path,
             modules::configuracion::commands::get_install_info,
             modules::configuracion::commands::load_smtp_secret,
@@ -160,6 +171,7 @@ pub fn run() {
             discovery::auto_connect_sanatorio_server,
             discovery::get_network_connection_status,
             discovery::set_manual_server_url,
+            discovery::set_mode_local,
             modules::configuracion::commands::minimize_window,
         ])
         .setup(move |app| {
@@ -182,6 +194,9 @@ pub fn run() {
                 }
                 server::start_background_server();
             }
+
+            // Configurar ícono de la bandeja del sistema (al lado del reloj)
+            let _ = tray::setup_tray(app.handle());
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

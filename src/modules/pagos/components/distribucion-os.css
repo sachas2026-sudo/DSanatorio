@@ -300,14 +300,8 @@
 }
 .dist-os__wrap thead th {
   position: sticky;
-  z-index: 2;
-}
-.dist-os__wrap thead tr:first-child th {
   top: 0;
-}
-.dist-os__wrap thead tr:nth-child(2) th {
-  /* debajo de la fila de porcentajes */
-  top: 33px;
+  z-index: 2;
 }
 .dist-os__wrap tfoot td {
   position: sticky;
@@ -464,11 +458,12 @@
   /* Anchos fijos de las columnas que quedan ancladas a los bordes. Médico y
      Paciente se pegan a la izquierda y "Total Medico" a la derecha, así el
      total se ve siempre sin tener que scrollear hasta el final. */
-  --dist-os-w-fecha: 76px;
-  --dist-os-w-medico: 180px;
+  --dist-os-w-fecha: 80px;
+  --dist-os-w-medico: 146px;
   --dist-os-w-paciente: 178px;
-  --dist-os-w-especialidad: 132px;
-  --dist-os-w-motivo: 130px;
+  --dist-os-w-especialidad: 100px;
+  --dist-os-w-motivo: 78px;
+  --dist-os-w-prestacion: 90px;
 }
 .dist-os__table th,
 .dist-os__table td {
@@ -486,6 +481,7 @@
   /* Barra de títulos en gris, para que se separe del cuerpo de la tabla */
   background: #e9edf3;
   border-bottom: 1px solid #d5dbe5;
+  text-align: left;
 }
 /* La utilidad .text-right del proyecto está acotada a `.pagos-table`, así que
    no llegaba a esta tabla: se define acá para alinear columnas y montos. */
@@ -510,8 +506,31 @@
 .dist-os__table thead th.dist-os__os-cell {
   white-space: normal;
   overflow-wrap: break-word;
-  line-height: 1.1;
-  vertical-align: bottom;
+  line-height: 1.15;
+  vertical-align: top;
+  text-align: center;
+}
+.dist-os__table thead th.dist-os__pct-header {
+  vertical-align: top;
+  text-align: center;
+  white-space: normal;
+}
+.dist-os__table thead th .dist-os__header-title {
+  text-align: center;
+  line-height: 1.15;
+}
+.dist-os__table thead th .dist-os__header-pct {
+  color: #2563eb;
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-align: center;
+  line-height: 1.15;
+}
+.dist-os__table thead th .dist-os__header-pct--spaced {
+  margin-top: 13px;
+}
+.dist-os__table thead th .dist-os__header-pct--tight {
+  margin-top: 2px;
 }
 /* Las columnas de obras sociales siguen el gris de la fila (striped por
    registro): la celda no lleva fondo propio, así que se ve la banda gris de
@@ -775,7 +794,9 @@
   max-width: var(--dist-os-w-motivo);
 }
 .dist-os__table th.dist-os__motivo-col,
-.dist-os__table td.dist-os__motivo {
+.dist-os__table td.dist-os__motivo,
+.dist-os__table th.dist-os__prestacion-col,
+.dist-os__table td.dist-os__prestacion {
   position: static;
 }
 /* Motivo de consulta: alineado a la izquierda, hasta 2 líneas con elipsis. */
@@ -792,9 +813,26 @@
   text-overflow: ellipsis;
   display: table-cell;
 }
+.dist-os__prestacion-col {
+  width: var(--dist-os-w-prestacion);
+  max-width: var(--dist-os-w-prestacion);
+}
+.dist-os__prestacion {
+  color: #3d4a66;
+  font-size: 0.71rem;
+  width: var(--dist-os-w-prestacion);
+  min-width: var(--dist-os-w-prestacion);
+  max-width: var(--dist-os-w-prestacion);
+  text-align: left;
+  padding-left: 0.4rem;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: table-cell;
+}
 .dist-os__suma {
   font-weight: 700;
-  color: #0284c7;
+  color: #1f2937;
 }
 
 /* (Los chips de obras sociales se eliminaron junto con esa columna.) */

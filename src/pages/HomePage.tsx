@@ -357,7 +357,7 @@ export function HomePage() {
 
             <div className="home-stat-card home-stat-card--obras">
 
-              <span className="home-stat-card__k">Obras sociales (top)</span>
+              <span className="home-stat-card__k">Obras sociales y planes (top)</span>
 
               <span className="home-stat-card__chips home-stat-card__chips--obra">
 

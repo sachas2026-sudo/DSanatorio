@@ -15,7 +15,7 @@ mod patient_tests {
     #[test]
     fn exact_edit_case_and_space_updates_version() {
         let (conn, _guard) = temp_db();
-        let p = Patient { id: "p1".into(), nombre: "perez".into(), apellido: "lopez".into(), dni: "1".into(), telefono: "111".into(), email: "e@e".into(), domicilio: "d".into(), localidad: "l".into(), fecha_nacimiento: "".into(), obra_social: "".into(), notas: "".into(), activo: Some(true), version: 1, deleted_at: None };
+        let p = Patient { id: "p1".into(), nombre: "perez".into(), apellido: "lopez".into(), dni: "1".into(), telefono: "111".into(), email: "e@e".into(), domicilio: "d".into(), localidad: "l".into(), fecha_nacimiento: "".into(), obra_social: "".into(), obra_social_anterior: None, notas: "".into(), activo: Some(true), version: 1, deleted_at: None };
         save_patients(&conn.unchecked_transaction().unwrap(), &[p.clone()]).unwrap();
         let tx = conn.unchecked_transaction().unwrap();
         save_patients(&tx, &[Patient { nombre: "Perez".into(), ..p.clone() }]).unwrap();
@@ -27,7 +27,7 @@ mod patient_tests {
     #[test]
     fn null_empty_string_treated_consistently() {
         let (conn, _guard) = temp_db();
-        let p = Patient { id: "p2".into(), nombre: "N".into(), apellido: "A".into(), dni: "".into(), telefono: "".into(), email: "".into(), domicilio: "".into(), localidad: "".into(), fecha_nacimiento: "".into(), obra_social: "".into(), notas: "".into(), activo: Some(true), version: 1, deleted_at: None };
+        let p = Patient { id: "p2".into(), nombre: "N".into(), apellido: "A".into(), dni: "".into(), telefono: "".into(), email: "".into(), domicilio: "".into(), localidad: "".into(), fecha_nacimiento: "".into(), obra_social: "".into(), obra_social_anterior: None, notas: "".into(), activo: Some(true), version: 1, deleted_at: None };
         let tx = conn.unchecked_transaction().unwrap();
         save_patients(&tx, &[p.clone()]).unwrap();
         tx.commit().unwrap();
@@ -42,7 +42,7 @@ mod patient_tests {
     #[test]
     fn logical_delete_preserved_on_subsequent_save() {
         let (conn, _guard) = temp_db();
-        let p = Patient { id: "p3".into(), nombre: "X".into(), apellido: "Y".into(), dni: "".into(), telefono: "".into(), email: "".into(), domicilio: "".into(), localidad: "".into(), fecha_nacimiento: "".into(), obra_social: "".into(), notas: "".into(), activo: Some(true), version: 1, deleted_at: Some("2026-01-01".into()) };
+        let p = Patient { id: "p3".into(), nombre: "X".into(), apellido: "Y".into(), dni: "".into(), telefono: "".into(), email: "".into(), domicilio: "".into(), localidad: "".into(), fecha_nacimiento: "".into(), obra_social: "".into(), obra_social_anterior: None, notas: "".into(), activo: Some(true), version: 1, deleted_at: Some("2026-01-01".into()) };
         let tx = conn.unchecked_transaction().unwrap();
         save_patients(&tx, &[p.clone()]).unwrap();
         tx.commit().unwrap();

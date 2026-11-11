@@ -18,7 +18,9 @@ import {
 } from './paymentPorcentaje'
 import {
   buildPagosSummaryMetrics,
+  calcularDesglosePagoFila,
   countDistinctPagos,
+  computeDoctorPorcentajeSettlement,
   computeEfectivoAEntregar,
   drawPagosDoctorSectionTitle,
   pagoPdfGroupKey,
@@ -27,10 +29,20 @@ import {
   drawPagosSummaryStrip,
   PAGOS_DOCTOR_RESUMEN_BLOCK_H,
   PAGOS_DOCTOR_SUBTOTAL_WITH_PCT_H,
+  buildPaymentsSettlementMap,
+  resolveDoctorPaymentSettlement,
+  resolvePaymentPorcentaje,
   sumPagosEfectivoEntregarByDoctor,
   sumPagosNetTotalByDoctor,
   sumPagosTransferencia,
+  drawPagosTransferenciaBar,
+  PAGOS_TRANSFERENCIA_BAR_H,
+  drawPagosTotalesBloqueH4,
+  PAGOS_TOTALES_H4_BLOCK_H,
   drawPagosTotalGeneralBar,
+  drawResumenGeneralCardJ2,
+  calculateResumenGeneralJ2,
+  RESUMEN_GENERAL_J2_TOTAL_H,
   drawPdfPeriodMetaBlock,
   formatPagosPdfDateTime,
   stampPdfGeneratedFooterOnAllPages,
@@ -47,6 +59,7 @@ import { getTurnoFromFecha } from './dayTurnos'
 import { formatMonto } from './formatMonto'
 import type { Appointment, Doctor, Payment } from '../types'
 import { appendDoctorDebtSummaryPage, type DoctorDebtPdfRow } from './doctorDebtPdfTable'
+import { drawValoresConfiguradosBullets } from './resumenCuidarValores'
 
 function money(n: number): string {
   return formatMonto(n)
@@ -58,7 +71,17 @@ function formatTurnoCell(
   appointmentById?: (id: string) => Appointment | undefined,
 ): string {
   const appt = citaId && appointmentById ? appointmentById(citaId) : undefined
-  return getTurnoFromFecha(appt?.fechaHora || paymentFecha)
+  const t = getTurnoFromFecha(appt?.fechaHora || paymentFecha)
+  return t === 'Mañana' ? 'Mañ' : t
+}
+
+function formatMetodoCell(metodo: string | undefined | null): string {
+  if (!metodo) return '—'
+  const trimmed = metodo.trim()
+  if (/^transferencia$/i.test(trimmed)) {
+    return 'Transf.'
+  }
+  return trimmed
 }
 
 export type DoctorPdfRow = {
@@ -84,7 +107,7 @@ export type DayPaymentPdfRow = {
 
 export type ObraSocialLabelFn = (patientId: string) => string
 
-function formatObraSocialCell(
+export function formatObraSocialCell(
   obraSocialLabel: ObraSocialLabelFn,
   patientId: string,
   payment?: Payment,
@@ -176,6 +199,7 @@ export function aggregateDoctorTotalsFromPayments(
   payments: Payment[],
   doctorLabel: (doctorId: string) => string,
   doctorPorcentaje?: (doctorId: string) => number | undefined,
+  doctorResolver?: (doctorId: string) => Doctor | undefined,
 ): DoctorTotalChartItem[] {
   const byDoctor = new Map<string, Payment[]>()
   for (const p of payments) {
@@ -185,9 +209,12 @@ export function aggregateDoctorTotalsFromPayments(
   }
   return [...byDoctor.entries()]
     .map(([doctorId, list]) => {
-      const monto = doctorPorcentaje
-        ? aggregatePorcentajeSettlementForPayments(list, doctorPorcentaje)
-            .totalGeneral
+      const monto = doctorResolver || doctorPorcentaje
+        ? aggregatePorcentajeSettlementForPayments(
+            list,
+            doctorPorcentaje,
+            doctorResolver,
+          ).totalGeneral
         : list.reduce((s, p) => s + p.monto, 0)
       return { label: doctorLabel(doctorId), monto }
     })
@@ -361,11 +388,13 @@ function appendDoctorTotalsChartPage(
   payments: Payment[],
   doctorLabel: (doctorId: string) => string,
   doctorPorcentaje?: (doctorId: string) => number | undefined,
+  doctorResolver?: (doctorId: string) => Doctor | undefined,
 ): void {
   const items = aggregateDoctorTotalsFromPayments(
     payments,
     doctorLabel,
     doctorPorcentaje,
+    doctorResolver,
   )
   if (items.length <= 1) return
   drawDoctorPaymentsChartPage(doc, scope, periodLabel, items, payments.length)
@@ -391,6 +420,77 @@ export function formatCobranzasHeaderPeriodSuffix(
   if (scope === 'mes') return `Mes de ${periodLabel}`
   if (scope === 'anio') return `Año de ${periodLabel}`
   return `Día de ${periodLabel}`
+}
+
+const SPANISH_MONTH_NUMS: Record<string, string> = {
+  enero: '01',
+  febrero: '02',
+  marzo: '03',
+  abril: '04',
+  mayo: '05',
+  junio: '06',
+  julio: '07',
+  agosto: '08',
+  septiembre: '09',
+  setiembre: '09',
+  octubre: '10',
+  noviembre: '11',
+  diciembre: '12',
+}
+
+/**
+ * Formato de subtítulo para el PDF diario del médico:
+ * "Período: DD-MM-YYYY — Médico: APELLIDO, NOMBRE" (estilo Resumen Cuidar).
+ */
+export function formatDoctorPaymentsSubtitle(
+  _scope: AllDoctorsPdfScope,
+  periodLabel: string,
+  doctorLine: string,
+): string {
+  let periodPart = periodLabel.trim()
+  let turnoPart = ''
+
+  const turnoMatch = periodPart.match(/\s*\((Turno\s+[^)]+)\)$/i)
+  if (turnoMatch) {
+    turnoPart = ` — ${turnoMatch[1]!.replace(/^Turno\s+/i, 'Turno: ')}`
+    periodPart = periodPart.replace(/\s*\((Turno\s+[^)]+)\)$/i, '').trim()
+  }
+
+  periodPart = periodPart
+    .replace(/^Día de\s+/i, '')
+    .replace(/^Mes de\s+/i, '')
+    .replace(/^Año de\s+/i, '')
+    .trim()
+
+  const singleDateMatch = periodPart.match(
+    /^(\d{1,2})\s+(?:de\s+)?([a-zA-Záéíóúñ]+)\s+(?:de\s+)?(\d{4})$/i,
+  )
+  if (singleDateMatch) {
+    const d = singleDateMatch[1]!.padStart(2, '0')
+    const m = SPANISH_MONTH_NUMS[singleDateMatch[2]!.toLowerCase()]
+    const y = singleDateMatch[3]!
+    if (m) {
+      periodPart = `${d}-${m}-${y}`
+    }
+  }
+
+  const rangeMatch = periodPart.match(
+    /^(\d{1,2})(?:\s+(?:de\s+)?([a-zA-Záéíóúñ]+))?\s+al\s+(\d{1,2})\s+(?:de\s+)?([a-zA-Záéíóúñ]+)\s+(?:de\s+)?(\d{4})$/i,
+  )
+  if (rangeMatch) {
+    const d1 = rangeMatch[1]!.padStart(2, '0')
+    const m1Name = rangeMatch[2]?.toLowerCase()
+    const d2 = rangeMatch[3]!.padStart(2, '0')
+    const m2Name = rangeMatch[4]!.toLowerCase()
+    const y = rangeMatch[5]!
+    const m2 = SPANISH_MONTH_NUMS[m2Name]
+    const m1 = m1Name ? SPANISH_MONTH_NUMS[m1Name] : m2
+    if (m1 && m2) {
+      periodPart = `${d1}-${m1}-${y} al ${d2}-${m2}-${y}`
+    }
+  }
+
+  return `Período: ${periodPart} — Médico: ${doctorLine}${turnoPart}`
 }
 
 export function formatCobranzasTodosMedicosHeaderTitle(
@@ -665,21 +765,38 @@ const PAYMENTS_TABLE_CELL_PADDING = {
   right: 2.5,
 } as const
 
-/** Hora angosta; Turno tras Fecha; Obra social tras Paciente; Monto tras Método. */
+/** Hora angosta; Turno tras Fecha; Obra social tras Paciente; % tras Obra social; Monto tras Método. */
 const PAYMENTS_TABLE_COLUMN_STYLES_WITH_OBS: Record<
   number,
   {
     halign?: 'right' | 'left' | 'center'
     valign?: 'top' | 'middle' | 'bottom'
     cellWidth?: number
+    cellPadding?: { top?: number; bottom?: number; left?: number; right?: number } | number
   }
 > = {
-  0: { cellWidth: 20, valign: 'middle' }, // Hora / Fecha
-  1: { cellWidth: 20, valign: 'middle' }, // Turno
-  3: { cellWidth: 24, valign: 'middle' }, // Obra social
-  4: { cellWidth: 24, valign: 'middle' }, // Motivo / Obs
-  5: { cellWidth: 27, valign: 'middle' }, // Método
-  6: { halign: 'right', cellWidth: 24, valign: 'middle' }, // Monto
+  0: { cellWidth: 13, valign: 'middle' }, // Hora
+  1: {
+    cellWidth: 16,
+    valign: 'middle',
+    cellPadding: { top: 2, bottom: 2, left: 1.5, right: 1.5 },
+  }, // Turno
+  3: { cellWidth: 26, valign: 'middle' }, // Obra social
+  4: {
+    halign: 'center',
+    cellWidth: 11,
+    valign: 'middle',
+    cellPadding: { top: 2, bottom: 2, left: 1, right: 1 },
+  }, // %
+  5: { cellWidth: 18, valign: 'middle' }, // Motivo
+  6: {
+    cellWidth: 17,
+    valign: 'middle',
+    cellPadding: { top: 2, bottom: 2, left: 1.2, right: 1.2 },
+  }, // Método
+  7: { halign: 'right', cellWidth: 18, valign: 'middle' }, // Monto
+  8: { halign: 'right', cellWidth: 18, valign: 'middle' }, // Cuidar
+  9: { halign: 'right', cellWidth: 18, valign: 'middle' }, // Médico
 }
 
 /** Sin Obra social: Turno tras Fecha; Monto tras Método. */
@@ -698,25 +815,25 @@ const PAYMENTS_TABLE_COLUMN_STYLES_NO_OBRA_WITH_OBS: Record<
   5: { halign: 'right', cellWidth: 24, valign: 'middle' }, // Monto
 }
 
-/** Cabecera azul compacta (Hora, Paciente, Obra social, Motivo, Método, Monto). */
+/** Cabecera azul oscura (Hora, Turno, Paciente, Obra social, %, Motivo, Método, Monto, Cuidar, Médico). */
 const PAYMENTS_TABLE_HEAD_STYLES = {
-  fillColor: [122, 163, 176] as [number, number, number],
+  fillColor: [10, 37, 64] as [number, number, number], // #0A2540 dark navy
   textColor: [255, 255, 255] as [number, number, number],
   fontStyle: 'bold' as const,
-  fontSize: 8,
-  cellPadding: PAYMENTS_TABLE_CELL_PADDING,
-  minCellHeight: PAYMENTS_TABLE_ROW_MIN_H,
+  fontSize: 8.5,
+  cellPadding: { top: 2.2, bottom: 2.2, left: 2, right: 2 },
+  minCellHeight: 8,
   valign: 'middle' as const,
 }
 
 const PAYMENTS_TABLE_BODY_STYLES = {
   fontSize: 8,
-  cellPadding: PAYMENTS_TABLE_CELL_PADDING,
-  textColor: [61, 74, 92] as [number, number, number],
+  cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
+  textColor: [26, 39, 68] as [number, number, number],
   lineColor: [225, 232, 242] as [number, number, number],
   lineWidth: 0.1,
   valign: 'middle' as const,
-  minCellHeight: PAYMENTS_TABLE_ROW_MIN_H,
+  minCellHeight: 6.5,
 }
 
 const PAYMENTS_TABLE_ALTERNATE_ROW_STYLES = {
@@ -937,6 +1054,12 @@ function renderPagosDoctorBlock(
   doctorEspecialidad?: string,
   resumenMedicoLayout?: boolean,
   appointmentById?: (id: string) => Appointment | undefined,
+  doctor?: Doctor,
+  blockOptions?: {
+    suppressTotalesH4?: boolean
+    suppressTransferenciaBar?: boolean
+    suppressDoctorSectionTitle?: boolean
+  },
 ): number {
   const left = pagosPdfContentLeft(pageNum)
   const width = pagosPdfContentWidth(doc, pageNum)
@@ -946,42 +1069,121 @@ function renderPagosDoctorBlock(
   )
   const subtotal = sorted.reduce((s, p) => s + p.monto, 0)
 
-  let y = drawPagosDoctorSectionTitle(
-    doc,
-    left,
-    cursorY,
-    width,
-    doctorName,
-    doctorEspecialidad,
+  let y = blockOptions?.suppressDoctorSectionTitle
+    ? cursorY
+    : drawPagosDoctorSectionTitle(
+        doc,
+        left,
+        cursorY,
+        width,
+        doctorName,
+        doctorEspecialidad,
+        { withoutFrame: true },
+      )
+
+  const pctFallback = () => doctorPorcentaje
+  const docGetter = doctor ? () => doctor : undefined
+  const osResolver = (p: Payment) =>
+    obraSocialLabel
+      ? formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById)
+      : (p.obraSocialOverride || undefined)
+  const pctAgg = aggregatePorcentajeSettlementForPayments(
+    sorted,
+    pctFallback,
+    docGetter,
+    osResolver,
   )
 
   const bodyRowCount = sorted.length
   autoTable(doc, {
     startY: y,
     pageBreak: 'auto',
+    rowPageBreak: 'avoid',
     showHead: 'everyPage',
     head: [
-      [dateColumnHeader, 'Turno', 'Paciente', 'Obra social', 'Historia Clínica', 'Método', 'Monto'],
+      [
+        dateColumnHeader,
+        'Turno',
+        'Paciente',
+        'Obra social',
+        '%',
+        'Motivo',
+        'Método',
+        'Monto',
+        'Médico',
+        'Cuidar',
+      ],
     ],
     body: (() => {
       // Si un turno tiene 2 pagos (split), repetimos método/monto pero mostramos
-      // Hora/Paciente/Obra social/Motivo una sola vez.
+      // Hora/Paciente/Obra social/%/Motivo una sola vez.
       let lastKey: string | null = null
+      const settlementMap = buildPaymentsSettlementMap(
+        sorted,
+        doctor ? () => doctor : undefined,
+        (p) => formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById),
+      )
+      const todosTransf = sonTodosTransferencia(sorted)
       return sorted.map((p) => {
         const groupKey = pagoPdfGroupKey(p)
         const repeat = groupKey === lastKey
         lastKey = groupKey
+        const osCell = formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById)
+        const s =
+          settlementMap.get(p.id) ??
+          (doctor
+            ? resolveDoctorPaymentSettlement(p, doctor, osCell)
+            : computeDoctorPorcentajeSettlement(
+                p.monto,
+                resolvePaymentPorcentaje(p, doctorPorcentaje),
+              ))
+        const pctCell = s.esMontoFijo ? '—' : `${s.porcentaje}%`
+        const desglose = calcularDesglosePagoFila(p, doctor, osCell, s)
+        const motivo = p.notas?.trim() || 'Consulta'
+        const cuidarLabel =
+          todosTransf && desglose.cuidar > 0
+            ? formatMonto(-desglose.cuidar)
+            : desglose.cuidarLabel
         return [
           repeat ? '' : formatPagosPdfDateTime(p.fecha, scope),
           repeat ? '' : formatTurnoCell(p.citaId, p.fecha, appointmentById),
           repeat ? '' : patientLabel(p.patientId),
-          repeat ? '' : formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById),
-          repeat ? '' : p.notas?.trim() || '—',
-          p.metodo,
+          repeat ? '' : osCell,
+          repeat ? '' : pctCell,
+          repeat ? '' : motivo,
+          formatMetodoCell(p.metodo),
           money(p.monto),
+          desglose.medicoLabel,
+          cuidarLabel,
         ]
       })
     })(),
+    foot: [
+      [
+        `Totales · ${countDistinctPagos(sorted)} pago${countDistinctPagos(sorted) === 1 ? '' : 's'}`,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        money(subtotal),
+        money(pctAgg.totalGeneral),
+        formatMonto(
+          sonTodosTransferencia(sorted)
+            ? -pctAgg.totalPorcentaje
+            : pctAgg.totalPorcentaje,
+        ),
+      ],
+    ],
+    footStyles: {
+      fillColor: [240, 245, 252],
+      textColor: [26, 39, 68],
+      fontStyle: 'bold',
+      fontSize: 8.5,
+      minCellHeight: 7.5,
+      valign: 'middle',
+    },
     ...tableOpts,
     tableWidth: width,
     margin: { ...tableOpts.margin, top: 0, bottom: 0 },
@@ -989,31 +1191,69 @@ function renderPagosDoctorBlock(
     headStyles: PAYMENTS_TABLE_HEAD_STYLES,
     alternateRowStyles: PAYMENTS_TABLE_ALTERNATE_ROW_STYLES,
     columnStyles: PAYMENTS_TABLE_COLUMN_STYLES_WITH_OBS,
-    didParseCell: (data) => applyPagosTableLastBodyRowPadding(data, bodyRowCount),
+    didParseCell: (data) => {
+      if (data.section === 'head') {
+        if (data.column.index === 4) {
+          data.cell.styles.halign = 'center'
+          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 1, right: 1 }
+        } else if (data.column.index >= 7) {
+          data.cell.styles.halign = 'right'
+        }
+      } else if (data.section === 'foot') {
+        if (data.column.index === 0) {
+          data.cell.colSpan = 7
+          data.cell.styles.halign = 'left'
+        } else if (data.column.index >= 7) {
+          data.cell.styles.halign = 'right'
+        }
+      }
+      applyPagosTableLastBodyRowPadding(data, bodyRowCount)
+    },
   })
 
   y = tableFinalY(doc, y)
-  const pctFallback = () => doctorPorcentaje
-  if (resumenMedicoLayout) {
-    return drawPagosDoctorResumenTable(
+  const transferTotal = sumPagosTransferencia(sorted)
+  if (!blockOptions?.suppressTotalesH4) {
+    y = drawPagosTotalesBloqueH4(
       doc,
-      y,
-      left,
-      width,
-      aggregateResumenSettlementForPayments(sorted, pctFallback),
-      sonTodosTransferencia(sorted),
-    )
+      y + 1.5,
+      pageW,
+      {
+        totalFacturado: subtotal,
+        totalMedico: pctAgg.totalGeneral,
+        totalCuidar: pctAgg.totalPorcentaje,
+        totalTransferencias: transferTotal,
+      },
+      { marginX: left },
+    ) + 3
   }
-  const pctAgg = aggregatePorcentajeSettlementForPayments(sorted, pctFallback)
-  return drawPagosDoctorSubtotalBar(doc, y, pageW, countDistinctPagos(sorted), subtotal, {
-    showPorcentajeLines: true,
-    porcentaje: pctAgg.porcentaje,
-    porcentajeLabel: pctAgg.porcentajeLabel,
-    totalPorcentaje: pctAgg.totalPorcentaje,
-    totalGeneral: pctAgg.totalGeneral,
-    totalTransferencias: sumPagosTransferencia(sorted),
-    todosTransferencia: sonTodosTransferencia(sorted),
-  })
+  if (!blockOptions?.suppressTransferenciaBar) {
+    y = drawPagosTransferenciaBar(doc, y, pageW, transferTotal, { marginX: left }) + 2.5
+  }
+
+  const deudaConCuidar = Math.max(0, transferTotal - pctAgg.totalGeneral)
+  if (deudaConCuidar > 0) {
+    y += 5
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8.5)
+    doc.setTextColor(138, 75, 8)
+    doc.text('Comisión pendiente - Deuda del médico con Cuidar', left, y)
+    doc.text(money(deudaConCuidar), left + width, y, { align: 'right' })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.text(
+      'Se cobrará la comisión en turnos posteriores o con pagos a acordar con Cuidar.',
+      left,
+      y + 3.8,
+      { maxWidth: width },
+    )
+    y += 5.5
+  }
+
+  if (blockOptions?.suppressTotalesH4 && blockOptions?.suppressTransferenciaBar) {
+    return y
+  }
+  return y + 3
 }
 
 function renderPagosDoctorBlockNoObraSocial(
@@ -1030,6 +1270,8 @@ function renderPagosDoctorBlockNoObraSocial(
   doctorEspecialidad?: string,
   resumenMedicoLayout?: boolean,
   appointmentById?: (id: string) => Appointment | undefined,
+  doctor?: Doctor,
+  obraSocialLabel?: ObraSocialLabelFn,
 ): number {
   const left = pagosPdfContentLeft(pageNum)
   const width = pagosPdfContentWidth(doc, pageNum)
@@ -1063,7 +1305,7 @@ function renderPagosDoctorBlockNoObraSocial(
           repeat ? '' : formatTurnoCell(p.citaId, p.fecha, appointmentById),
           repeat ? '' : patientLabel(p.patientId),
           repeat ? '' : p.notas?.trim() || '—',
-          p.metodo,
+          formatMetodoCell(p.metodo),
           money(p.monto),
         ]
       })
@@ -1080,17 +1322,27 @@ function renderPagosDoctorBlockNoObraSocial(
 
   y = tableFinalY(doc, y)
   const pctFallback = () => doctorPorcentaje
+  const docGetter = doctor ? () => doctor : undefined
+  const osResolver = (p: Payment) =>
+    obraSocialLabel
+      ? formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById)
+      : (p.obraSocialOverride || undefined)
   if (resumenMedicoLayout) {
     return drawPagosDoctorResumenTable(
       doc,
       y,
       left,
       width,
-      aggregateResumenSettlementForPayments(sorted, pctFallback),
+      aggregateResumenSettlementForPayments(sorted, pctFallback, docGetter, osResolver),
       sonTodosTransferencia(sorted),
     )
   }
-  const pctAgg = aggregatePorcentajeSettlementForPayments(sorted, pctFallback)
+  const pctAgg = aggregatePorcentajeSettlementForPayments(
+    sorted,
+    pctFallback,
+    docGetter,
+    osResolver,
+  )
   return drawPagosDoctorSubtotalBar(doc, y, pageW, countDistinctPagos(sorted), subtotal, {
     showPorcentajeLines: true,
     porcentaje: pctAgg.porcentaje,
@@ -1170,9 +1422,9 @@ export function buildDoctorPaymentsPdf(params: {
    const headerBottom = drawPdfHeader(
      doc,
      pageW,
-     `Cobranzas`,
+     'Cobranzas',
      {
-       secondLine: `${formatCobranzasHeaderPeriodSuffix(scope, periodLabel)} - ${doctorLine}`,
+       secondLine: formatDoctorPaymentsSubtitle(scope, periodLabel, doctorLine),
        fontSize: 18,
      },
    )
@@ -1195,28 +1447,70 @@ export function buildDoctorPaymentsPdf(params: {
       pagosPdfContentLeft(pageNum),
       cursorY + 2,
     )
+
+    const pageH = doc.internal.pageSize.getHeight()
+    const neededH = RESUMEN_GENERAL_J2_TOTAL_H + 4
+    const space = ensurePagosPdfSpace(doc, cursorY + 8, neededH, pageH)
+    let blockY = space.y
+    blockY = drawResumenGeneralCardJ2(
+      doc,
+      blockY,
+      pageW,
+      {
+        totalFacturado: 0,
+        totalMedico: 0,
+        totalCuidar: 0,
+        totalTransferencias: 0,
+        totalPagos: 0,
+        totalGeneral: 0,
+      },
+      {
+        marginX: pagosPdfContentLeft(pageNum),
+        labelTotalGeneral: 'Total efectivo a entregar al médico',
+      },
+    )
+    const afterBarsY = blockY + 5
+    const left = pagosPdfContentLeft(pageNum)
+    const maxW = pagosPdfContentWidth(doc, pageNum)
+    drawValoresConfiguradosBullets(doc, doctor, afterBarsY, left, maxW, {
+      skipSetPage: true,
+      anchorToBottom: true,
+    })
   } else {
     const pageH = doc.internal.pageSize.getHeight()
     const pctFallback = () => doctor.porcentaje
+    const docGetter = () => doctor
+    const osResolver = (p: Payment) =>
+      formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById)
+
+    const totalFacturado = payments.reduce((s, p) => s + p.monto, 0)
+    const settlement = aggregatePorcentajeSettlementForPayments(
+      payments,
+      pctFallback,
+      docGetter,
+      osResolver,
+    )
+    const totalMedico = settlement.totalGeneral
+    const totalCuidar = settlement.totalPorcentaje
+    const totalTransferencias = sumPagosTransferencia(payments)
+
     const totalGeneral = resumenMedicoLayout
       ? Math.max(
           0,
-          aggregateResumenSettlementForPayments(payments, pctFallback)
-            .efectivoAEntregar,
-        )
-      : (() => {
-          const settlement = aggregatePorcentajeSettlementForPayments(
+          aggregateResumenSettlementForPayments(
             payments,
             pctFallback,
-          )
-          return Math.max(
-            0,
-            computeEfectivoAEntregar(
-              settlement.totalGeneral,
-              sumPagosTransferencia(payments),
-            ),
-          )
-        })()
+            docGetter,
+            osResolver,
+          ).efectivoAEntregar,
+        )
+      : Math.max(
+          0,
+          computeEfectivoAEntregar(
+            totalMedico,
+            totalTransferencias,
+          ),
+        )
 
     cursorY = renderPagosDoctorBlock(
       doc,
@@ -1233,22 +1527,46 @@ export function buildDoctorPaymentsPdf(params: {
       doctor.especialidad,
       resumenMedicoLayout,
       appointmentById,
+      doctor,
+      {
+        suppressTotalesH4: true,
+        suppressTransferenciaBar: true,
+        suppressDoctorSectionTitle: true,
+      },
     )
 
+    const neededH = RESUMEN_GENERAL_J2_TOTAL_H + 4
     const space = ensurePagosPdfSpace(
       doc,
       cursorY,
-      PAGOS_TOTAL_GENERAL_BAR_H + 8,
+      neededH,
       pageH,
     )
-    drawPagosTotalGeneralBar(
+    let blockY = space.y + 1.5
+    blockY = drawResumenGeneralCardJ2(
       doc,
-      space.y,
+      blockY,
       pageW,
-      countDistinctPagos(payments),
-      totalGeneral,
-      { left: 'Total efectivo a entregar al médico' },
+      {
+        totalFacturado,
+        totalMedico,
+        totalCuidar,
+        totalTransferencias,
+        totalPagos: countDistinctPagos(payments),
+        totalGeneral,
+      },
+      {
+        marginX: pagosPdfContentLeft(pageNum),
+        labelTotalGeneral: 'Total efectivo a entregar al médico',
+      },
     )
+    const afterBarsY = blockY + 5
+    const left = pagosPdfContentLeft(pageNum)
+    const maxW = pagosPdfContentWidth(doc, pageNum)
+    drawValoresConfiguradosBullets(doc, doctor, afterBarsY, left, maxW, {
+      skipSetPage: true,
+      anchorToBottom: true,
+    })
   }
 
   const slug = `${doctor.apellido}-${doctor.nombre}`
@@ -1346,7 +1664,7 @@ export function buildDoctorPdfRows(
         paciente: repeat ? '' : patientLabel(p.patientId),
         obs: repeat ? '' : p.notas?.trim() || '—',
         monto: p.monto,
-        metodo: p.metodo,
+        metodo: formatMetodoCell(p.metodo),
         obraSocial: formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById),
       }
     })
@@ -1374,7 +1692,7 @@ export function buildDayPaymentPdfRows(
         obs: repeat ? '' : p.notas?.trim() || '—',
         medico: repeat ? '' : doctorLabel(p.doctorId),
         monto: p.monto,
-        metodo: p.metodo,
+        metodo: formatMetodoCell(p.metodo),
         obraSocial: formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById),
       }
     })
@@ -1460,9 +1778,9 @@ export function buildDayPaymentsPdf(params: {
       columnStyles: {
         0: { cellWidth: 20, valign: 'middle' },
         1: { cellWidth: 20, valign: 'middle' },
-        3: { cellWidth: 22, valign: 'middle' },
+        3: { cellWidth: 30, valign: 'middle' },
         4: { cellWidth: 24, valign: 'middle' },
-        6: { cellWidth: 27, valign: 'middle' },
+        6: { cellWidth: 19, valign: 'middle' },
         7: { halign: 'right', cellWidth: 24, valign: 'middle' },
       },
       margin: { left: 14, right: 14 },
@@ -1500,6 +1818,7 @@ export function buildAllDoctorsPaymentsPdf(params: {
   obraSocialLabel: ObraSocialLabelFn
   doctorLabel: (doctorId: string) => string
   doctorPorcentaje?: (doctorId: string) => number | undefined
+  doctorResolver?: (doctorId: string) => Doctor | undefined
   doctorEspecialidad?: (doctorId: string) => string | undefined
   dateFormat: string
   dateColumnHeader: string
@@ -1523,6 +1842,7 @@ export function buildAllDoctorsPaymentsPdf(params: {
     obraSocialLabel,
     doctorLabel,
     doctorPorcentaje,
+    doctorResolver,
     doctorEspecialidad,
     dateColumnHeader,
     scope,
@@ -1538,6 +1858,8 @@ export function buildAllDoctorsPaymentsPdf(params: {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
+  const osResolver = (p: Payment) =>
+    formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById)
 
   const pdfHeaderSubtitle = (
     headerTitle ?? formatCobranzasTodosMedicosHeaderTitle(scope, periodLabel)
@@ -1556,7 +1878,29 @@ export function buildAllDoctorsPaymentsPdf(params: {
 
   if (payments.length === 0) {
     doc.setTextColor(107, 124, 147)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
     doc.text(emptyMessage, pagosPdfContentLeft(1), cursorY + 2)
+    cursorY += 8
+
+    drawResumenGeneralCardJ2(
+      doc,
+      cursorY,
+      pageW,
+      {
+        totalFacturado: 0,
+        totalMedico: 0,
+        totalCuidar: 0,
+        totalTransferencias: 0,
+        totalPagos: 0,
+        totalGeneral: 0,
+      },
+      {
+        labelTotalGeneral: resumenMedicoLayout
+          ? 'Total efectivo a entregar al médico'
+          : 'Total general',
+      },
+    )
   } else {
     const byDoctor = new Map<string, Payment[]>()
     for (const p of payments) {
@@ -1602,36 +1946,61 @@ export function buildAllDoctorsPaymentsPdf(params: {
         doctorEspecialidad?.(doctorId),
         resumenMedicoLayout,
         appointmentById,
+        doctorResolver?.(doctorId),
       )
     }
 
+    const doctorResolverOrPorcentaje = doctorResolver ?? doctorPorcentaje
     const grandTotalNeto = resumenMedicoLayout
       ? Math.max(
           0,
-          sumPagosEfectivoEntregarByDoctor(payments, doctorPorcentaje),
+          sumPagosEfectivoEntregarByDoctor(
+            payments,
+            doctorResolverOrPorcentaje,
+            osResolver,
+          ),
         )
       : Math.max(
           0,
           computeEfectivoAEntregar(
-            sumPagosNetTotalByDoctor(payments, doctorPorcentaje),
+            sumPagosNetTotalByDoctor(
+              payments,
+              doctorResolverOrPorcentaje,
+              osResolver,
+            ),
             sumPagosTransferencia(payments),
           ),
         )
-    const space = ensurePagosPdfSpace(
+    const totalFacturadoAll = payments.reduce((s, p) => s + p.monto, 0)
+    const totalTransfAll = sumPagosTransferencia(payments)
+    const totalMedicoAll = sumPagosNetTotalByDoctor(payments, doctorResolverOrPorcentaje, osResolver)
+    const totalCuidarAll = totalFacturadoAll - totalMedicoAll
+
+    const neededH = RESUMEN_GENERAL_J2_TOTAL_H + 4
+    if (cursorY + neededH > pageH - 16) {
+      doc.addPage()
+      cursorY = bodyStartY
+    } else {
+      cursorY += 4
+    }
+
+    drawResumenGeneralCardJ2(
       doc,
       cursorY,
-      PAGOS_TOTAL_GENERAL_BAR_H + 8,
-      pageH,
-    )
-    drawPagosTotalGeneralBar(
-      doc,
-      space.y,
       pageW,
-      countDistinctPagos(payments),
-      grandTotalNeto,
-      resumenMedicoLayout
-        ? { left: 'Total efectivo a entregar al médico' }
-        : undefined,
+      {
+        totalFacturado: totalFacturadoAll,
+        totalMedico: totalMedicoAll,
+        totalCuidar: totalCuidarAll,
+        totalTransferencias: totalTransfAll,
+        totalPagos: countDistinctPagos(payments),
+        totalGeneral: grandTotalNeto,
+      },
+      {
+        labelTotalGeneral: resumenMedicoLayout
+          ? 'Total efectivo a entregar al médico'
+          : 'Total general',
+      },
     )
   }
 
@@ -1643,6 +2012,7 @@ export function buildAllDoctorsPaymentsPdf(params: {
       payments,
       doctorLabel,
       doctorPorcentaje,
+      doctorResolver,
     )
   }
 
@@ -1651,7 +2021,13 @@ export function buildAllDoctorsPaymentsPdf(params: {
       doc,
       scope,
       periodLabel,
-      buildRendicionDoctorRows(payments, doctorLabel, doctorPorcentaje),
+      buildRendicionDoctorRows(
+        payments,
+        doctorLabel,
+        doctorPorcentaje,
+        doctorResolver,
+        osResolver,
+      ),
       sonTodosTransferencia(payments),
     )
   }
@@ -1675,6 +2051,7 @@ export function buildObraSocialDoctorsPaymentsPdf(params: {
   obraSocialLabel: ObraSocialLabelFn
   doctorLabel: (doctorId: string) => string
   doctorPorcentaje?: (doctorId: string) => number | undefined
+  doctorResolver?: (doctorId: string) => Doctor | undefined
   doctorEspecialidad?: (doctorId: string) => string | undefined
   dateColumnHeader: string
   scope: AllDoctorsPdfScope
@@ -1692,6 +2069,7 @@ export function buildObraSocialDoctorsPaymentsPdf(params: {
     obraSocialLabel,
     doctorLabel,
     doctorPorcentaje,
+    doctorResolver,
     doctorEspecialidad,
     dateColumnHeader,
     scope,
@@ -1705,6 +2083,8 @@ export function buildObraSocialDoctorsPaymentsPdf(params: {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
+  const osResolver = (p: Payment) =>
+    formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById)
 
   const headerBottom = drawPdfHeader(
     doc,
@@ -1779,10 +2159,16 @@ export function buildObraSocialDoctorsPaymentsPdf(params: {
           doctorEspecialidad?.(doctorId),
           undefined,
           appointmentById,
+          doctorResolver?.(doctorId),
+          obraSocialLabel,
         )
       }
 
-      const obraTotalNeto = sumPagosNetTotalByDoctor(obraPayments, doctorPorcentaje)
+      const doctorResolverOrPorcentaje = doctorResolver ?? doctorPorcentaje
+      const obraTotalNeto = sumPagosNetTotalByDoctor(
+        obraPayments,
+        doctorResolverOrPorcentaje,
+      )
       const space = ensurePagosPdfSpace(
         doc,
         cursorY,
@@ -1860,6 +2246,8 @@ export function buildGerenciaDoctorsPaymentsPdf(params: {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
+  const osResolver = (p: Payment) =>
+    formatObraSocialCell(obraSocialLabel, p.patientId, p, appointmentById)
 
   const headerBottom = drawPdfHeader(
     doc,

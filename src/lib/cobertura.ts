@@ -1,10 +1,17 @@
 import type {
   Afiliado,
+  Appointment,
   CoberturaTipo,
   CuotaMensual,
   Patient,
   PlanAfiliado,
 } from '../types'
+import { calcularConsumoAfiliadoMes } from './consumoAfiliados'
+import {
+  esContratanteDadoDeBaja,
+  esContratanteSuspendido,
+  hoyIsoLocal,
+} from './contratantesMovimientos'
 
 /** Valor con el que se guarda "sin cobertura" en `obraSocialOverride`. */
 export const COBERTURA_PARTICULAR = 'Particular'
@@ -131,6 +138,7 @@ export function contextoCoberturaDe(
   planes: readonly PlanAfiliado[],
   cuotas: readonly CuotaMensual[],
   hoy: Date = new Date(),
+  appointments?: readonly Appointment[],
 ): ContextoCobertura {
   const obraSocial = (paciente?.obraSocial ?? '').trim()
 
@@ -139,23 +147,48 @@ export function contextoCoberturaDe(
   const afiliado =
     !paciente || paciente.activo === false
       ? null
-      : afiliados.find((a) => a.patientId === paciente.id && a.activo) ?? null
+      : afiliados.find(
+          (a) =>
+            a.activo &&
+            (a.patientId === paciente.id ||
+              (Array.isArray(a.adherentes) &&
+                a.adherentes.some((adh) => adh.patientId === paciente.id))),
+        ) ?? null
   const plan = afiliado
     ? planes.find((p) => p.id === afiliado.planId) ?? null
     : null
 
   let planHabilitado = true
   let planMotivo = ''
+  const hoyIso = hoyIsoLocal(hoy)
   const consumo = consumoPlanDelMes(afiliado, plan, cuotas, hoy)
   if (!plan) {
     planHabilitado = false
     planMotivo = 'No tiene plan activo.'
+  } else if (afiliado && esContratanteDadoDeBaja(afiliado, hoyIso)) {
+    planHabilitado = false
+    planMotivo = 'Contratante dado de baja'
+  } else if (afiliado && esContratanteSuspendido(afiliado, hoyIso)) {
+    planHabilitado = false
+    planMotivo = 'Contratante suspendido'
   } else if (!plan.activo) {
     planHabilitado = false
     planMotivo = `El plan "${plan.nombre}" está dado de baja.`
   } else if (afiliadoTieneCuotasImpagas(afiliado, cuotas, hoy)) {
     planHabilitado = false
     planMotivo = 'Tiene cuotas impagas: regularizá antes de usarlo.'
+  } else if (appointments && paciente) {
+    const cMes = calcularConsumoAfiliadoMes({
+      patientId: paciente.id,
+      anio: hoy.getFullYear(),
+      mes: hoy.getMonth() + 1,
+      plan,
+      appointments,
+    })
+    if (cMes.consultasAgotadas && cMes.prestacionesAgotadas) {
+      planHabilitado = false
+      planMotivo = `Ya usó todas sus consultas (${cMes.consultasCupo}) y prestaciones (${cMes.prestacionesCupo}) de este mes.`
+    }
   } else if (consumo.agotado) {
     // Consumió las consultas gratuitas del mes. No se bloquea el turno: se
     // bloquea la cobertura por el plan, que sigue disponible por obra social

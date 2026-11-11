@@ -377,3 +377,40 @@
     transition: none !important;
   }
 }
+
+/* === Tarjeta "Conectar por IP manual" en el modal === */
+.modal-ip-card {
+  margin-bottom: 12px;
+  transition: border-color 0.2s ease;
+}
+
+.modal-ip-card:hover {
+  border-color: #EA8A00 !important;
+}
+
+.modal-ip-input {
+  fontFamily: Consolas, monospace;
+  fontSize: 0.8rem;
+}
+
+.modal-ip-btn {
+  fontSize: 0.78rem;
+}
+
+.modal-ip-status--ok {
+  color: #047857;
+}
+
+.modal-ip-status--err {
+  color: #B91C1C;
+}
+
+.modal-ip-status--connecting {
+  color: #B45309;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-ip-card {
+    transition: none !important;
+  }
+}

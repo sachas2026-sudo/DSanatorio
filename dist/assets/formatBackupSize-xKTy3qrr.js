@@ -1,0 +1,1 @@
+function e(e){return e==null||e<0?`—`:e<1024?`${e} B`:e<1024*1024?`${(e/1024).toFixed(1)} KB`:`${(e/(1024*1024)).toFixed(2)} MB`}export{e as t};

@@ -1,13 +1,13 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Sanatorio V",
-  "version": "16.0.0",
+  "version": "18.0.0",
   "identifier": "com.sanatorio.gestion",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npx vite build"
   },
   "app": {
     "windows": [
@@ -39,7 +39,8 @@
       "installer-bases/sanatorio-datos.respaldo-1.json": "sanatorio-datos.respaldo-1.json",
       "installer-bases/sanatorio-datos.respaldo-2.json": "sanatorio-datos.respaldo-2.json",
       "installer-bases/sanatorio-datos.respaldo-3.json": "sanatorio-datos.respaldo-3.json",
-      "installer-bases/auth-accounts.json": "auth-accounts.json"
+      "installer-bases/auth-accounts.json": "auth-accounts.json",
+      "installer-bases/firewall-cmd.cmd": "firewall-cmd.cmd"
     },
     "windows": {
       "nsis": {

@@ -1,0 +1,419 @@
+    Checking app v18.0.0 (D:\Proyectos\Sanatorio\src-tauri)
+error[E0433]: cannot find `__tauri_command_name_discover_sanatorio_servers` in `discovery`
+   --> src\lib.rs:121:25
+    |
+121 |           .invoke_handler(tauri::generate_handler![
+    |  _________________________^
+122 | |             modules::comunicacion::commands::send_email_gmail,
+123 | |             modules::comunicacion::commands::send_agenda_email,
+124 | |             modules::comunicacion::commands::open_agenda_email_draft,
+...   |
+174 | |             modules::configuracion::commands::minimize_window,
+175 | |         ])
+    | |_________^ could not find `__tauri_command_name_discover_sanatorio_servers` in `discovery`
+    |
+    = note: this error originates in the macro `tauri::generate_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find `__cmd__discover_sanatorio_servers` in `discovery`
+   --> src\lib.rs:169:24
+    |
+169 |             discovery::discover_sanatorio_servers,
+    |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^ could not find `__cmd__discover_sanatorio_servers` in `discovery`
+
+error[E0433]: cannot find `__tauri_command_name_auto_connect_sanatorio_server` in `discovery`
+   --> src\lib.rs:121:25
+    |
+121 |           .invoke_handler(tauri::generate_handler![
+    |  _________________________^
+122 | |             modules::comunicacion::commands::send_email_gmail,
+123 | |             modules::comunicacion::commands::send_agenda_email,
+124 | |             modules::comunicacion::commands::open_agenda_email_draft,
+...   |
+174 | |             modules::configuracion::commands::minimize_window,
+175 | |         ])
+    | |_________^ could not find `__tauri_command_name_auto_connect_sanatorio_server` in `discovery`
+    |
+    = note: this error originates in the macro `tauri::generate_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find `__cmd__auto_connect_sanatorio_server` in `discovery`
+   --> src\lib.rs:170:24
+    |
+170 |             discovery::auto_connect_sanatorio_server,
+    |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ could not find `__cmd__auto_connect_sanatorio_server` in `discovery`
+
+error[E0433]: cannot find `__tauri_command_name_get_network_connection_status` in `discovery`
+   --> src\lib.rs:121:25
+    |
+121 |           .invoke_handler(tauri::generate_handler![
+    |  _________________________^
+122 | |             modules::comunicacion::commands::send_email_gmail,
+123 | |             modules::comunicacion::commands::send_agenda_email,
+124 | |             modules::comunicacion::commands::open_agenda_email_draft,
+...   |
+174 | |             modules::configuracion::commands::minimize_window,
+175 | |         ])
+    | |_________^ could not find `__tauri_command_name_get_network_connection_status` in `discovery`
+    |
+    = note: this error originates in the macro `tauri::generate_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find `__cmd__get_network_connection_status` in `discovery`
+   --> src\lib.rs:171:24
+    |
+171 |             discovery::get_network_connection_status,
+    |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ could not find `__cmd__get_network_connection_status` in `discovery`
+
+error[E0433]: cannot find `__tauri_command_name_set_manual_server_url` in `discovery`
+   --> src\lib.rs:121:25
+    |
+121 |           .invoke_handler(tauri::generate_handler![
+    |  _________________________^
+122 | |             modules::comunicacion::commands::send_email_gmail,
+123 | |             modules::comunicacion::commands::send_agenda_email,
+124 | |             modules::comunicacion::commands::open_agenda_email_draft,
+...   |
+174 | |             modules::configuracion::commands::minimize_window,
+175 | |         ])
+    | |_________^ could not find `__tauri_command_name_set_manual_server_url` in `discovery`
+    |
+    = note: this error originates in the macro `tauri::generate_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find `__cmd__set_manual_server_url` in `discovery`
+   --> src\lib.rs:172:24
+    |
+172 |             discovery::set_manual_server_url,
+    |                        ^^^^^^^^^^^^^^^^^^^^^ could not find `__cmd__set_manual_server_url` in `discovery`
+
+error[E0433]: cannot find `__tauri_command_name_set_mode_local` in `discovery`
+   --> src\lib.rs:121:25
+    |
+121 |           .invoke_handler(tauri::generate_handler![
+    |  _________________________^
+122 | |             modules::comunicacion::commands::send_email_gmail,
+123 | |             modules::comunicacion::commands::send_agenda_email,
+124 | |             modules::comunicacion::commands::open_agenda_email_draft,
+...   |
+174 | |             modules::configuracion::commands::minimize_window,
+175 | |         ])
+    | |_________^ could not find `__tauri_command_name_set_mode_local` in `discovery`
+    |
+    = note: this error originates in the macro `tauri::generate_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find `__cmd__set_mode_local` in `discovery`
+   --> src\lib.rs:173:24
+    |
+173 |             discovery::set_mode_local,
+    |                        ^^^^^^^^^^^^^^ could not find `__cmd__set_mode_local` in `discovery`
+
+error[E0433]: cannot find `LocalAddr` in `net`
+   --> src\discovery.rs:100:33
+    |
+100 |     let local_addrs = std::net::LocalAddr::iterator().filter_map(|a| a.ok());
+    |                                 ^^^^^^^^^ could not find `LocalAddr` in `net`
+
+error[E0425]: cannot find value `found` in this scope
+   --> src\discovery.rs:213:58
+    |
+213 |                         if !found_set.contains(&url) && !found.iter().any(|s| s.server_url == url) {
+    |                                                          ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `found` in this scope
+   --> src\discovery.rs:215:29
+    |
+215 | ...                   found.push(DiscoveredServer {
+    |                       ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `found` in this scope
+   --> src\discovery.rs:248:15
+    |
+248 |     for s in &found {
+    |               ^^^^^ not found in this scope
+
+warning: unused import: `std::path::Path`
+ --> src\server.rs:3:5
+  |
+3 | use std::path::Path;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `rcgen::generate_simple_self_signed`
+  --> src\server.rs:18:5
+   |
+18 | use rcgen::generate_simple_self_signed;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused doc comment
+   --> src\client_commands.rs:61:9
+    |
+ 61 |           /// Paso 1: Si hay URL configurada, hacer health check antes de usarla.
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 62 | /         if base_url_opt.is_some() {
+ 63 | |             let base = base_url_opt.as_ref().unwrap().clone();
+ 64 | |             let pem_for_check = pem_opt.as_deref().unwrap_or("auto").to_string();
+ 65 | |             let client_for_check = build_http_client(&pem_for_check).unwrap();
+...   |
+110 | |         }
+    | |_________- rustdoc does not generate documentation for expressions
+    |
+    = help: use `//` for a plain comment
+    = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused label
+   --> src\discovery.rs:106:5
+    |
+106 |     'main: for addr in std::net::IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)).to_socket_addrs() {
+    |     ^^^^^
+    |
+    = note: `#[warn(unused_labels)]` (part of `#[warn(unused)]`) on by default
+
+error[E0560]: struct `Health` has no field named `app`
+   --> src\server.rs:433:69
+    |
+433 |     Json(Health { status: "ok", version: env!("CARGO_PKG_VERSION"), app: "sanatorio", server_name })
+    |                                                                     ^^^ `Health` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+error[E0560]: struct `Health` has no field named `server_name`
+   --> src\server.rs:433:87
+    |
+433 |     Json(Health { status: "ok", version: env!("CARGO_PKG_VERSION"), app: "sanatorio", server_name })
+    |                                                                                       ^^^^^^^^^^^ `Health` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1072:17
+     |
+1072 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1098:17
+     |
+1098 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1176:17
+     |
+1176 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1201:17
+     |
+1201 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1238:17
+     |
+1238 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1263:17
+     |
+1263 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1301:17
+     |
+1301 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1326:17
+     |
+1326 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1363:17
+     |
+1363 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1388:17
+     |
+1388 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1426:17
+     |
+1426 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\server.rs:1451:17
+     |
+1451 | ...   let mut conn = db::open_connection().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": ...
+     |           ----^^^^
+     |           |
+     |           help: remove this `mut`
+
+error[E0308]: mismatched types
+   --> src\client_commands.rs:151:33
+    |
+151 |   ...                   let (info2, active_client2) = self
+    |  ___________________________^^^^^^^^^^^^^^^^^^^^^^^___-
+    | |                           |
+    | |                           expected `SessionInfo`, found `(_, _)`
+152 | | ...                       .session
+153 | | ...                       .login(&new_client, &new_base, username, password)
+154 | | ...                       .await
+155 | | ...                       .map_err(|e2| format!("No se pudo conectar con el servidor: {e2}"))?;
+    | |______________________________________________________________________________________________- this expression has type `SessionInfo`
+    |
+    = note: expected struct `SessionInfo`
+                found tuple `(_, _)`
+
+error[E0308]: mismatched types
+   --> src\discovery.rs:102:12
+    |
+102 |     if let Ok(addrs) = std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) {
+    |            ^^^^^^^^^   ------------------------------------------------- this expression has type `std::net::IpAddr`
+    |            |
+    |            expected `IpAddr`, found `Result<_, _>`
+    |
+    = note: expected enum `std::net::IpAddr`
+               found enum `Result<_, _>`
+
+error[E0599]: no method named `to_socket_addrs` found for enum `std::net::IpAddr` in the current scope
+   --> src\discovery.rs:106:72
+    |
+106 |     'main: for addr in std::net::IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)).to_socket_addrs() {
+    |                                                                        ^^^^^^^^^^^^^^^ method not found in `std::net::IpAddr`
+
+error[E0599]: no method named `to_socket_addrs` found for enum `std::net::IpAddr` in the current scope
+   --> src\discovery.rs:107:83
+    |
+107 |         if let Ok(socket_addrs) = std::net::IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)).to_socket_addrs() {
+    |                                                                                   ^^^^^^^^^^^^^^^ method not found in `std::net::IpAddr`
+
+error[E0599]: no method named `parse` found for reference `&std::net::IpAddr` in the current scope
+   --> src\discovery.rs:235:32
+    |
+235 |         if let Ok(ip) = ip_str.parse::<IpAddr>() {
+    |                                ^^^^^ method not found in `&std::net::IpAddr`
+
+error[E0061]: this enum variant takes 1 argument but 0 arguments were supplied
+   --> src\discovery.rs:412:5
+    |
+412 |     Ok()
+    |     ^^-- argument #1 of type `()` is missing
+    |
+note: tuple variant defined here
+   --> C:\Users\L\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\result.rs:562:5
+    |
+562 |     Ok(#[stable(feature = "rust1", since = "1.0.0")] T),
+    |     ^^
+help: provide the argument
+    |
+412 |     Ok(())
+    |        ++
+
+error[E0061]: this enum variant takes 1 argument but 0 arguments were supplied
+   --> src\discovery.rs:424:5
+    |
+424 |     Ok()
+    |     ^^-- argument #1 of type `()` is missing
+    |
+note: tuple variant defined here
+   --> C:\Users\L\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\result.rs:562:5
+    |
+562 |     Ok(#[stable(feature = "rust1", since = "1.0.0")] T),
+    |     ^^
+help: provide the argument
+    |
+424 |     Ok(())
+    |        ++
+
+warning: unused variable: `state`
+   --> src\server.rs:421:30
+    |
+421 | async fn check_write_enabled(state: &AppState) -> Result<(), (StatusCode, axum::Json<serde_json::Value>)> {
+    |                              ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1097:33
+     |
+1097 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1200:33
+     |
+1200 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1262:33
+     |
+1262 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1325:33
+     |
+1325 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1387:33
+     |
+1387 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `current_version`
+    --> src\server.rs:1450:33
+     |
+1450 |         WriteResult::Conflict { current_version } => {
+     |                                 ^^^^^^^^^^^^^^^ help: try ignoring the field: `current_version: _`
+
+warning: unused variable: `ip_v4`
+   --> src\discovery.rs:144:23
+    |
+144 |     if let IpAddr::V4(ip_v4) = ip {
+    |                       ^^^^^ help: if this is intentional, prefix it with an underscore: `_ip_v4`
+
+warning: unused variable: `addr_str`
+   --> src\discovery.rs:145:13
+    |
+145 |         let addr_str = format!("{}:8787", ip);
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_addr_str`
+
+Some errors have detailed explanations: E0061, E0308, E0425, E0433, E0560, E0599.
+For more information about an error, try `rustc --explain E0061`.
+warning: `app` (lib) generated 25 warnings
+error: could not compile `app` (lib) due to 23 previous errors; 25 warnings emitted

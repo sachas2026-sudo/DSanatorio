@@ -9,7 +9,11 @@ import {
   type ReactNode,
 } from 'react'
 import { format } from 'date-fns'
-import { pushResumenDiarioToSupabase } from '../lib/supabaseSync'
+import {
+  pushMesesRecientesToSupabase,
+  pushMedicosDirectorioToSupabase,
+  pushMedicosDirectorioDebounced,
+} from '../lib/supabaseSync'
 import { LoadErrorScreen } from '../shared/components/LoadErrorScreen'
 import { LoadingScreen } from '../shared/components/LoadingScreen'
 import { useConfirm } from './ConfirmContext'
@@ -25,6 +29,13 @@ import {
   normalizeObraSocial,
   obraSocialKey,
 } from '../lib/obrasSociales'
+import { buildObrasSocialesCatalog } from '../lib/obrasSocialesCatalog'
+import {
+  buildPrestacionesCatalog,
+  normalizePrestacionKey,
+  generarSiguienteNumeroOrden,
+} from '../lib/prestacionesCatalog'
+import type { ObraSocialCatalog, PrestacionCatalogo, OrdenMedica } from '../types'
 import { saveUltimoDniPacCorto } from '../lib/dniLabels'
 import { createId } from '../lib/id'
 import { getCurrentUserDisplayName } from '../lib/auth'
@@ -103,6 +114,18 @@ import {
   motivoConsultaKey,
   normalizeMotivoConsulta,
 } from '../lib/motivoConsulta'
+import {
+  type AplicarCambioCoberturaParams,
+  cancelarCambioProgramadoState,
+  darDeBajaContratanteState,
+  ejecutarCambioCoberturaEfectivo,
+  esContratanteDadoDeBaja,
+  procesarTareasDiariasContratantes,
+  programarCambioCoberturaState,
+  reactivarContratanteState,
+  resolverObraSocialAnteriorParaGuardar,
+  suspenderContratanteState,
+} from '../lib/contratantesMovimientos'
 
 type Ctx = {
   data: AppData
@@ -140,12 +163,71 @@ type Ctx = {
   deletePlanAfiliado: (id: string) => void
   upsertAfiliado: (a: Omit<Afiliado, 'id'> & { id?: string }) => void
   deleteAfiliado: (id: string) => void
+  afiliarConSincronizacion: (payload: {
+    titularId: string
+    planId: string
+    fechaInicio: string
+    adherentes?: Array<{
+      pacienteExistenteId?: string
+      nombre: string
+      apellido: string
+      dni: string
+      fechaNacimiento: string
+      relacion: string
+    }>
+    usuario?: string
+  }) => void
+  quitarAdherente: (afiliadoId: string, adherentePatientId: string) => void
+  cambiarCoberturaContratante: (params: AplicarCambioCoberturaParams) => {
+    pacientesReutilizados: string[]
+  }
+  cancelarCambioProgramadoContratante: (afiliadoId: string, usuario: string) => void
+  suspenderContratante: (params: {
+    afiliadoId: string
+    motivo: string
+    desde: string
+    hasta?: string
+    observaciones?: string
+    usuario: string
+  }) => void
+  reactivarContratante: (params: {
+    afiliadoId: string
+    fecha?: string
+    usuario: string
+  }) => void
+  darDeBajaContratante: (params: {
+    afiliadoId: string
+    motivo: string
+    fechaBaja: string
+    usuario: string
+  }) => void
+  registrarContratanteConPacienteNuevoState: (payload: {
+    patient: Patient
+    afiliado: Afiliado
+    adherentes?: Array<{
+      pacienteExistenteId?: string
+      nombre: string
+      apellido: string
+      dni: string
+      fechaNacimiento: string
+      relacion: string
+    }>
+    usuario?: string
+  }) => void
   // `usos` es opcional al crear: recién se suma al agendar un turno con plan,
 // así que una cuota nueva arranca en 0 sin que el llamador tenga que decirlo.
   upsertCuotaMensual: (
     c: Omit<CuotaMensual, 'id' | 'usos'> & { id?: string; usos?: number },
   ) => void
   deleteCuotaMensual: (id: string) => void
+  // Prestaciones y Órdenes Médicas de Afiliados
+  prestacionesAfiliados: PrestacionCatalogo[]
+  ordenesMedicas: OrdenMedica[]
+  upsertPrestacionAfiliado: (p: Omit<PrestacionCatalogo, 'id'> & { id?: string }) => { ok: boolean; error?: string }
+  deletePrestacionAfiliado: (id: string) => { ok: boolean; error?: string }
+  emitirOrdenMedica: (
+    orden: Omit<OrdenMedica, 'id' | 'numero' | 'creadaEn'>,
+  ) => { ok: boolean; orden?: OrdenMedica; error?: string }
   // Distribución por médico · Obras Sociales (sólo porcentajes: el resto sale del filtro)
   setDistribucionOSPorcentaje: (obraSocial: string, porcentaje: number) => void
   saveAtencionSinTurnoListado: (payload: {
@@ -187,6 +269,11 @@ type Ctx = {
     nuevo: string,
   ) => { ok: boolean; error?: string }
   obrasSocialesOpciones: string[]
+  obrasSocialesCatalog: ObraSocialCatalog[]
+  saveObraSocialCatalog: (
+    item: ObraSocialCatalog,
+  ) => Promise<{ ok: boolean; conflict?: boolean; current?: ObraSocialCatalog; error?: string }>
+  deleteObraSocialCatalog: (nombre: string) => Promise<{ ok: boolean; error?: string }>
   addObraSocialCustom: (nombre: string) => { ok: boolean; error?: string }
   removeObraSocialCustom: (nombre: string) => void
   renameObraSocialCustom: (
@@ -324,9 +411,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         .catch(() => undefined)
         .then(() => saveAppData(snapshot))
         .then(() => {
-          if (snapshot.settings?.supabaseUrl && snapshot.settings?.supabaseAnonKey && snapshot.settings?.supabaseAutoSync !== false) {
-            void pushResumenDiarioToSupabase(snapshot).catch(() => {})
-          }
+          void pushMesesRecientesToSupabase(snapshot)
+          void pushMedicosDirectorioDebounced(snapshot, 5000)
         })
         .catch((err) => {
           console.error('No se pudieron guardar los datos en disco:', err)
@@ -361,9 +447,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           setData(enriched)
         }
         setLastSyncTime(new Date())
-        if (enriched.settings?.supabaseUrl && enriched.settings?.supabaseAnonKey && enriched.settings?.supabaseAutoSync !== false) {
-          void pushResumenDiarioToSupabase(enriched).catch(() => {})
-        }
+        void pushMesesRecientesToSupabase(enriched)
+        void pushMedicosDirectorioToSupabase(enriched)
         return true
       }
       return false
@@ -450,6 +535,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           setSystemAlert(result.integrityAlert)
         }
         await saveAppData(enriched)
+        void pushMesesRecientesToSupabase(enriched)
+        void pushMedicosDirectorioToSupabase(enriched)
       } catch (err) {
         if (slowTimer !== undefined) window.clearTimeout(slowTimer)
         if (generation !== loadGenerationRef.current) return
@@ -491,6 +578,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       if (!snapshot) return
       saveChainRef.current = saveChainRef.current
         .then(() => saveAppData(snapshot))
+        .then(() => {
+          void pushMesesRecientesToSupabase(snapshot)
+          void pushMedicosDirectorioDebounced(snapshot, 5000)
+        })
         .catch((err) => {
           console.error('No se pudieron guardar los datos en disco:', err)
           reportPersistError(
@@ -800,6 +891,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         localidad: p.localidad ?? '',
         fechaNacimiento: p.fechaNacimiento,
         obraSocial: p.obraSocial,
+        obraSocialAnterior: p.obraSocialAnterior ?? prevPatient?.obraSocialAnterior,
         notas: p.notas,
         activo: prevPatient?.activo ?? p.activo ?? true,
         coberturaPreferida: p.coberturaPreferida ?? prevPatient?.coberturaPreferida,
@@ -863,14 +955,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         obraSocial: d.obraSocial ?? prevDoc?.obraSocial ?? '',
         obrasSociales:
           d.obrasSociales ??
-          (d.obraSocial ? [d.obraSocial] : undefined) ??
+          (d.obraSocial ? [{ nombre: d.obraSocial, porcentaje: 0, monto: 0 }] : undefined) ??
           prevDoc?.obrasSociales ??
-          (prevDoc?.obraSocial ? [prevDoc.obraSocial] : undefined) ??
+          (prevDoc?.obraSocial ? [{ nombre: prevDoc.obraSocial, porcentaje: 0, monto: 0 }] : undefined) ??
           [],
         telefono: d.telefono,
         localidad: d.localidad ?? '',
         email: d.email,
+        alias: d.alias ?? prevDoc?.alias,
         porcentaje: d.porcentaje,
+        valor: d.valor ?? prevDoc?.valor ?? 0,
+        particular: d.particular ?? prevDoc?.particular ?? 0,
+        cuidar: d.cuidar ?? prevDoc?.cuidar ?? 0,
         duracionTurnoMinutos:
           d.duracionTurnoMinutos ?? prevDoc?.duracionTurnoMinutos ?? 30,
         tipoAgenda: d.tipoAgenda ?? prevDoc?.tipoAgenda ?? 'semanal',
@@ -1147,17 +1243,79 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setData((prev) => {
       if (!prev) return prev
       const id = p.id ?? createId()
+      const prevPlan = prev.planesAfiliados.find((x) => x.id === id)
       const next: PlanAfiliado = {
         id,
         nombre: p.nombre,
         precio: p.precio,
         descripcion: p.descripcion ?? '',
         activo: p.activo ?? true,
+        tipo: p.tipo ?? prevPlan?.tipo ?? 'individual',
         cupoConsultas: p.cupoConsultas ?? 0,
+        prestacionesPorMes: p.prestacionesPorMes ?? prevPlan?.prestacionesPorMes ?? 0,
+        maxAdherentes: p.maxAdherentes ?? prevPlan?.maxAdherentes ?? 0,
       }
-      const exists = prev.planesAfiliados.some((x) => x.id === id)
+      const exists = !!prevPlan
+
+      // Si se editó el nombre del plan, sincronizar la obra social de todos los pacientes afiliados
+      let updatedPatients = prev.patients
+      let updatedObrasSociales = prev.obrasSociales
+      let updatedObrasSocialesCustom = prev.obrasSocialesCustom
+      if (prevPlan && prevPlan.nombre !== p.nombre) {
+        const viejoNombreNorm = prevPlan.nombre.trim().toLowerCase()
+        const nuevoNombre = p.nombre.trim()
+        updatedPatients = prev.patients.map((pac) => {
+          if (pac.obraSocial && pac.obraSocial.trim().toLowerCase() === viejoNombreNorm) {
+            return { ...pac, obraSocial: nuevoNombre }
+          }
+          return pac
+        })
+        if (updatedObrasSociales) {
+          updatedObrasSociales = updatedObrasSociales.map((os) => {
+            if (os.nombre.trim().toLowerCase() === viejoNombreNorm) {
+              return { ...os, nombre: nuevoNombre }
+            }
+            return os
+          })
+        }
+        if (updatedObrasSocialesCustom) {
+          updatedObrasSocialesCustom = updatedObrasSocialesCustom.map((n) =>
+            n.trim().toLowerCase() === viejoNombreNorm ? nuevoNombre : n,
+          )
+        }
+      }
+
+      // Si se editó el precio del plan, aplicar hacia adelante a todos los contratantes del plan:
+      // - Cuotas pagadas o de meses anteriores: NO se tocan (mantienen su importe original histórico).
+      // - Cuotas pendientes del mes actual y meses futuros: se actualizan con el nuevo precio.
+      let updatedCuotas = prev.cuotasAfiliados
+      if (prevPlan && prevPlan.precio !== p.precio && p.precio > 0) {
+        const now = new Date()
+        const anioActual = now.getFullYear()
+        const mesActual = now.getMonth() + 1
+        const afiliadosIds = new Set(
+          (prev.afiliados ?? []).filter((a) => a.planId === id).map((a) => a.id),
+        )
+
+        updatedCuotas = (prev.cuotasAfiliados ?? []).map((c) => {
+          if (!afiliadosIds.has(c.afiliadoId)) return c
+          // No tocar cuotas ya pagadas
+          if (c.estado !== 'pendiente') return c
+          // Solo mes actual y meses futuros (hacia adelante)
+          const esHaciaAdelante =
+            c.anio > anioActual || (c.anio === anioActual && c.mes >= mesActual)
+          if (!esHaciaAdelante) return c
+
+          return { ...c, monto: p.precio }
+        })
+      }
+
       return {
         ...prev,
+        patients: updatedPatients,
+        obrasSociales: updatedObrasSociales,
+        obrasSocialesCustom: updatedObrasSocialesCustom,
+        cuotasAfiliados: updatedCuotas,
         planesAfiliados: exists
           ? prev.planesAfiliados.map((x) => (x.id === id ? next : x))
           : [...prev.planesAfiliados, next],
@@ -1168,9 +1326,19 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const deletePlanAfiliado = useCallback((id: string) => {
     setData((prev) => {
       if (!prev) return prev
+      const planToDelete = prev.planesAfiliados.find((p) => p.id === id)
+      const planNameNorm = planToDelete ? planToDelete.nombre.trim().toLowerCase() : ''
       return {
         ...prev,
         planesAfiliados: prev.planesAfiliados.filter((p) => p.id !== id),
+        obrasSociales:
+          planNameNorm && prev.obrasSociales
+            ? prev.obrasSociales.filter((o) => o.nombre.trim().toLowerCase() !== planNameNorm)
+            : prev.obrasSociales,
+        obrasSocialesCustom:
+          planNameNorm && prev.obrasSocialesCustom
+            ? prev.obrasSocialesCustom.filter((n) => n.trim().toLowerCase() !== planNameNorm)
+            : prev.obrasSocialesCustom,
       }
     })
   }, [])
@@ -1179,14 +1347,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setData((prev) => {
       if (!prev) return prev
       const id = a.id ?? createId()
+      const prevAfil = prev.afiliados.find((x) => x.id === id)
       const next: Afiliado = {
         id,
         patientId: a.patientId,
         planId: a.planId,
         fechaInicio: a.fechaInicio,
         activo: a.activo ?? true,
+        obraSocialAnterior: a.obraSocialAnterior ?? prevAfil?.obraSocialAnterior,
+        adherentes: a.adherentes ?? prevAfil?.adherentes,
       }
-      const exists = prev.afiliados.some((x) => x.id === id)
+      const exists = !!prevAfil
       return {
         ...prev,
         afiliados: exists
@@ -1199,13 +1370,533 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const deleteAfiliado = useCallback((id: string) => {
     setData((prev) => {
       if (!prev) return prev
+      const afil = prev.afiliados.find((a) => a.id === id)
+      let updatedPatients = prev.patients
+
+      if (afil) {
+        const restoreMap = new Map<string, string>()
+        // Titular
+        restoreMap.set(afil.patientId, afil.obraSocialAnterior ?? '')
+        // Adherentes
+        if (Array.isArray(afil.adherentes)) {
+          afil.adherentes.forEach((adh) => {
+            restoreMap.set(adh.patientId, adh.obraSocialAnterior ?? '')
+          })
+        }
+
+        updatedPatients = prev.patients.map((pac) => {
+          if (restoreMap.has(pac.id)) {
+            const restoredOs = restoreMap.get(pac.id) ?? ''
+            return {
+              ...pac,
+              obraSocial: restoredOs,
+              obraSocialAnterior: undefined,
+            }
+          }
+          return pac
+        })
+      }
+
       return {
         ...prev,
+        patients: updatedPatients,
         afiliados: prev.afiliados.filter((a) => a.id !== id),
         cuotasAfiliados: prev.cuotasAfiliados.filter((c) => c.afiliadoId !== id),
       }
     })
   }, [])
+
+  const afiliarConSincronizacion = useCallback((payload: {
+    titularId: string
+    planId: string
+    fechaInicio: string
+    usuario?: string
+    adherentes?: Array<{
+      pacienteExistenteId?: string
+      nombre: string
+      apellido: string
+      dni: string
+      fechaNacimiento: string
+      relacion: string
+    }>
+  }) => {
+    setData((prev) => {
+      if (!prev) return prev
+      const plan = prev.planesAfiliados.find((p) => p.id === payload.planId)
+      if (!plan) return prev
+
+      const titular = prev.patients.find((p) => p.id === payload.titularId)
+      if (!titular) return prev
+
+      const planNombre = plan.nombre.trim()
+      const titularPrevOs = resolverObraSocialAnteriorParaGuardar(
+        titular,
+        titular.obraSocialAnterior,
+        prev.planesAfiliados,
+      )
+
+      const adherentesList: Array<{ patientId: string; relacion: string; obraSocialAnterior?: string }> = []
+      const nuevosPacientes: Patient[] = []
+      const pacientesModificados = new Map<string, { obraSocial: string; obraSocialAnterior?: string }>()
+      const adhNombresDetalle: string[] = []
+
+      // Titular
+      pacientesModificados.set(titular.id, {
+        obraSocial: planNombre,
+        obraSocialAnterior: titularPrevOs,
+      })
+
+      if (Array.isArray(payload.adherentes)) {
+        for (const adh of payload.adherentes) {
+          if (adh.pacienteExistenteId) {
+            const pac = prev.patients.find((p) => p.id === adh.pacienteExistenteId)
+            const prevOs = resolverObraSocialAnteriorParaGuardar(
+              pac,
+              pac?.obraSocialAnterior,
+              prev.planesAfiliados,
+            )
+            adherentesList.push({
+              patientId: adh.pacienteExistenteId,
+              relacion: adh.relacion,
+              obraSocialAnterior: prevOs,
+            })
+            pacientesModificados.set(adh.pacienteExistenteId, {
+              obraSocial: planNombre,
+              obraSocialAnterior: prevOs,
+            })
+            if (pac) {
+              adhNombresDetalle.push(`${pac.apellido}, ${pac.nombre} (${adh.relacion})`)
+            }
+          } else {
+            const newPacId = createId()
+            adherentesList.push({
+              patientId: newPacId,
+              relacion: adh.relacion,
+              obraSocialAnterior: '',
+            })
+            nuevosPacientes.push({
+              id: newPacId,
+              nombre: adh.nombre.trim(),
+              apellido: adh.apellido.trim(),
+              dni: adh.dni.trim(),
+              fechaNacimiento: adh.fechaNacimiento.trim(),
+              telefono: '',
+              email: '',
+              domicilio: '',
+              localidad: '',
+              obraSocial: planNombre,
+              obraSocialAnterior: '',
+              notas: '',
+              activo: true,
+            })
+            adhNombresDetalle.push(`${adh.apellido.trim()}, ${adh.nombre.trim()} (${adh.relacion})`)
+          }
+        }
+      }
+
+      const updatedPatients = [
+        ...prev.patients.map((pac) => {
+          if (pacientesModificados.has(pac.id)) {
+            const mod = pacientesModificados.get(pac.id)!
+            return {
+              ...pac,
+              obraSocial: mod.obraSocial,
+              obraSocialAnterior: mod.obraSocialAnterior,
+            }
+          }
+          return pac
+        }),
+        ...nuevosPacientes,
+      ]
+
+      // Si el paciente ya tenía un registro de contratante dado de baja, se vuelve a afiliar sobre ese registro conservando su historial y cuotas
+      const existenteBaja = prev.afiliados.find(
+        (a) => a.patientId === payload.titularId && esContratanteDadoDeBaja(a),
+      )
+      const afilId = existenteBaja?.id ?? createId()
+      const ahoraIso = new Date().toISOString()
+      const detalleAlta =
+        adhNombresDetalle.length > 0
+          ? `Alta en cobertura ${planNombre} con adherentes: ${adhNombresDetalle.join('; ')}`
+          : `Alta en cobertura ${planNombre}`
+
+      const movAlta = {
+        id: createId(),
+        afiliadoId: afilId,
+        fecha: payload.fechaInicio,
+        tipo: 'alta' as const,
+        detalle: existenteBaja ? `Reafiliación · ${detalleAlta}` : detalleAlta,
+        usuario: payload.usuario || 'Administración',
+        creadoEn: ahoraIso,
+      }
+
+      if (existenteBaja) {
+        const updatedAfiliados = prev.afiliados.map((a) => {
+          if (a.id !== existenteBaja.id) return a
+          return {
+            ...a,
+            planId: payload.planId,
+            fechaInicio: payload.fechaInicio,
+            activo: true,
+            obraSocialAnterior: titularPrevOs,
+            adherentes: adherentesList.length > 0 ? adherentesList : undefined,
+            suspension: undefined,
+            baja: undefined,
+            cambioCoberturaProgramado: undefined,
+            historialCoberturas: [
+              ...(a.historialCoberturas ?? []),
+              {
+                planId: payload.planId,
+                planNombre,
+                desde: payload.fechaInicio,
+              },
+            ],
+            movimientos: [movAlta, ...(a.movimientos ?? [])],
+          }
+        })
+        return {
+          ...prev,
+          patients: updatedPatients,
+          afiliados: updatedAfiliados,
+        }
+      }
+
+      const nuevoAfiliado: Afiliado = {
+        id: afilId,
+        patientId: payload.titularId,
+        planId: payload.planId,
+        fechaInicio: payload.fechaInicio,
+        activo: true,
+        obraSocialAnterior: titularPrevOs,
+        adherentes: adherentesList.length > 0 ? adherentesList : undefined,
+        historialCoberturas: [
+          {
+            planId: payload.planId,
+            planNombre,
+            desde: payload.fechaInicio,
+          },
+        ],
+        movimientos: [movAlta],
+      }
+
+      return {
+        ...prev,
+        patients: updatedPatients,
+        afiliados: [...prev.afiliados, nuevoAfiliado],
+      }
+    })
+  }, [])
+
+  const quitarAdherente = useCallback((afiliadoId: string, adherentePatientId: string) => {
+    setData((prev) => {
+      if (!prev) return prev
+      const afil = prev.afiliados.find((a) => a.id === afiliadoId)
+      if (!afil || !afil.adherentes) return prev
+
+      const adh = afil.adherentes.find((x) => x.patientId === adherentePatientId)
+      const restoredOs = adh?.obraSocialAnterior ?? ''
+
+      const updatedPatients = prev.patients.map((pac) => {
+        if (pac.id === adherentePatientId) {
+          return {
+            ...pac,
+            obraSocial: restoredOs,
+            obraSocialAnterior: undefined,
+          }
+        }
+        return pac
+      })
+
+      const updatedAfiliados = prev.afiliados.map((a) => {
+        if (a.id === afiliadoId) {
+          return {
+            ...a,
+            adherentes: (a.adherentes ?? []).filter((x) => x.patientId !== adherentePatientId),
+          }
+        }
+        return a
+      })
+
+      return {
+        ...prev,
+        patients: updatedPatients,
+        afiliados: updatedAfiliados,
+      }
+    })
+  }, [])
+
+  const cambiarCoberturaContratante = useCallback(
+    (params: AplicarCambioCoberturaParams): { pacientesReutilizados: string[] } => {
+      const current = dataRef.current
+      let reutilizadosSync: string[] = []
+      if (current) {
+        const preview = params.programado
+          ? programarCambioCoberturaState(
+              {
+                patients: current.patients,
+                afiliados: current.afiliados,
+                planesAfiliados: current.planesAfiliados,
+              },
+              params,
+            )
+          : ejecutarCambioCoberturaEfectivo(
+              {
+                patients: current.patients,
+                afiliados: current.afiliados,
+                planesAfiliados: current.planesAfiliados,
+              },
+              params,
+            )
+        reutilizadosSync = preview.pacientesExistentesReutilizados
+      }
+
+      setData((prev) => {
+        if (!prev) return prev
+        const res = params.programado
+          ? programarCambioCoberturaState(
+              {
+                patients: prev.patients,
+                afiliados: prev.afiliados,
+                planesAfiliados: prev.planesAfiliados,
+              },
+              params,
+            )
+          : ejecutarCambioCoberturaEfectivo(
+              {
+                patients: prev.patients,
+                afiliados: prev.afiliados,
+                planesAfiliados: prev.planesAfiliados,
+              },
+              params,
+            )
+        return {
+          ...prev,
+          patients: res.patients,
+          afiliados: res.afiliados,
+        }
+      })
+
+      return { pacientesReutilizados: reutilizadosSync }
+    },
+    [],
+  )
+
+  const cancelarCambioProgramadoContratante = useCallback(
+    (afiliadoId: string, usuario: string) => {
+      setData((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          afiliados: cancelarCambioProgramadoState(prev.afiliados, afiliadoId, usuario),
+        }
+      })
+    },
+    [],
+  )
+
+  const suspenderContratante = useCallback(
+    (params: {
+      afiliadoId: string
+      motivo: string
+      desde: string
+      hasta?: string
+      observaciones?: string
+      usuario: string
+    }) => {
+      setData((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          afiliados: suspenderContratanteState(prev.afiliados, params),
+        }
+      })
+    },
+    [],
+  )
+
+  const reactivarContratante = useCallback(
+    (params: { afiliadoId: string; fecha?: string; usuario: string }) => {
+      setData((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          afiliados: reactivarContratanteState(prev.afiliados, params),
+        }
+      })
+    },
+    [],
+  )
+
+  const darDeBajaContratante = useCallback(
+    (params: { afiliadoId: string; motivo: string; fechaBaja: string; usuario: string }) => {
+      setData((prev) => {
+        if (!prev) return prev
+        const res = darDeBajaContratanteState(
+          {
+            patients: prev.patients,
+            afiliados: prev.afiliados,
+            planesAfiliados: prev.planesAfiliados,
+          },
+          params,
+        )
+        return {
+          ...prev,
+          patients: res.patients,
+          afiliados: res.afiliados,
+        }
+      })
+    },
+    [],
+  )
+
+  // Tarea programada diaria: aplica cambios de cobertura programados, reactivaciones por fecha Hasta y bajas diferidas
+  useEffect(() => {
+    if (!data) return
+    const runDailyTasks = () => {
+      setData((prev) => {
+        if (!prev) return prev
+        const res = procesarTareasDiariasContratantes({
+          patients: prev.patients,
+          afiliados: prev.afiliados,
+          planesAfiliados: prev.planesAfiliados,
+        })
+        if (!res.changed) return prev
+        return {
+          ...prev,
+          patients: res.patients,
+          afiliados: res.afiliados,
+        }
+      })
+    }
+    runDailyTasks()
+    const timer = window.setInterval(runDailyTasks, 60_000)
+    return () => window.clearInterval(timer)
+  }, [Boolean(data)])
+
+  const registrarContratanteConPacienteNuevoState = useCallback(
+    (payload: {
+      patient: Patient
+      afiliado: Afiliado
+      adherentes?: Array<{
+        pacienteExistenteId?: string
+        nombre: string
+        apellido: string
+        dni: string
+        fechaNacimiento: string
+        relacion: string
+      }>
+      usuario?: string
+    }) => {
+      setData((prev) => {
+        if (!prev) return prev
+        const patientExists = prev.patients.some((p) => p.id === payload.patient.id)
+        let updatedPatients = patientExists
+          ? prev.patients.map((p) => (p.id === payload.patient.id ? payload.patient : p))
+          : [...prev.patients, payload.patient]
+
+        const adherentesList: Array<{ patientId: string; relacion: string; obraSocialAnterior?: string }> = []
+        const nuevosPacientesAdh: Patient[] = []
+        const pacientesModificados = new Map<string, { obraSocial: string; obraSocialAnterior?: string }>()
+
+        const plan = prev.planesAfiliados.find((pl) => pl.id === payload.afiliado.planId)
+        const planNombre = plan?.nombre ?? payload.patient.obraSocial ?? 'Cobertura'
+
+        if (Array.isArray(payload.adherentes)) {
+          for (const adh of payload.adherentes) {
+            if (adh.pacienteExistenteId) {
+              const pac = updatedPatients.find((p) => p.id === adh.pacienteExistenteId)
+              const prevOs = pac?.obraSocial ?? ''
+              adherentesList.push({
+                patientId: adh.pacienteExistenteId,
+                relacion: adh.relacion,
+                obraSocialAnterior: pac?.obraSocialAnterior ?? prevOs,
+              })
+              pacientesModificados.set(adh.pacienteExistenteId, {
+                obraSocial: planNombre,
+                obraSocialAnterior: pac?.obraSocialAnterior ?? prevOs,
+              })
+            } else {
+              const newPacId = createId()
+              adherentesList.push({
+                patientId: newPacId,
+                relacion: adh.relacion,
+                obraSocialAnterior: '',
+              })
+              nuevosPacientesAdh.push({
+                id: newPacId,
+                nombre: adh.nombre.trim(),
+                apellido: adh.apellido.trim(),
+                dni: adh.dni.trim(),
+                fechaNacimiento: adh.fechaNacimiento.trim(),
+                telefono: '',
+                email: '',
+                domicilio: '',
+                localidad: '',
+                obraSocial: planNombre,
+                obraSocialAnterior: '',
+                notas: '',
+                activo: true,
+              })
+            }
+          }
+        }
+
+        if (pacientesModificados.size > 0 || nuevosPacientesAdh.length > 0) {
+          updatedPatients = [
+            ...updatedPatients.map((pac) => {
+              if (pacientesModificados.has(pac.id)) {
+                const mod = pacientesModificados.get(pac.id)!
+                return {
+                  ...pac,
+                  obraSocial: mod.obraSocial,
+                  obraSocialAnterior: mod.obraSocialAnterior,
+                }
+              }
+              return pac
+            }),
+            ...nuevosPacientesAdh,
+          ]
+        }
+
+        const movAlta = {
+          id: createId(),
+          afiliadoId: payload.afiliado.id,
+          fecha: payload.afiliado.fechaInicio,
+          tipo: 'alta' as const,
+          detalle: `Alta en cobertura ${planNombre}${
+            adherentesList.length > 0 ? ` (${adherentesList.length} adh.)` : ''
+          }`,
+          usuario: payload.usuario?.trim() || 'Recepción',
+          creadoEn: new Date().toISOString(),
+        }
+
+        const finalAfiliado: Afiliado = {
+          ...payload.afiliado,
+          adherentes: adherentesList.length > 0 ? adherentesList : undefined,
+          historialCoberturas: [
+            {
+              planId: payload.afiliado.planId,
+              planNombre,
+              desde: payload.afiliado.fechaInicio,
+            },
+          ],
+          movimientos: [movAlta],
+        }
+
+        const afilExists = prev.afiliados.some((a) => a.id === finalAfiliado.id)
+        const updatedAfiliados = afilExists
+          ? prev.afiliados.map((a) => (a.id === finalAfiliado.id ? finalAfiliado : a))
+          : [...prev.afiliados, finalAfiliado]
+
+        return {
+          ...prev,
+          patients: updatedPatients,
+          afiliados: updatedAfiliados,
+        }
+      })
+    },
+    [],
+  )
 
   const upsertCuotaMensual = useCallback((c: Omit<CuotaMensual, 'id' | 'usos'> & { id?: string; usos?: number }) => {
     setData((prev) => {
@@ -1223,6 +1914,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         comprobante: c.comprobante ?? false,
         notas: c.notas ?? '',
         usos: c.usos ?? 0,
+        cobradoPor: c.cobradoPor,
+        registradoEn: c.registradoEn,
       }
       const exists = prev.cuotasAfiliados.some((x) => x.id === id)
       return {
@@ -1243,6 +1936,115 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       }
     })
   }, [])
+
+  const prestacionesAfiliados = useMemo(() => {
+    return buildPrestacionesCatalog(data?.prestacionesAfiliados)
+  }, [data?.prestacionesAfiliados])
+
+  const ordenesMedicas = useMemo(() => {
+    return data?.ordenesMedicas ?? []
+  }, [data?.ordenesMedicas])
+
+  const upsertPrestacionAfiliado = useCallback(
+    (p: Omit<PrestacionCatalogo, 'id'> & { id?: string }): { ok: boolean; error?: string } => {
+      const nombreNorm = p.nombre.trim()
+      if (!nombreNorm) {
+        return { ok: false, error: 'El nombre de la prestación es obligatorio.' }
+      }
+      const keyNorm = normalizePrestacionKey(nombreNorm)
+      let errorResult: string | null = null
+
+      setData((prev) => {
+        if (!prev) return prev
+        const currentList = buildPrestacionesCatalog(prev.prestacionesAfiliados)
+        const id = p.id ?? createId()
+        const existing = currentList.find((x) => x.id === id)
+
+        // Validar duplicado por nombre (ignorando mayúsculas/acentos), salvo que sea el mismo id
+        const duplicado = currentList.some(
+          (x) => x.id !== id && normalizePrestacionKey(x.nombre) === keyNorm,
+        )
+        if (duplicado) {
+          errorResult = 'Ya existe una prestación con ese nombre.'
+          return prev
+        }
+
+        const newItem: PrestacionCatalogo = {
+          id,
+          nombre: nombreNorm,
+          grupo: (p.grupo || existing?.grupo || 'PROCEDIMIENTOS Y OTROS').trim().toUpperCase(),
+          activa: p.activa ?? existing?.activa ?? true,
+        }
+
+        const updated = existing
+          ? currentList.map((x) => (x.id === id ? newItem : x))
+          : [...currentList, newItem]
+
+        return {
+          ...prev,
+          prestacionesAfiliados: updated,
+        }
+      })
+
+      if (errorResult) return { ok: false, error: errorResult }
+      return { ok: true }
+    },
+    [],
+  )
+
+  const deletePrestacionAfiliado = useCallback((id: string): { ok: boolean; error?: string } => {
+    setData((prev) => {
+      if (!prev) return prev
+      const currentList = buildPrestacionesCatalog(prev.prestacionesAfiliados)
+      const filtered = currentList.filter((x) => x.id !== id)
+      return {
+        ...prev,
+        prestacionesAfiliados: filtered,
+      }
+    })
+    return { ok: true }
+  }, [])
+
+  const emitirOrdenMedica = useCallback(
+    (
+      orden: Omit<OrdenMedica, 'id' | 'numero' | 'creadaEn'>,
+    ): { ok: boolean; orden?: OrdenMedica; error?: string } => {
+      if (!orden.patientId) {
+        return { ok: false, error: 'Seleccioná un afiliado.' }
+      }
+      if (orden.tipo === 'prestacion' && !orden.prestacionNombre?.trim()) {
+        return { ok: false, error: 'Seleccioná una prestación.' }
+      }
+
+      let createdOrden: OrdenMedica | null = null
+
+      setData((prev) => {
+        if (!prev) return prev
+        const existingOrders = prev.ordenesMedicas ?? []
+        const numero = generarSiguienteNumeroOrden(existingOrders)
+        const newOrd: OrdenMedica = {
+          ...orden,
+          id: createId(),
+          numero,
+          prestacionNombre:
+            orden.tipo === 'prestacion' ? orden.prestacionNombre?.trim() : undefined,
+          observaciones: orden.observaciones?.trim() || undefined,
+          creadaEn: new Date().toISOString(),
+        }
+        createdOrden = newOrd
+        return {
+          ...prev,
+          ordenesMedicas: [newOrd, ...existingOrders],
+        }
+      })
+
+      if (!createdOrden) {
+        return { ok: false, error: 'No se pudo emitir la orden médica.' }
+      }
+      return { ok: true, orden: createdOrden }
+    },
+    [],
+  )
 
   // ── Distribución por médico · Obras Sociales ────────────────────────
   // Nota: no se guardan médicos ni montos porque ambos salen del filtro de
@@ -1595,10 +2397,150 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [persistSnapshotImmediately],
   )
 
-  const obrasSocialesOpciones = useMemo(
-    () =>
-      data ? mergeObrasSociales(data.obrasSocialesCustom, data.patients) : [],
-    [data?.obrasSocialesCustom, data?.patients],
+  const obrasSocialesCatalog = useMemo(() => {
+    if (!data) return []
+    return buildObrasSocialesCatalog(
+      data.obrasSociales,
+      data.obrasSocialesCustom,
+      data.planesAfiliados,
+    )
+  }, [data?.obrasSociales, data?.obrasSocialesCustom, data?.planesAfiliados])
+
+  const obrasSocialesOpciones = useMemo(() => {
+    return obrasSocialesCatalog
+      .filter((o) => !o.suspendida)
+      .map((o) => o.nombre)
+      .sort((a, b) => a.localeCompare(b, 'es'))
+  }, [obrasSocialesCatalog])
+
+  const saveObraSocialCatalog = useCallback(
+    async (
+      item: ObraSocialCatalog,
+    ): Promise<{ ok: boolean; conflict?: boolean; current?: ObraSocialCatalog; error?: string }> => {
+      const nombreNorm = item.nombre.trim()
+      if (!nombreNorm) return { ok: false, error: 'Escribí el nombre de la obra social.' }
+
+      let conflictResult: { conflict: true; current?: ObraSocialCatalog } | null = null
+      let nextSnapshot: AppData | null = null
+
+      setData((prev) => {
+        if (!prev) return prev
+        const currentList = buildObrasSocialesCatalog(
+          prev.obrasSociales,
+          prev.obrasSocialesCustom,
+          prev.planesAfiliados,
+        )
+
+        const existing = currentList.find(
+          (o) => o.nombre.trim().toLowerCase() === nombreNorm.toLowerCase(),
+        )
+
+        if (existing) {
+          if (existing.version !== item.version) {
+            conflictResult = { conflict: true, current: existing }
+            return prev
+          }
+          const nextVersion = existing.version + 1
+          const updated = currentList.map((o) =>
+            o.nombre.trim().toLowerCase() === nombreNorm.toLowerCase()
+              ? { ...item, nombre: existing.nombre, version: nextVersion }
+              : o,
+          )
+          const next: AppData = {
+            ...prev,
+            obrasSociales: updated,
+            obrasSocialesCustom: updated.map((o) => o.nombre),
+          }
+          nextSnapshot = next
+          return next
+        } else {
+          // Nueva obra social
+          const newItem: ObraSocialCatalog = {
+            ...item,
+            nombre: nombreNorm,
+            version: 1,
+          }
+          const updated = [...currentList, newItem].sort((a, b) =>
+            a.nombre.localeCompare(b.nombre, 'es'),
+          )
+          const next: AppData = {
+            ...prev,
+            obrasSociales: updated,
+            obrasSocialesCustom: updated.map((o) => o.nombre),
+          }
+          nextSnapshot = next
+          return next
+        }
+      })
+
+      if (conflictResult) {
+        return { ok: false, conflict: true, current: (conflictResult as { current?: ObraSocialCatalog }).current }
+      }
+      if (nextSnapshot) {
+        await persistSnapshotImmediately(nextSnapshot)
+      }
+      return { ok: true }
+    },
+    [persistSnapshotImmediately],
+  )
+
+  const deleteObraSocialCatalog = useCallback(
+    async (nombre: string): Promise<{ ok: boolean; error?: string }> => {
+      const nombreNorm = nombre.trim().toLowerCase()
+      if (!data) return { ok: false, error: 'Sin datos' }
+
+      const isPlan = (data.planesAfiliados ?? []).some(
+        (p) => p.nombre.trim().toLowerCase() === nombreNorm,
+      )
+      if (isPlan) {
+        return {
+          ok: false,
+          error: `"${nombre}" es un plan de Afiliados; si no lo usás, podés suspenderlo`,
+        }
+      }
+
+      const inUseDoctors = (data.doctors ?? []).filter((d) => {
+        const inSingle = d.obraSocial?.trim().toLowerCase() === nombreNorm
+        const inList = (d.obrasSociales ?? []).some(
+          (os) => os.nombre.trim().toLowerCase() === nombreNorm,
+        )
+        return inSingle || inList
+      })
+
+      if (inUseDoctors.length > 0) {
+        return {
+          ok: false,
+          error: `está en uso por ${inUseDoctors.length} médicos, suspendela`,
+        }
+      }
+
+      let nextSnapshot: AppData | null = null
+      setData((prev) => {
+        if (!prev) return prev
+        const currentList = buildObrasSocialesCatalog(
+          prev.obrasSociales,
+          prev.obrasSocialesCustom,
+          prev.planesAfiliados,
+        )
+
+        const filtered = currentList.filter(
+          (o) => o.nombre.trim().toLowerCase() !== nombreNorm,
+        )
+        const next: AppData = {
+          ...prev,
+          obrasSociales: filtered,
+          obrasSocialesCustom: filtered.map((o) => o.nombre),
+        }
+        nextSnapshot = next
+        return next
+      })
+
+      if (nextSnapshot) {
+        await persistSnapshotImmediately(nextSnapshot)
+      }
+      return { ok: true }
+    },
+    [data, persistSnapshotImmediately],
   )
 
   const addObraSocialCustom = useCallback((nombre: string) => {
@@ -1959,8 +2901,21 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       deletePlanAfiliado,
       upsertAfiliado,
       deleteAfiliado,
+      afiliarConSincronizacion,
+      registrarContratanteConPacienteNuevoState,
+      quitarAdherente,
+      cambiarCoberturaContratante,
+      cancelarCambioProgramadoContratante,
+      suspenderContratante,
+      reactivarContratante,
+      darDeBajaContratante,
       upsertCuotaMensual,
       deleteCuotaMensual,
+      prestacionesAfiliados,
+      ordenesMedicas,
+      upsertPrestacionAfiliado,
+      deletePrestacionAfiliado,
+      emitirOrdenMedica,
       setDistribucionOSPorcentaje,
       saveAtencionSinTurnoListado: saveAtencionSinTurnoListadoFn,
       deleteAtencionSinTurnoListado: deleteAtencionSinTurnoListadoFn,
@@ -1975,6 +2930,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       removeEspecialidadCustom,
       renameEspecialidadCustom,
       obrasSocialesOpciones,
+      obrasSocialesCatalog,
+      saveObraSocialCatalog,
+      deleteObraSocialCatalog,
       addObraSocialCustom,
       removeObraSocialCustom,
       renameObraSocialCustom,
@@ -2027,8 +2985,21 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       deletePlanAfiliado,
       upsertAfiliado,
       deleteAfiliado,
+      afiliarConSincronizacion,
+      registrarContratanteConPacienteNuevoState,
+      quitarAdherente,
+      cambiarCoberturaContratante,
+      cancelarCambioProgramadoContratante,
+      suspenderContratante,
+      reactivarContratante,
+      darDeBajaContratante,
       upsertCuotaMensual,
       deleteCuotaMensual,
+      prestacionesAfiliados,
+      ordenesMedicas,
+      upsertPrestacionAfiliado,
+      deletePrestacionAfiliado,
+      emitirOrdenMedica,
       setDistribucionOSPorcentaje,
       saveAtencionSinTurnoListadoFn,
       deleteAtencionSinTurnoListadoFn,
@@ -2043,6 +3014,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       removeEspecialidadCustom,
       renameEspecialidadCustom,
       obrasSocialesOpciones,
+      obrasSocialesCatalog,
+      saveObraSocialCatalog,
+      deleteObraSocialCatalog,
       addObraSocialCustom,
       removeObraSocialCustom,
       renameObraSocialCustom,

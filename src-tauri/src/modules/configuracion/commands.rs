@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use crate::core::db;
 use crate::core::config::settings;
+use super::dto;
 use super::service;
 
 const SMTP_SECRET_FILE: &str = "smtp-secret.txt";
@@ -109,6 +110,19 @@ pub fn load_app_data() -> Result<Option<String>, String> {
 pub fn save_app_data(json: String) -> Result<(), String> {
     crate::client_mode::ensure_local().map_err(|e| e)?;
     service::save_app_data(&json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn registrar_contratante_con_paciente_nuevo(
+    req: dto::RegistrarContratanteConPacienteNuevoReq,
+) -> Result<serde_json::Value, String> {
+    crate::client_mode::ensure_local().map_err(|e| e)?;
+    let (patient, afil) = service::registrar_contratante_con_paciente_nuevo(&req, "admin", "admin")
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "patient": patient,
+        "afiliado": afil,
+    }))
 }
 
 #[tauri::command]

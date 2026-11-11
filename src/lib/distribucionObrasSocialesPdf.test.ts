@@ -183,33 +183,30 @@ describe('formatMoney', () => {
 })
 
 describe('buildDistribucionObrasSocialesPdf · PDF generado', () => {
-  it('los datos de referencia salen en un PDF válido', () => {
-    const { doc } = buildDistribucionObrasSocialesPdf({
-      desde: '2026-05-01',
-      hasta: '2026-05-31',
-      filterLabel: '',
-      obras: OBRAS,
-      rows: filasReferencia,
-    })
+  const base = {
+    desde: '2026-11-02',
+    hasta: '2026-11-02',
+    filterLabel: '',
+    obras: OBRAS,
+  }
 
-    // Test de humo: PDF válido para los datos de referencia. La hoja es
-    // vertical y entran 4 obras por hoja, así que las 6 de referencia se
-    // reparten en dos: la segunda se titula CONTINUACIÓN.
-    expect(doc.getNumberOfPages()).toBe(2)
-    contiene(doc.output(), 'CONTINU')
+  it('3 filas entran en una sola hoja apaisada', () => {
+    const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: filasReferencia.slice(0, 3) })
+    expect(doc.getNumberOfPages()).toBe(1)
+    expect(doc.internal.pageSize.getWidth()).toBeGreaterThan(doc.internal.pageSize.getHeight())
+  })
 
+  it('los datos de referencia salen en un PDF válido y apaisado', () => {
+    const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: filasReferencia })
     const salida = doc.output()
-    // Firma de un PDF válido.
     expect(salida.startsWith('%PDF-')).toBe(true)
     expect(salida).toContain('%%EOF')
+    expect(doc.internal.pageSize.getWidth()).toBeGreaterThan(doc.internal.pageSize.getHeight())
 
-    // Banner: título, período y los tres totales.
-    // Ojo con las aserciones sobre texto: las celdas angostas parten las
-    // palabras en varias líneas y cada línea va en su propio operador de texto,
-    // así que un literal largo con espacios ("Motivo de la Consulta") no
-    // aparece nunca tal cual en el PDF. Se verifica por fragmentos.
-    contiene(salida,
+    contiene(
+      salida,
       'Distribución por médico',
+      'Obras sociales · período 02/11/2026',
       'TOTAL FACTURADO',
       'TOTAL MÉDICO',
       'TOTAL CUIDAR',
@@ -217,72 +214,36 @@ describe('buildDistribucionObrasSocialesPdf · PDF generado', () => {
       '$ 945.000',
       '$ 405.000',
     )
-
-    // Encabezado: "% Cuidar" con el 30 % de cada obra social.
-    contiene(salida,
-      '% Cuidar',
-      '30%',
-      'Fecha',
-      'Médico',
-      'Paciente',
-      // Se verifica la primera palabra: el rótulo se parte en dos renglones
-      // ("Motivo de" / "la Consulta") y la frase entera nunca aparece junta.
-      'Motivo',
-      'Consulta',
-      'Monto',
-      'ASIS',
-      'IPS',
-      'Medicu',
-      'MELD',
-      'PAMI',
-      'Sancor',
-      'Total',
-    )
-
-    // Fila de totales y médicos en mayúsculas.
-    contiene(salida, 'TOTALES', 'AGUIRRE')
-
-    // Pie.
-    contiene(salida, 'Período', '12 médicos', 'Generado el')
   })
 
-  it('regresión: el encabezado no queda tapado por su propio degradé', () => {
-    // El degradé de la banda del encabezado se pinta después de la tabla, con
-    // lo que tapaba los títulos y los "%" de cada obra social y dejaba la banda
-    // en blanco. Se dibujó a mano antes de autoTable por esto: este test falla
-    // si alguien vuelve a pintar el encabezado encima de las celdas.
-    const { doc } = buildDistribucionObrasSocialesPdf({
-      desde: '2026-05-01',
-      hasta: '2026-05-31',
-      filterLabel: '',
-      obras: OBRAS,
-      rows: filasReferencia,
-    })
+  it('el encabezado lleva Plus, Arancel y los % dentro del título de cada obra social', () => {
+    const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: filasReferencia })
     const salida = doc.output()
-
-    // Cada obra social tiene su rótulo y su porcentaje. En vertical las
-    // columnas son angostas y un nombre se puede partir a mitad de palabra
-    // ("Medicu" / "s"), así que se busca un fragmento corto.
+    contiene(salida, 'Fecha', 'Médico', 'Paciente', 'Motivo', 'Prestación', 'Plus', 'Arancel', 'Cuidar', 'Total', 'médico')
+    expect(salida).not.toContain('Especialidad')
+    // Sin la banda "Porcentajes sobre el Arancel": sólo la nota al pie de la tabla.
+    expect(salida).not.toContain('Porcentajes sobre')
+    contiene(salida, 'Los porcentajes de cada columna se calculan sobre el Arancel.')
     for (const o of OBRAS) {
-      const fragmento = o.nombre.slice(0, 4)
-      expect(salida, `falta el rótulo de ${o.nombre}`).toContain(fragmento)
-      expect(salida, `falta el % de ${o.nombre}`).toContain('30%')
+      expect(salida, `falta el rótulo de ${o.nombre}`).toContain(o.nombre.split(' ')[0]!)
     }
-    // Y los rótulos de las columnas fijas y de los totales.
-    contiene(salida, 'Fecha', 'Médico', 'Paciente', 'Motivo', 'Monto', 'Total')
+    expect(salida.split('(30 %)').length - 1).toBeGreaterThanOrEqual(OBRAS.length)
   })
 
-  it('no lleva el rótulo "RESUMEN" ni el de detalle cuando sólo hay resumen', () => {
-    const { doc } = buildDistribucionObrasSocialesPdf({
-      desde: '2026-05-01',
-      hasta: '2026-05-31',
-      filterLabel: '',
-      obras: OBRAS,
-      rows: filasReferencia,
-    })
-    const salida = doc.output()
-    expect(salida).not.toContain('RESUMEN')
-    expect(salida).not.toContain('COMPLETO')
+  it('el Total Cuidar de cada fila es la suma de sus obras sociales', () => {
+    const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: filasReferencia })
+    // Aguirre: 52.500 en IPS -> Total Cuidar $ 52.500.
+    contiene(doc.output(), 'AGUIRRE', '$ 52.500')
+  })
+
+  it('pie con el rótulo del centro y la numeración de hojas', () => {
+    const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: filasReferencia.slice(0, 3) })
+    contiene(
+      doc.output(),
+      'Centro M', 'Distribución por médico · Obras sociales',
+      'Generado el',
+      'Página 1 de 1',
+    )
   })
 
   it('con detalle: el resumen va en la primera hoja y el detalle después', () => {
@@ -290,41 +251,38 @@ describe('buildDistribucionObrasSocialesPdf · PDF generado', () => {
       { ...r, paciente: 'PACIENTE UNO', motivo: 'Consulta' },
       { ...r, paciente: '', motivo: 'Presurometría' },
     ])
-
     const { doc } = buildDistribucionObrasSocialesPdf({
-      desde: '2026-05-01',
-      hasta: '2026-05-31',
+      ...base,
       filterLabel: 'Médico: Aguirre, Rafael',
-      obras: OBRAS,
       rows: filasReferencia,
       rowsCompletas: detalle,
     })
-
     expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(2)
-    contiene(doc.output(), 'COMPLETO', 'Presurom', 'Filtro: Médico: Aguirre, Rafael')
-    // Con más de una hoja aparece el "Página x de y".
-    expect(doc.output()).toContain('Página 1 de')
+    contiene(doc.output(), 'COMPLETO', 'Presu', 'Médico: Aguirre, Rafael', 'Página 1 de')
+  })
+
+  it('sólo resumen: no lleva el rótulo COMPLETO', () => {
+    const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: filasReferencia })
+    expect(doc.output()).not.toContain('COMPLETO')
   })
 
   it('sin filas: arma el PDF igual, sin romperse', () => {
-    const { doc, filename, title } = buildDistribucionObrasSocialesPdf({
-      desde: '2026-05-01',
-      hasta: '2026-05-31',
-      filterLabel: '',
-      obras: OBRAS,
-      rows: [],
-    })
+    const { doc, filename, title } = buildDistribucionObrasSocialesPdf({ ...base, rows: [] })
     const salida = doc.output()
     expect(salida.startsWith('%PDF-')).toBe(true)
-    // El aviso de tabla vacía va partido en renglones por el ancho de celda.
-    contiene(salida, 'Sin datos', 'TOTALES')
-    // Y los tres totales del banner dan cero, no NaN.
-    contiene(salida, '$ 0')
+    contiene(salida, 'Sin datos', 'TOTALES', '$ 0')
+    expect(salida).not.toContain('NaN')
     expect(title).toBe('Distribución por Médico · Obras Sociales')
     expect(filename).toMatch(/^Fac Obras Sociales-\d{8}-\d{4}\.pdf$/)
   })
 
-  it('con más de 14 médicos pagina, repite el encabezado y numera las hojas', () => {
+  it('un monto grande ("$ 9.999.999") sale entero, en un solo texto', () => {
+    const grande = { ...filasReferencia[0]!, monto: '$ 9.999.999', porObraSocial: ['$ 9.999.999', '', '', '', '', ''], total: '$ 9.999.999' }
+    const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: [grande] })
+    expect(doc.output()).toContain('($ 9.999.999) Tj')
+  })
+
+  it('con 40 filas pagina, repite el encabezado y TOTALES queda al final', () => {
     const muchas: DistribucionObrasSocialesPdfRow[] = []
     for (let i = 0; i < 40; i++) {
       muchas.push(
@@ -336,45 +294,88 @@ describe('buildDistribucionObrasSocialesPdf · PDF generado', () => {
         }),
       )
     }
-
-    const { doc } = buildDistribucionObrasSocialesPdf({
-      desde: '2026-05-01',
-      hasta: '2026-05-31',
-      filterLabel: '',
-      obras: OBRAS,
-      rows: muchas,
-    })
-
+    const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: muchas })
     const paginas = doc.getNumberOfPages()
     expect(paginas).toBeGreaterThan(1)
 
     const salida = doc.output()
-    // El encabezado de tabla se repite en cada hoja. Se cuenta una palabra
-    // suelta ("Motivo") porque los rótulos largos se parten en varios renglones
-    // y la frase entera no aparece junta en ninguna de las hojas.
-    const repeticiones = salida.split('Motivo').length - 1
-    expect(repeticiones).toBeGreaterThanOrEqual(paginas)
-    // Numeración de hojas y total de médicos.
-    contiene(salida, 'Página 1 de', '40 médicos')
+    // Una vez el título por hoja: el encabezado de la tabla se repite en todas.
+    expect(salida.split('(Motivo) Tj').length - 1).toBe(paginas)
+    // TOTALES una sola vez, y en la última hoja.
+    expect(salida.split('TOTALES').length - 1).toBe(1)
+    contiene(salida, `Página ${paginas} de ${paginas}`, '40 motivos')
+    const ultimaHoja = salida.split('/Type /Page\n').pop() ?? ''
+    expect(ultimaHoja).toContain('TOTALES')
   })
 
-  it('el rótulo COMPLETO aparece sólo en las hojas de detalle', () => {
-    const detalle = filasReferencia.map((r) => ({ ...r, motivo: 'Presurometría' }))
+  it('TOTALES nunca queda solo en una hoja', () => {
+    // Se prueba con varias cantidades de filas para cruzar el borde de la hoja.
+    for (let n = 8; n <= 16; n++) {
+      const filas: DistribucionObrasSocialesPdfRow[] = Array.from({ length: n }, (_, i) =>
+        fila({
+          medico: `MEDICO ${i}`,
+          monto: '$ 10.000',
+          os: ['$ 3.000', null, null, null, null, null],
+          total: '$ 7.000',
+        }),
+      )
+      const { doc } = buildDistribucionObrasSocialesPdf({ ...base, rows: filas })
+      const salida = doc.output()
+      const hojas = salida.split('/Type /Page\n').slice(1)
+      const conTotales = hojas.find((h) => h.includes('TOTALES'))!
+      // La hoja de TOTALES también tiene al menos una fila de datos.
+      expect(conTotales, `n=${n}`).toContain('MEDICO')
+    }
+  })
+  it('soporta columnas de cantidad para planes como Individual y Familiar', () => {
+    const obrasConPlan: DistribucionPdfObra[] = [
+      { nombre: 'Individual', porcentaje: 0, esCantidad: true },
+      { nombre: 'IPS', porcentaje: 30 },
+    ]
+    const filas: DistribucionObrasSocialesPdfRow[] = [
+      {
+        fecha: '13-11-26',
+        medico: 'AGUIRRE, RAFAEL',
+        paciente: 'AGUIAR, CRISTOPHER',
+        motivo: 'Consulta',
+        prestacion: 'Radiografía',
+        monto: '',
+        arancel: '',
+        porObraSocial: ['1', ''],
+        totalCuidar: '',
+        total: '',
+      },
+      {
+        fecha: '13-11-26',
+        medico: 'AGUIRRE, RAFAEL',
+        paciente: 'ACOSTA, MARIA',
+        motivo: 'Consulta',
+        prestacion: '—',
+        monto: '',
+        arancel: '',
+        porObraSocial: ['1', ''],
+        totalCuidar: '',
+        total: '',
+      },
+    ]
+
+    const totales = totalesDe(filas, obrasConPlan)
+    // Las columnas de cantidad no suman a Cuidar ni Facturado
+    expect(totales.cuidar).toBe(0)
+    expect(totales.facturado).toBe(0)
+
     const { doc } = buildDistribucionObrasSocialesPdf({
-      desde: '2026-05-01',
-      hasta: '2026-05-31',
+      desde: '2026-11-08',
+      hasta: '2026-11-14',
       filterLabel: '',
-      obras: OBRAS,
-      rows: filasReferencia,
-      rowsCompletas: detalle,
+      obras: obrasConPlan,
+      rows: filas,
     })
     const salida = doc.output()
-    // Ni el resumen ni sus hojas de continuación llevan el rótulo: sólo el
-    // bloque de detalle. Como las 6 obras no entran en una hoja vertical, el
-    // detalle ocupa dos hojas y el rótulo aparece en cada una.
-    const ocurrencias = salida.split('COMPLETO').length - 1
-    expect(ocurrencias).toBeGreaterThanOrEqual(1)
-    expect(ocurrencias).toBe(doc.getNumberOfPages() - 2)
+    // El encabezado muestra 'Cant.' en vez de '0 %'
+    contiene(salida, 'Cant.')
+    // La suma de la columna de cantidad es 2
+    expect(salida).toContain('(2)')
   })
 })
 

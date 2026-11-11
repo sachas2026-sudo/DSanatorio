@@ -8,6 +8,7 @@ use crate::api_client::build_http_client;
 use crate::client_mode::{self, AppMode, ClientConfig};
 use crate::client_session::{ClientSession, SessionInfo};
 use std::sync::{Mutex, MutexGuard};
+use tokio::time::{timeout, Instant, Duration};
 
 /// Cliente HTTPS ya configurado + URL base del servidor.
 #[derive(Clone)]
@@ -57,8 +58,60 @@ impl ClientState {
         let mut base_url_opt = cfg.server_url.clone();
         let mut pem_opt = cfg.server_cert_pem.clone();
 
+        // Paso 1: Si hay URL configurada, hacer health check antes de usarla.
+        if base_url_opt.is_some() {
+            let base = base_url_opt.as_ref().unwrap().clone();
+            let pem_for_check = pem_opt.as_deref().unwrap_or("auto").to_string();
+            let client_for_check = build_http_client(&pem_for_check).unwrap();
+            let start = Instant::now();
+            let health_ok = timeout(
+                Duration::from_millis(1500),
+                async move {
+                    let resp = client_for_check.get(format!("{}/api/health", base)).send().await;
+                    let elapsed = start.elapsed();
+                    (resp.map(|r| r.status().is_success()).unwrap_or(false), elapsed)
+                },
+            )
+            .await;
+            match health_ok {
+                Ok((ok, elapsed)) => {
+                    if elapsed.as_millis() > 1500 || !ok {
+                        // Health check falló: limpiar URL y redescubrir en toda la red (cableada y Wi-Fi)
+                        base_url_opt = None;
+                        pem_opt = None;
+                        if let Ok(servers) = crate::discovery::discover_servers(2000) {
+                            if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
+                                base_url_opt = Some(srv.server_url);
+                                pem_opt = srv.cert_pem.or_else(|| Some("auto".to_string()));
+                                let mut updated = cfg.clone();
+                                updated.server_url = base_url_opt.clone();
+                                updated.server_cert_pem = pem_opt.clone();
+                                let _ = client_mode::save_config(&updated);
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Timeout: redescubrir en toda la red (cableada y Wi-Fi)
+                    base_url_opt = None;
+                    pem_opt = None;
+                    if let Ok(servers) = crate::discovery::discover_servers(2000) {
+                        if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
+                            base_url_opt = Some(srv.server_url);
+                            pem_opt = srv.cert_pem.or_else(|| Some("auto".to_string()));
+                            let mut updated = cfg.clone();
+                            updated.server_url = base_url_opt.clone();
+                            updated.server_cert_pem = pem_opt.clone();
+                            let _ = client_mode::save_config(&updated);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Si aun no hay URL, intentar descubrimiento en toda la red (cableada y Wi-Fi)
         if base_url_opt.is_none() {
-            if let Ok(servers) = crate::discovery::discover_servers(1200) {
+            if let Ok(servers) = crate::discovery::discover_servers(2000) {
                 if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
                     base_url_opt = Some(srv.server_url);
                     pem_opt = srv.cert_pem.or_else(|| Some("auto".to_string()));
@@ -70,16 +123,65 @@ impl ClientState {
             }
         }
 
-        let base_url = base_url_opt.ok_or_else(|| {
-            "No se encontró el servidor de Mesa de Entrada en la red local. Verificá que la PC principal esté encendida con el programa abierto.".to_string()
-        })?;
+        let base_url = match base_url_opt {
+            Some(u) => u,
+            None => {
+                // Verificar si esta misma máquina tiene el servidor local activo
+                let local_health_url = format!("https://127.0.0.1:{}/api/health", crate::discovery::SERVER_PORT);
+                let local_client = build_http_client("auto").unwrap();
+                let is_local_online = local_client
+                    .get(&local_health_url)
+                    .timeout(Duration::from_millis(600))
+                    .send()
+                    .await
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false);
+
+                if is_local_online {
+                    let _ = crate::discovery::set_mode_local();
+                    return Err("servidor_local_detectado".to_string());
+                }
+
+                return Err("No se encontró ningún servidor Sanatorio en la red local (cableada o Wi-Fi). Verificá que la PC principal esté encendida con el programa abierto, o hacé clic en 'Usar Servidor Local' si esta es la PC principal.".to_string());
+            }
+        };
         let pem = pem_opt.unwrap_or_else(|| "auto".to_string());
-        let client = build_http_client(&pem)?;
-        let info = self
-            .session
-            .login(&client, &base_url, username, password)
-            .await?;
-        *self.conn_lock() = Some(Conn { client, base_url });
+        let client = match build_http_client(&pem) {
+            Ok(c) => c,
+            Err(_) => build_http_client("auto")?,
+        };
+        let (info, active_client) = match self.session.login(&client, &base_url, username, password).await {
+            Ok(info) => (info, client),
+            Err(e) => {
+                // Si falló por error de conexión (no credenciales), reintentá una vez con redescubrimiento
+                let err_str = e.to_string();
+                if !err_str.contains("incorrect") && !err_str.contains("credencial") {
+                    // Intentar redescubrimiento y reintentar login con la nueva URL
+                    if let Ok(servers) = crate::discovery::discover_servers(1200) {
+                        if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
+                            let mut updated = client_mode::load_config()?;
+                            updated.server_url = Some(srv.server_url.clone());
+                            updated.server_cert_pem = Some("auto".to_string());
+                            client_mode::save_config(&updated)?;
+                            client_mode::set_runtime_mode(AppMode::Client);
+                            let new_base = srv.server_url.clone();
+                            let new_pem = "auto".to_string();
+                            let new_client = build_http_client(&new_pem).unwrap();
+                            let info2 = self
+                                .session
+                                .login(&new_client, &new_base, username, password)
+                                .await
+                                .map_err(|e2| format!("No se pudo conectar con el servidor: {e2}"))?;
+                            *self.conn_lock() = Some(Conn { client: new_client, base_url: new_base });
+                            return Ok(info2);
+                        }
+                    }
+                }
+                // Si no fue error de credenciales, relanzar el error original
+                return Err(e);
+            }
+        };
+        *self.conn_lock() = Some(Conn { client: active_client, base_url });
         Ok(info)
     }
 }

@@ -5,6 +5,7 @@ import { PdfPreviewModal } from '../../../shared/components/PdfPreviewModal'
 import { PacienteHistorialSection } from '../components/PacienteHistorialSection'
 import { ObrasSocialesModal } from '../components/ObrasSocialesModal'
 import { LocalidadesModal } from '../components/LocalidadesModal'
+import { NuevaOrdenMedicaModal } from '../../afiliados/components/NuevaOrdenMedicaModal'
 import { IconList } from '../../../shared/components/icons'
 import { useAppState } from '../../../context/AppStateContext'
 import { useAuth } from '../../../context/AuthContext'
@@ -35,6 +36,7 @@ import {
 import type { CoberturaTipo, Patient } from '../../../types'
 import type jsPDF from 'jspdf'
 import '../../../shared/styles/pages.css'
+import '../../afiliados/pages/AfiliadosModern.css'
 import './PacientesModern.css'
 
 const emptyForm: Omit<Patient, 'id'> = {
@@ -152,6 +154,17 @@ function IconClipboard({ className }: { className?: string }) {
   )
 }
 
+function IconMedicalOrderAction({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="12" y1="18" x2="12" y2="12" />
+      <line x1="9" y1="15" x2="15" y2="15" />
+    </svg>
+  )
+}
+
 export function PacientesPage() {
   const {
     data,
@@ -186,7 +199,9 @@ export function PacientesPage() {
     url: string
     filename: string
     title: string
+    hidePrint?: boolean
   } | null>(null)
+  const [ordenMedicaPatientId, setOrdenMedicaPatientId] = useState<string | null>(null)
 
   const edadLabel = useMemo(
     () => edadDesdeFechaNacimientoLabel(form.fechaNacimiento),
@@ -204,7 +219,7 @@ export function PacientesPage() {
   )
 
   /**
-   * Plan de cada paciente que está afiliado, con su estado de pago.
+   * Plan de cada paciente que está afiliado (titular o adherente), con su estado de pago.
    * El plan es un dato aparte de la obra social: el paciente puede tener las
    * dos. Se calcula una vez por cambio de estado porque la tabla es
    * virtualizada y se recalcular por fila se nota.
@@ -213,19 +228,32 @@ export function PacientesPage() {
     const hoy = new Date()
     const mapa = new Map<string, { nombre: string; alDia: boolean; motivo: string }>()
     for (const a of data.afiliados ?? []) {
-      if (!a.activo || mapa.has(a.patientId)) continue
+      if (!a.activo) continue
       const plan = (data.planesAfiliados ?? []).find((p) => p.id === a.planId)
       if (!plan) continue
       const alDia = !afiliadoTieneCuotasImpagas(a, data.cuotasAfiliados ?? [], hoy)
-      mapa.set(a.patientId, {
-        nombre: plan.nombre,
-        alDia,
-        motivo: !plan.activo
-          ? `El plan "${plan.nombre}" está dado de baja.`
-          : alDia
-            ? ''
-            : 'Tiene cuotas impagas: no puede attenderse por el plan hasta regularizar.',
-      })
+      const motivo = !plan.activo
+        ? `El plan "${plan.nombre}" está dado de baja.`
+        : alDia
+          ? ''
+          : 'Tiene cuotas impagas: no puede atenderse por el plan hasta regularizar.'
+
+      if (a.patientId && !mapa.has(a.patientId)) {
+        mapa.set(a.patientId, {
+          nombre: plan.nombre,
+          alDia,
+          motivo,
+        })
+      }
+
+      for (const adh of a.adherentes ?? []) {
+        if (!adh.patientId || mapa.has(adh.patientId)) continue
+        mapa.set(adh.patientId, {
+          nombre: plan.nombre,
+          alDia,
+          motivo,
+        })
+      }
     }
     return mapa
   }, [data.afiliados, data.planesAfiliados, data.cuotasAfiliados])
@@ -233,22 +261,33 @@ export function PacientesPage() {
   /** Plan del paciente que se está editando (la ficha sólo lo muestra). */
   const planInfo = editingId ? planPorPaciente.get(editingId) ?? null : null
 
-  /** Pacientes activos agrupados por Obra Social (top 6 + Otras). */
+  /** Pacientes activos agrupados por Obra Social y Plan (top 6 + Otras). */
   const obraSocialChart = useMemo(() => {
     const counts = new Map<string, number>()
     for (const p of pacientesActivos(data.patients)) {
-      const os = p.obraSocial?.trim() || 'Particular'
-      counts.set(os, (counts.get(os) ?? 0) + 1)
+      const plan = planPorPaciente.get(p.id)
+      const os = p.obraSocial?.trim()
+
+      if (plan) {
+        counts.set(plan.nombre, (counts.get(plan.nombre) ?? 0) + 1)
+      }
+
+      if (os && os.toLowerCase() !== 'particular' && (!plan || os.toLowerCase() !== plan.nombre.toLowerCase())) {
+        counts.set(os, (counts.get(os) ?? 0) + 1)
+      } else if (!plan && (!os || os.toLowerCase() === 'particular')) {
+        counts.set('Particular', (counts.get('Particular') ?? 0) + 1)
+      }
     }
     const all = [...counts.entries()]
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, 'es'))
-    const top = all.slice(0, 6)
-    const resto = all.slice(6).reduce((s, x) => s + x.value, 0)
+    const TOP_LIMIT = 10
+    const top = all.slice(0, TOP_LIMIT)
+    const resto = all.slice(TOP_LIMIT).reduce((s, x) => s + x.value, 0)
     if (resto > 0) top.push({ label: 'Otras', value: resto })
     const max = top.reduce((m, x) => Math.max(m, x.value), 0)
     return { items: top, max, total: all.length }
-  }, [data.patients])
+  }, [data.patients, planPorPaciente])
 
   function openNewModal() {
     setEditingId(null)
@@ -541,9 +580,9 @@ export function PacientesPage() {
         <div className="pacientes-metric-card pacientes-metric-card--action">
           <div className="pacientes-os-chart">
             <div className="pacientes-os-chart__head">
-              <span className="pacientes-os-chart__title">PACIENTES POR OBRA SOCIAL</span>
+              <span className="pacientes-os-chart__title">PACIENTES POR OBRA SOCIAL Y PLAN</span>
               <span className="pacientes-os-chart__meta">
-                {obraSocialChart.total} obra{obraSocialChart.total === 1 ? '' : 's'} social{obraSocialChart.total === 1 ? '' : 'es'}
+                {obraSocialChart.total} {obraSocialChart.total === 1 ? 'cobertura' : 'coberturas'}
               </span>
             </div>
             {obraSocialChart.items.length === 0 ? (
@@ -663,10 +702,10 @@ export function PacientesPage() {
                 type="button"
                 className="pacientes-btn-pdf"
                 onClick={handlePdfPreview}
-                title="Vista previa del listado en PDF"
+                title="Listado de Pacientes en PDF"
               >
                 <IconPdf />
-                <span>Vista previa PDF</span>
+                <span>Listado de Pacientes</span>
               </button>
             )}
 
@@ -789,6 +828,19 @@ export function PacientesPage() {
                         </td>
                         <td className="pacientes-td-actions" onClick={(e) => e.stopPropagation()}>
                           <div className="pacientes-row-actions">
+                            {planPorPaciente.has(p.id) && (
+                              <button
+                                type="button"
+                                className="pacientes-action-icon-btn pacientes-action-icon-btn--orden"
+                                title="Nueva orden médica para este afiliado"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setOrdenMedicaPatientId(p.id)
+                                }}
+                              >
+                                <IconMedicalOrderAction />
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="pacientes-action-icon-btn"
@@ -1254,11 +1306,23 @@ export function PacientesPage() {
         />
       )}
 
+      {ordenMedicaPatientId && (
+        <NuevaOrdenMedicaModal
+          afiliadoSeleccionadoId={ordenMedicaPatientId}
+          onClose={() => setOrdenMedicaPatientId(null)}
+          onPreviewPdf={({ url, filename, title, doc, hidePrint }) => {
+            pdfDocRef.current = doc
+            setPdfPreview({ url, filename, title, hidePrint })
+          }}
+        />
+      )}
+
       {pdfPreview && (
         <PdfPreviewModal
           title={pdfPreview.title}
           url={pdfPreview.url}
           filename={pdfPreview.filename}
+          hidePrint={pdfPreview.hidePrint}
           onClose={closePdfPreview}
           onDownload={() => void handlePdfDownload()}
         />

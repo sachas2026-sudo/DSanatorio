@@ -19,6 +19,8 @@ export interface Patient {
   localidad: string
   fechaNacimiento: string
   obraSocial: string
+  /** Obra social previa a afiliarse a un plan de salud (para restaurar al dar de baja) */
+  obraSocialAnterior?: string
   notas: string
   /** false = suspendido (no aparece en listas operativas; historial intacto). */
   activo?: boolean
@@ -31,6 +33,24 @@ export interface Patient {
 
 export type DoctorTipoAgenda = 'semanal' | 'mensual'
 
+export interface DoctorObraSocial {
+  nombre: string
+  porcentaje: number
+  monto: number
+}
+
+export interface ObraSocialCatalog {
+  nombre: string
+  plus: number
+  arancel: number
+  cuidar: number
+  impBanco: number
+  impFactura: number
+  gastosAdm: number
+  suspendida: boolean
+  version: number
+}
+
 export interface Doctor {
   id: string
   nombre: string
@@ -40,8 +60,8 @@ export interface Doctor {
   especialidad: string
   /** @deprecated Usar `obrasSociales` (se mantiene por compatibilidad con bases viejas). */
   obraSocial?: string
-  /** Obras sociales que atiende el médico (opcional). */
-  obrasSociales?: string[]
+  /** Obras sociales que atiende el médico con % y monto (opcional). */
+  obrasSociales?: DoctorObraSocial[]
   telefono: string
   localidad: string
   email: string
@@ -55,6 +75,12 @@ export interface Doctor {
   tipoAgenda?: DoctorTipoAgenda
   /** false = suspendido (no aparece en listas operativas; historial intacto). */
   activo?: boolean
+  /** Monto en pesos (entero no negativo). */
+  valor?: number
+  /** Monto en pesos (entero no negativo). */
+  particular?: number
+  /** Monto en pesos que se queda el centro dentro de "particular" (entero no negativo). */
+  cuidar?: number
 }
 
 /** Día puntual de atención (médicos que vienen una vez al mes o fechas especiales). */
@@ -180,17 +206,29 @@ export interface PagoCancelado {
 
 // ── Módulo Afiliados ──────────────────────────────────────────────────────────
 
+export type TipoPlanAfiliado = 'individual' | 'familiar'
+
 export interface PlanAfiliado {
   id: string
   nombre: string
   precio: number
   descripcion: string
   activo: boolean
+  /** Individual (1 persona) o Familiar (titular + adherentes) */
+  tipo?: TipoPlanAfiliado
   /**
    * Consultas gratuitas por mes incluidas en el plan. 0 = sin cupo.
    * Todavía no bloquea el agendamiento: sólo se guarda y se muestra.
    */
   cupoConsultas: number
+  /**
+   * Prestaciones gratuitas por mes incluidas en el plan. 0 = sin límite.
+   */
+  prestacionesPorMes?: number
+  /**
+   * Máximo de adherentes además del titular (solo si tipo === 'familiar'). 0 = sin límite.
+   */
+  maxAdherentes?: number
 }
 
 export type CuotaEstado = 'pagado' | 'pendiente' | 'vencido'
@@ -216,6 +254,90 @@ export interface CuotaMensual {
    * ahora es sólo el contador.
    */
   usos: number
+  /** Usuario que registró el cobro (pantalla Pagos de afiliados). */
+  cobradoPor?: string
+  /** Fecha y hora ISO del cobro (pantalla Pagos de afiliados). */
+  registradoEn?: string
+}
+
+export type RelacionTitular = 'Cónyuge' | 'Hijo/a' | 'Otro'
+
+export interface AdherenteAfiliado {
+  patientId: string
+  relacion: RelacionTitular | string
+  obraSocialAnterior?: string
+}
+
+export type TipoMovimientoContratante =
+  | 'alta'
+  | 'cambio_cobertura'
+  | 'suspension'
+  | 'reactivacion'
+  | 'baja'
+
+export interface MovimientoContratante {
+  id: string
+  afiliadoId: string
+  /** YYYY-MM-DD (fecha de vigencia del movimiento) */
+  fecha: string
+  tipo: TipoMovimientoContratante
+  detalle: string
+  motivo?: string
+  usuario: string
+  /** ISO datetime */
+  creadoEn: string
+}
+
+export interface SuspensionContratante {
+  activa: boolean
+  /** YYYY-MM-DD */
+  desde: string
+  /** YYYY-MM-DD (opcional; si se define, se reactiva automáticamente ese día) */
+  hasta?: string
+  motivo: string
+  observaciones?: string
+  usuario?: string
+}
+
+export interface BajaContratante {
+  activa: boolean
+  /** YYYY-MM-DD */
+  fecha: string
+  motivo: string
+  /** true cuando la fecha de baja es futura y aún no se ejecutó el corte */
+  programada?: boolean
+  usuario?: string
+}
+
+export type OpcionAdherentesFamiliarAIndividual = 'sin_cobertura' | 'pasan_individual'
+
+export interface AdherenteCambioProgramado {
+  pacienteExistenteId?: string
+  dni: string
+  apellido: string
+  nombre: string
+  fechaNacimiento: string
+  relacion: RelacionTitular | string
+}
+
+export interface CambioCoberturaProgramado {
+  planNuevoId: string
+  planNuevoNombre: string
+  /** YYYY-MM-DD */
+  fechaVigencia: string
+  opcionAdherentes?: OpcionAdherentesFamiliarAIndividual
+  nuevosAdherentes?: AdherenteCambioProgramado[]
+  usuario: string
+  creadoEn: string
+}
+
+export interface HistorialCoberturaItem {
+  planId: string
+  planNombre: string
+  /** YYYY-MM-DD */
+  desde: string
+  /** YYYY-MM-DD */
+  hasta?: string
 }
 
 export interface Afiliado {
@@ -225,6 +347,20 @@ export interface Afiliado {
   /** YYYY-MM-DD */
   fechaInicio: string
   activo: boolean
+  /** Obra social que tenía el titular antes de la afiliación (para restaurar en la baja). */
+  obraSocialAnterior?: string
+  /** Adherentes a la afiliación del titular (en planes familiares). */
+  adherentes?: AdherenteAfiliado[]
+  /** Estado de suspensión activa o programada del contratante y sus adherentes */
+  suspension?: SuspensionContratante
+  /** Datos de baja de afiliación (ejecutada o con fecha futura) */
+  baja?: BajaContratante
+  /** Cambio de cobertura programado para fecha futura (ej. 1.º del mes siguiente) */
+  cambioCoberturaProgramado?: CambioCoberturaProgramado
+  /** Historial de coberturas por las que pasó el contratante */
+  historialCoberturas?: HistorialCoberturaItem[]
+  /** Historial de movimientos (alta, cambio de cobertura, suspensión, reactivación, baja) */
+  movimientos?: MovimientoContratante[]
 }
 
 /** Datos institucionales del centro médico (configuración) */
@@ -252,6 +388,7 @@ export interface AppSettings {
   mostrarAccionesEnListaPagos?: boolean
   supabaseUrl?: string
   supabaseAnonKey?: string
+  supabaseServiceRoleKey?: string
   supabaseAutoSync?: boolean
   supabaseUltimaSync?: string
 }
@@ -282,6 +419,8 @@ export interface AppData {
   pagosDeudasMedicos?: DoctorDebtPayment[]
   /** Especialidades agregadas por el usuario (además de las comunes) */
   especialidadesCustom: string[]
+  /** Catálogo unificado de obras sociales con montos y porcentajes */
+  obrasSociales?: ObraSocialCatalog[]
   /** Obras sociales agregadas por el usuario (además de las habituales) */
   obrasSocialesCustom: string[]
   /** Localidades agregadas por el usuario (además de Misiones) */
@@ -296,4 +435,33 @@ export interface AppData {
   /** Módulo Distribución por médico · Obras Sociales.
       Sólo se guardan los porcentajes: médicos y montos salen del filtro de Pagos. */
   distribucionOSPercentajes: DistribucionOSPercentaje[]
+  /** Catálogo de prestaciones configurables para órdenes médicas de Afiliados */
+  prestacionesAfiliados?: PrestacionCatalogo[]
+  /** Órdenes médicas emitidas para Afiliados */
+  ordenesMedicas?: OrdenMedica[]
+}
+
+export interface PrestacionCatalogo {
+  id: string
+  nombre: string
+  grupo: string
+  activa: boolean
+}
+
+export type TipoOrdenMedica = 'consulta' | 'prestacion'
+
+export interface OrdenMedica {
+  id: string
+  numero: string // Correlativo OM-0001
+  patientId: string // ID del paciente (titular o adherente)
+  afiliadoId: string // ID del registro Afiliado
+  planNombre: string // Plan al momento de emitir
+  tipo: TipoOrdenMedica
+  prestacionNombre?: string // Prestación si tipo === 'prestacion'
+  medicoId?: string // ID del médico solicitante (Pedido del Médico)
+  medicoNombre?: string // Nombre del médico solicitante
+  fecha: string // YYYY-MM-DD
+  observaciones?: string
+  usuario?: string // Usuario que emitió
+  creadaEn: string // ISO string
 }

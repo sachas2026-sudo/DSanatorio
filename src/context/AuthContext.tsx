@@ -117,6 +117,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           const message =
             typeof err === 'string' ? err : err instanceof Error ? err.message : ''
+          // Si el backend detectó que el servidor local está en esta máquina, conmutar transparente
+          if (message.includes('servidor_local_detectado')) {
+            clearAppModeCache()
+            await ensureAuthAccountsLoaded()
+            const result = await authenticate(username, password)
+            if (result.ok) {
+              storeSession(result.session)
+              setSession(result.session)
+            }
+            return result
+          }
           // Error de credenciales: se muestra el mensaje estándar del login.
           if (/incorrect|credencial|usuario o contrase/i.test(message)) {
             return { ok: false, reason: 'invalid_credentials' }

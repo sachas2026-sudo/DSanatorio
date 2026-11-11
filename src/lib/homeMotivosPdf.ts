@@ -121,14 +121,14 @@ export function buildHomeMotivosPdf(
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   doc.setTextColor(26, 39, 68)
-  doc.text('Ranking de obras sociales (top)', left, y)
+  doc.text('Ranking de obras sociales y planes (top)', left, y)
   y += 8
 
   if (stats.topObrasSociales.length === 0) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(10)
     doc.setTextColor(107, 124, 147)
-    doc.text('No hay obras sociales registradas.', left, y)
+    doc.text('No hay coberturas registradas.', left, y)
   } else {
     const rowH = 13
     const maxObra = stats.topObrasSociales[0]?.cantidad ?? 1

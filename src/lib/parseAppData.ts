@@ -1,4 +1,6 @@
 import { normalizeDiasLibres } from './diasLibres'
+import { buildObrasSocialesCatalog } from './obrasSocialesCatalog'
+import { buildPrestacionesCatalog } from './prestacionesCatalog'
 import { parsePorcentajeStored } from './porcentajeInput'
 import { parsePorcentajeAplicado } from './paymentPorcentajeParse'
 import { mergeAtencionSinTurnoStorage } from './atencionSinTurno'
@@ -15,6 +17,7 @@ import type {
   PlanAfiliado,
   Afiliado,
   Doctor,
+  DoctorObraSocial,
   DoctorAtencionMensual,
   DoctorDebtPayment,
   DoctorHorario,
@@ -110,10 +113,16 @@ export function parsePatient(raw: unknown): Patient | null {
     localidad: asString(raw.localidad),
     fechaNacimiento,
     obraSocial: asString(raw.obraSocial),
+    ...(typeof raw.obraSocialAnterior === 'string' ? { obraSocialAnterior: raw.obraSocialAnterior } : {}),
     notas: asString(raw.notas),
     activo: asBoolean(raw.activo, true),
     ...(coberturaPreferida ? { coberturaPreferida } : {}),
   }
+}
+
+function clampMoney(val: unknown): number {
+  const n = asNumber(val, 0)
+  return n > 0 ? Math.min(Math.round(n), 100_000_000) : 0
 }
 
 export function parseDoctor(raw: unknown): Doctor | null {
@@ -123,14 +132,38 @@ export function parseDoctor(raw: unknown): Doctor | null {
   const obrasSociales = (() => {
     const v = (raw as Record<string, unknown>).obrasSociales
     if (Array.isArray(v)) {
-      const list = v
-        .filter((x): x is string => typeof x === 'string')
-        .map((s) => s.trim())
-        .filter(Boolean)
-      return list.length > 0 ? list : undefined
+      const result: DoctorObraSocial[] = []
+      const seen = new Set<string>()
+      for (const item of v) {
+        if (typeof item === 'string') {
+          const nombre = item.trim()
+          if (!nombre) continue
+          const key = nombre.toLowerCase()
+          if (seen.has(key)) continue
+          seen.add(key)
+          result.push({ nombre, porcentaje: 0, monto: 0 })
+        } else if (isRecord(item)) {
+          const nombre = asString(item.nombre).trim()
+          if (!nombre) continue
+          const key = nombre.toLowerCase()
+          if (seen.has(key)) continue
+          seen.add(key)
+          const rawPct = typeof item.porcentaje === 'number'
+            ? item.porcentaje
+            : typeof item.porcentaje === 'string'
+              ? parseFloat(item.porcentaje.replace(',', '.'))
+              : 0
+          const porcentaje = isNaN(rawPct)
+            ? 0
+            : Math.max(0, Math.min(100, Math.round(rawPct * 10) / 10))
+          const monto = clampMoney(item.monto)
+          result.push({ nombre, porcentaje, monto })
+        }
+      }
+      return result.length > 0 ? result : undefined
     }
-    const single = asString((raw as Record<string, unknown>).obraSocial)
-    return single ? [single] : undefined
+    const single = asString((raw as Record<string, unknown>).obraSocial).trim()
+    return single ? [{ nombre: single, porcentaje: 0, monto: 0 }] : undefined
   })()
   return {
     id,
@@ -158,6 +191,9 @@ export function parseDoctor(raw: unknown): Doctor | null {
       return t === 'mensual' ? 'mensual' : 'semanal'
     })(),
     activo: asBoolean(raw.activo, true),
+    valor: clampMoney((raw as Record<string, unknown>).valor),
+    particular: clampMoney((raw as Record<string, unknown>).particular),
+    cuidar: clampMoney((raw as Record<string, unknown>).cuidar),
   }
 }
 
@@ -320,6 +356,11 @@ function parseSettings(raw: unknown): AppSettings {
       clave: '',
       telefono: '',
       cuit: '',
+      supabaseUrl: 'https://mzfyzabgdlzqkvufqrxh.supabase.co',
+      supabaseAnonKey: 'sb_publishable_5E4thTDbweeAZOd4wcypsw_I5O7F4fM',
+      supabaseServiceRoleKey: '',
+      supabaseAutoSync: true,
+      supabaseUltimaSync: '',
     }
   }
   const carpetaBackupGoogleDrive = optionalStringField(raw, 'carpetaBackupGoogleDrive')
@@ -362,6 +403,11 @@ function parseSettings(raw: unknown): AppSettings {
       raw.mostrarAccionesEnListaPagos,
       false,
     ),
+    supabaseUrl: optionalStringField(raw, 'supabaseUrl') || 'https://mzfyzabgdlzqkvufqrxh.supabase.co',
+    supabaseAnonKey: optionalStringField(raw, 'supabaseAnonKey') || 'sb_publishable_5E4thTDbweeAZOd4wcypsw_I5O7F4fM',
+    supabaseServiceRoleKey: optionalStringField(raw, 'supabaseServiceRoleKey') || '',
+    supabaseAutoSync: optionalBoolField(raw, 'supabaseAutoSync') ?? true,
+    supabaseUltimaSync: optionalStringField(raw, 'supabaseUltimaSync') || '',
   }
 }
 
@@ -584,20 +630,144 @@ export function parseAppDataRecordWithReport(parsed: unknown): {
       precio: asNumber(raw.precio, 0),
       descripcion: asString(raw.descripcion),
       activo: asBoolean(raw.activo, true),
+      tipo: (raw.tipo === 'familiar' ? 'familiar' : 'individual') as 'individual' | 'familiar',
       // Los planes guardados antes de existir el cupo se leen como "sin cupo".
       cupoConsultas: Math.max(0, Math.trunc(asNumber(raw.cupoConsultas, 0))),
+      prestacionesPorMes: Math.max(0, Math.trunc(asNumber(raw.prestacionesPorMes, 0))),
+      maxAdherentes: Math.max(0, Math.trunc(asNumber(raw.maxAdherentes, 0))),
     }]
   }) : [],
   afiliados: Array.isArray(parsed.afiliados) ? parsed.afiliados.flatMap((raw: unknown) => {
     if (!isRecord(raw)) return []
     const id = nonEmptyId(raw.id)
     if (!id) return []
+    const suspension = isRecord(raw.suspension)
+      ? {
+          activa: asBoolean(raw.suspension.activa, false),
+          desde: asString(raw.suspension.desde),
+          ...(typeof raw.suspension.hasta === 'string' && raw.suspension.hasta.trim()
+            ? { hasta: raw.suspension.hasta.trim() }
+            : {}),
+          motivo: asString(raw.suspension.motivo),
+          ...(typeof raw.suspension.observaciones === 'string' && raw.suspension.observaciones.trim()
+            ? { observaciones: raw.suspension.observaciones.trim() }
+            : {}),
+          ...(typeof raw.suspension.usuario === 'string' && raw.suspension.usuario.trim()
+            ? { usuario: raw.suspension.usuario.trim() }
+            : {}),
+        }
+      : undefined
+    const baja = isRecord(raw.baja)
+      ? {
+          activa: asBoolean(raw.baja.activa, false),
+          fecha: asString(raw.baja.fecha),
+          motivo: asString(raw.baja.motivo),
+          ...(typeof raw.baja.programada === 'boolean' ? { programada: raw.baja.programada } : {}),
+          ...(typeof raw.baja.usuario === 'string' && raw.baja.usuario.trim()
+            ? { usuario: raw.baja.usuario.trim() }
+            : {}),
+        }
+      : undefined
+    const cambioCoberturaProgramado = isRecord(raw.cambioCoberturaProgramado)
+      ? {
+          planNuevoId: asString(raw.cambioCoberturaProgramado.planNuevoId),
+          planNuevoNombre: asString(raw.cambioCoberturaProgramado.planNuevoNombre),
+          fechaVigencia: asString(raw.cambioCoberturaProgramado.fechaVigencia),
+          ...(raw.cambioCoberturaProgramado.opcionAdherentes === 'sin_cobertura' ||
+          raw.cambioCoberturaProgramado.opcionAdherentes === 'pasan_individual'
+            ? {
+                opcionAdherentes: raw.cambioCoberturaProgramado.opcionAdherentes as
+                  | 'sin_cobertura'
+                  | 'pasan_individual',
+              }
+            : {}),
+          ...(Array.isArray(raw.cambioCoberturaProgramado.nuevosAdherentes)
+            ? {
+                nuevosAdherentes: raw.cambioCoberturaProgramado.nuevosAdherentes.flatMap(
+                  (na: unknown) => {
+                    if (!isRecord(na)) return []
+                    return [
+                      {
+                        ...(typeof na.pacienteExistenteId === 'string' && na.pacienteExistenteId
+                          ? { pacienteExistenteId: na.pacienteExistenteId }
+                          : {}),
+                        dni: asString(na.dni),
+                        apellido: asString(na.apellido),
+                        nombre: asString(na.nombre),
+                        fechaNacimiento: asString(na.fechaNacimiento),
+                        relacion: asString(na.relacion) || 'Otro',
+                      },
+                    ]
+                  },
+                ),
+              }
+            : {}),
+          usuario: asString(raw.cambioCoberturaProgramado.usuario),
+          creadoEn: asString(raw.cambioCoberturaProgramado.creadoEn),
+        }
+      : undefined
+    const historialCoberturas = Array.isArray(raw.historialCoberturas)
+      ? raw.historialCoberturas.flatMap((hc: unknown) => {
+          if (!isRecord(hc)) return []
+          return [
+            {
+              planId: asString(hc.planId),
+              planNombre: asString(hc.planNombre),
+              desde: asString(hc.desde),
+              ...(typeof hc.hasta === 'string' && hc.hasta.trim() ? { hasta: hc.hasta.trim() } : {}),
+            },
+          ]
+        })
+      : undefined
+    const movimientos = Array.isArray(raw.movimientos)
+      ? raw.movimientos.flatMap((m: unknown) => {
+          if (!isRecord(m)) return []
+          const mid = nonEmptyId(m.id)
+          if (!mid) return []
+          const tipoRaw = asString(m.tipo)
+          const tipo: 'alta' | 'cambio_cobertura' | 'suspension' | 'reactivacion' | 'baja' =
+            tipoRaw === 'cambio_cobertura' ||
+            tipoRaw === 'suspension' ||
+            tipoRaw === 'reactivacion' ||
+            tipoRaw === 'baja'
+              ? tipoRaw
+              : 'alta'
+          return [
+            {
+              id: mid,
+              afiliadoId: asString(m.afiliadoId, id),
+              fecha: asString(m.fecha),
+              tipo,
+              detalle: asString(m.detalle),
+              ...(typeof m.motivo === 'string' && m.motivo.trim() ? { motivo: m.motivo.trim() } : {}),
+              usuario: asString(m.usuario, 'Sistema'),
+              creadoEn: asString(m.creadoEn, asString(m.fecha)),
+            },
+          ]
+        })
+      : undefined
     return [{
       id,
       patientId: asString(raw.patientId),
       planId: asString(raw.planId),
       fechaInicio: asString(raw.fechaInicio),
       activo: asBoolean(raw.activo, true),
+      ...(typeof raw.obraSocialAnterior === 'string' ? { obraSocialAnterior: raw.obraSocialAnterior } : {}),
+      adherentes: Array.isArray(raw.adherentes) ? raw.adherentes.flatMap((adh: unknown) => {
+        if (!isRecord(adh)) return []
+        const pid = asString(adh.patientId)
+        if (!pid) return []
+        return [{
+          patientId: pid,
+          relacion: asString(adh.relacion) || 'Otro',
+          ...(typeof adh.obraSocialAnterior === 'string' ? { obraSocialAnterior: adh.obraSocialAnterior } : {}),
+        }]
+      }) : [],
+      ...(suspension ? { suspension } : {}),
+      ...(baja ? { baja } : {}),
+      ...(cambioCoberturaProgramado ? { cambioCoberturaProgramado } : {}),
+      ...(historialCoberturas && historialCoberturas.length > 0 ? { historialCoberturas } : {}),
+      ...(movimientos && movimientos.length > 0 ? { movimientos } : {}),
     }]
   }) : [],
   cuotasAfiliados: Array.isArray(parsed.cuotasAfiliados) ? parsed.cuotasAfiliados.flatMap((raw: unknown) => {
@@ -633,8 +803,48 @@ export function parseAppDataRecordWithReport(parsed: unknown): {
       }]
     })
     : [],
+  prestacionesAfiliados: buildPrestacionesCatalog(parsed.prestacionesAfiliados),
+  ordenesMedicas: Array.isArray(parsed.ordenesMedicas)
+    ? parsed.ordenesMedicas.flatMap((raw: unknown) => {
+        if (!isRecord(raw)) return []
+        const id = nonEmptyId(raw.id)
+        const numero = asString(raw.numero).trim()
+        const patientId = asString(raw.patientId).trim()
+        if (!id || !numero || !patientId) return []
+        return [{
+          id,
+          numero,
+          patientId,
+          afiliadoId: asString(raw.afiliadoId).trim(),
+          planNombre: asString(raw.planNombre).trim(),
+          tipo: raw.tipo === 'prestacion' ? ('prestacion' as const) : ('consulta' as const),
+          ...(typeof raw.prestacionNombre === 'string' && raw.prestacionNombre.trim()
+            ? { prestacionNombre: raw.prestacionNombre.trim() }
+            : {}),
+          ...(typeof raw.medicoId === 'string' && raw.medicoId.trim()
+            ? { medicoId: raw.medicoId.trim() }
+            : {}),
+          ...(typeof raw.medicoNombre === 'string' && raw.medicoNombre.trim()
+            ? { medicoNombre: raw.medicoNombre.trim() }
+            : {}),
+          fecha: asString(raw.fecha).trim(),
+          ...(typeof raw.observaciones === 'string' && raw.observaciones.trim()
+            ? { observaciones: raw.observaciones.trim() }
+            : {}),
+          ...(typeof raw.usuario === 'string' && raw.usuario.trim()
+            ? { usuario: raw.usuario.trim() }
+            : {}),
+          creadaEn: asString(raw.creadaEn) || new Date().toISOString(),
+        }]
+      })
+    : [],
     especialidadesCustom: parseEspecialidadesCustom(
       parsed.especialidadesCustom,
+    ),
+    obrasSociales: buildObrasSocialesCatalog(
+      parsed.obrasSociales,
+      parsed.obrasSocialesCustom,
+      parsed.planesAfiliados,
     ),
     obrasSocialesCustom: parseEspecialidadesCustom(
       parsed.obrasSocialesCustom,

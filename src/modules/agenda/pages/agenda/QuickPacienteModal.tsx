@@ -12,6 +12,7 @@ type Props = {
   initial?: Partial<BasePacienteForm>
   existingPatients: Patient[]
   localidadesOpciones: string[]
+  obrasSocialesOpciones: string[]
   onSave: (data: BasePacienteForm) => void
   onClose: () => void
 }
@@ -30,6 +31,7 @@ export function QuickPacienteModal({
   initial,
   existingPatients,
   localidadesOpciones,
+  obrasSocialesOpciones,
   onSave,
   onClose,
 }: Props) {
@@ -93,7 +95,6 @@ export function QuickPacienteModal({
         <header className="quick-pac__head">
           <div>
             <h2 id="quick-pac-title">Nuevo paciente</h2>
-            <p className="quick-pac__sub">Carga rápida (sin salir de la agenda)</p>
           </div>
           <button
             type="button"
@@ -157,12 +158,19 @@ export function QuickPacienteModal({
             </div>
             <div className="field">
               <label htmlFor="qp-obra">Obra social</label>
-              <input
+              <select
                 id="qp-obra"
                 value={form.obraSocial}
                 onChange={(e) => setForm((f) => ({ ...f, obraSocial: e.target.value }))}
-                placeholder="Opcional"
-              />
+              >
+                <option value="">Particular / sin obra social</option>
+                {obrasSocialesOpciones.map((obraSocial) => (
+                  <option key={obraSocial} value={obraSocial}>{obraSocial}</option>
+                ))}
+                {form.obraSocial && !obrasSocialesOpciones.includes(form.obraSocial) ? (
+                  <option value={form.obraSocial}>{form.obraSocial}</option>
+                ) : null}
+              </select>
             </div>
             <div className="field field--pill">
               <label htmlFor="qp-loc">Localidad</label>

@@ -169,7 +169,8 @@
   gap: 0.4rem;
 }
 
-.network-dialog__badge {
+.network-dialog__badge,
+.network-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -179,12 +180,14 @@
   font-weight: 600;
 }
 
-.network-dialog__badge--online {
+.network-dialog__badge--online,
+.network-badge--online {
   background: #dcfce7;
   color: #15803d;
 }
 
-.network-dialog__badge--offline {
+.network-dialog__badge--offline,
+.network-badge--offline {
   background: #fee2e2;
   color: #b91c1c;
 }
@@ -219,6 +222,66 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.network-manual-box {
+  margin-top: 0.25rem;
+  padding: 0.75rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.network-manual-box label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.network-manual-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.network-manual-row input {
+  flex: 1;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.82rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  outline: none;
+  font-family: inherit;
+}
+
+.network-manual-row input:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+.network-manual-row button {
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.network-manual-row button:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.network-manual-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-network-primary {
@@ -260,6 +323,96 @@
 
 .btn-network-secondary:hover {
   background: #e2e8f0;
+}
+
+/* Modal Dialog Messages */
+.network-message {
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  margin-bottom: 0.85rem;
+  line-height: 1.35;
+}
+
+.network-message--ok {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.network-message--err {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+/* Footer & Action Buttons */
+.network-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.network-action-btn {
+  padding: 0.55rem 1.1rem;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  transition: all 0.15s ease;
+  user-select: none;
+  font-family: inherit;
+}
+
+.network-action-btn--primary {
+  background: #0284c7;
+  color: #ffffff;
+  border: 1px solid #0284c7;
+}
+
+.network-action-btn--primary:hover:not(:disabled) {
+  background: #0369a1;
+  border-color: #0369a1;
+}
+
+.network-action-btn--primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.network-action-btn--secondary {
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.network-action-btn--secondary:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.network-action-btn--link {
+  background: transparent;
+  color: #0284c7;
+  border: none;
+  padding: 0.35rem 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.network-action-btn--link:hover:not(:disabled) {
+  color: #0369a1;
 }
 
 @keyframes network-fade-in {

@@ -1,7 +1,7 @@
 {
   "name": "sanatorio",
   "private": true,
-  "version": "16.0.0",
+  "version": "18.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -20,7 +20,7 @@
     "installer:build-clean": "npm run installer:ensure-logo && npm run installer:empty-bases && npm run desktop:build",
     "installer:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-all-installers.ps1",
     "installer:release": "npm run installer:build-clean && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/copy-installer-to.ps1 -Version 5.0.0 -DestDir C:\\Proyectos\\Instaladores\\Sanatorio -Actualizacion",
-    "apk:build": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"cd mobile; npm run build; npx cap copy android; cd android; .\\gradlew.bat assembleDebug; Copy-Item app/build/outputs/apk/debug/app-debug.apk ../../Cuidar_Gerencial_1.0.0.apk -Force\"",
+    "apk:build": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"cd mobile; npm run build; npx cap copy android; cd android; .\\gradlew.bat assembleDebug; Copy-Item app/build/outputs/apk/debug/app-debug.apk ../../Cuidar_Gerencial.apk -Force\"",
     "package:zip": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/zip-source-dotnet.ps1 -Version 2.2.1 -OutputDir C:\\Sanatorio -KeepMaxVersions 2"
   },
   "dependencies": {

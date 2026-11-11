@@ -1,8 +1,10 @@
-import type { PagoCancelado, Payment } from '../types'
+import type { Doctor, PagoCancelado, Payment } from '../types'
 import {
+  buildPaymentsSettlementMap,
   computeDoctorPorcentajeSettlement,
   countDistinctPagos,
   esPagoTransferencia,
+  resolveDoctorPaymentSettlement,
   resolvePaymentPorcentaje,
   sumPagosEfectivo,
   sumPagosTransferencia,
@@ -24,6 +26,7 @@ export type RendicionDoctorRow = {
 }
 
 function rendicionPorcentajeCell(porcentajeLabel: string): string {
+  if (!porcentajeLabel || porcentajeLabel.trim() === '') return '—'
   if (porcentajeLabel === 'Var.') return porcentajeLabel
   return porcentajeLabel.replace(/%$/, '')
 }
@@ -33,6 +36,8 @@ export function buildRendicionDoctorRows(
   payments: Payment[],
   doctorLabel: (doctorId: string) => string,
   doctorPorcentaje?: (doctorId: string) => number | undefined,
+  doctorResolver?: (doctorId: string) => Doctor | undefined,
+  obraSocialResolver?: (payment: Payment) => string | undefined,
 ): RendicionDoctorRow[] {
   const byDoctor = new Map<string, Payment[]>()
   for (const p of payments) {
@@ -46,8 +51,20 @@ export function buildRendicionDoctorRows(
     .map((doctorId) => {
       const list = byDoctor.get(doctorId) ?? []
       const pctFallback = () => doctorPorcentaje?.(doctorId)
-      const settlement = aggregateResumenSettlementForPayments(list, pctFallback)
-      const pctAgg = aggregatePorcentajeSettlementForPayments(list, pctFallback)
+      const doc = doctorResolver?.(doctorId)
+      const docGetter = doc ? () => doc : undefined
+      const settlement = aggregateResumenSettlementForPayments(
+        list,
+        pctFallback,
+        docGetter,
+        obraSocialResolver,
+      )
+      const pctAgg = aggregatePorcentajeSettlementForPayments(
+        list,
+        pctFallback,
+        docGetter,
+        obraSocialResolver,
+      )
       const efectivo = Math.round(sumPagosEfectivo(list) * 100) / 100
       return {
         medico: doctorLabel(doctorId),
@@ -69,36 +86,69 @@ export type AggregatedPorcentajeSettlement = DoctorPorcentajeSettlement & {
 export function aggregatePorcentajeSettlementForPayments(
   payments: Payment[],
   doctorPorcentaje?: (doctorId: string) => number | undefined,
+  doctorResolver?: (doctorId: string) => Doctor | undefined,
+  obraSocialResolver?: (payment: Payment) => string | undefined,
 ): AggregatedPorcentajeSettlement {
+  const settlementMap = buildPaymentsSettlementMap(
+    payments,
+    (doctorResolver ?? doctorPorcentaje) as any,
+    obraSocialResolver,
+  )
   let totalPorcentaje = 0
   let totalGeneral = 0
   const pctSet = new Set<number>()
+  let hasFixed = false
   for (const p of payments) {
     if (p.monto <= 0) continue
-    const pct =
-      resolvePaymentPorcentaje(p, doctorPorcentaje?.(p.doctorId)) ?? 0
-    pctSet.add(pct)
-    const s = computeDoctorPorcentajeSettlement(p.monto, pct)
+    const s = settlementMap.get(p.id) ?? (
+      doctorResolver?.(p.doctorId)
+        ? resolveDoctorPaymentSettlement(p, doctorResolver(p.doctorId), obraSocialResolver?.(p))
+        : computeDoctorPorcentajeSettlement(
+            p.monto,
+            resolvePaymentPorcentaje(p, doctorPorcentaje?.(p.doctorId)) ?? 0,
+          )
+    )
+    if (s.esMontoFijo) {
+      hasFixed = true
+    } else if (s.porcentaje > 0) {
+      pctSet.add(s.porcentaje)
+    }
     totalPorcentaje += s.totalPorcentaje
     totalGeneral += s.totalGeneral
   }
   totalPorcentaje = Math.round(totalPorcentaje * 100) / 100
   totalGeneral = Math.round(totalGeneral * 100) / 100
   const porcentaje = pctSet.size === 1 ? ([...pctSet][0] ?? 0) : 0
-  const porcentajeLabel =
-    pctSet.size === 0
+  const porcentajeLabel = hasFixed
+    ? pctSet.size === 0
+      ? ''
+      : 'Var.'
+    : pctSet.size === 0
       ? '0%'
       : pctSet.size === 1
         ? `${porcentaje}%`
         : 'Var.'
-  return { porcentaje, totalPorcentaje, totalGeneral, porcentajeLabel }
+  return {
+    porcentaje,
+    totalPorcentaje,
+    totalGeneral,
+    porcentajeLabel,
+    esMontoFijo: hasFixed && pctSet.size === 0,
+  }
 }
 
 export function aggregateResumenSettlementForPayments(
   payments: Payment[],
   doctorPorcentaje?: (doctorId: string) => number | undefined,
+  doctorResolver?: (doctorId: string) => Doctor | undefined,
+  obraSocialResolver?: (payment: Payment) => string | undefined,
 ): DoctorResumenSettlement {
-  const agg = aggregatePorcentajeSettlementForPayments(payments, doctorPorcentaje)
+  const agg = aggregatePorcentajeSettlementForPayments(
+    payments,
+    doctorPorcentaje,
+    doctorResolver,
+    obraSocialResolver,
+  )
   const facturado = payments.reduce((s, p) => s + p.monto, 0)
   const transferencias = sumPagosTransferencia(payments)
   const efectivoAEntregar =

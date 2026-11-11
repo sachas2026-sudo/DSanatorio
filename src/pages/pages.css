@@ -1698,8 +1698,8 @@ button.tile.tile--action:focus-visible {
 
 .form-grid--medico-top {
   grid-template-columns:
-    minmax(0, 0.92fr) minmax(0, 1.15fr) minmax(4.5rem, 0.72fr)
-    minmax(6.5rem, 8.25rem) minmax(0, 1.35fr);
+    minmax(0, 0.95fr) minmax(0, 1.65fr) minmax(5.5rem, 6.75rem)
+    minmax(0, 0.75fr) minmax(0, 1.25fr);
   margin-bottom: 0.85rem;
 }
 
@@ -2680,7 +2680,8 @@ table.data th {
 }
 
 /* Pagos: sin scroll en ventana principal; listado con scroll interno */
-.main-area:has(.page--pagos) {
+.main-area:has(.page--pagos),
+.main-area:has(.page--pagos-modern) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -6763,12 +6764,15 @@ table.data tbody tr.data-row--active {
 
 .booking-modal-row--medico {
   display: flex;
-  gap: 14px;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
 }
 
 .booking-schedule-badge {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   background-color: #e3f1ff;
   border: 1px solid #bfddf8;
@@ -6950,11 +6954,11 @@ table.data tbody tr.data-row--active {
 }
 
 .booking-urgencia-box {
-  background-color: #fff9e6;
-  border: 1px solid #f2d9a0;
-  color: #6b4700;
+  background-color: #f1f5f9;
+  border: 1px solid #0284c7;
+  color: #0f172a;
   font-size: 14.5px;
-  font-weight: 500;
+  font-weight: 600;
   border-radius: 10px;
   min-height: 44px;
   padding: 0 12px;
@@ -6969,7 +6973,7 @@ table.data tbody tr.data-row--active {
 .booking-urgencia-box input[type="checkbox"] {
   width: 16px;
   height: 16px;
-  accent-color: #d97706;
+  accent-color: #0284c7;
   cursor: pointer;
 }
 

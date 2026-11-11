@@ -26,10 +26,19 @@ export type DistribucionFila = {
   /** El paciente se escribe sólo en la primera fila de su pago. */
   mostrarPaciente: boolean
   motivo: string
+  prestacion?: string
   monto: number
+  /** Arancel de la obra social del pago (catálogo). Base del cálculo del %; va en la misma fila que el monto. */
+  arancel: number
+  impBanco: number
+  impFactura: number
+  gastosAdm: number
+  totalCuidar: number
+  total: number
   obras: Set<string>
   /** Pagos que aporta la fila (1 en COMPLETO). */
   cantidadPagos: number
+  cantidadesPorObraSocial?: Map<string, number>
 }
 
 /** Una fila consolidada de la vista RESUMEN: una por médico. */
@@ -48,17 +57,26 @@ export type DistribucionFilaResumen = {
   paciente: string
   /** "Consulta", o el motivo principal seguido de "+N" si hay varios. */
   motivo: string
+  /** Prestación médica si aplica, o varias en formato "+N". */
+  prestacion?: string
   /** Todos los motivos con su monto, para el tooltip de la celda. */
   motivosDetalle: { motivo: string; monto: number }[]
   monto: number
+  arancel: number
   /**
-   * Monto ya repartido por obra social. Se calcula fila por fila y después se
+   * Arancel ya repartido por obra social. Se calcula fila por fila y después se
    * suma, así la consolidada da el mismo resultado que la suma del detalle.
    */
   porObraSocial: Map<string, number>
+  cantidadesPorObraSocial?: Map<string, number>
   /** Suma de `porObraSocial`: lo que la fila reparte entre obras sociales. */
   repartido: number
-  /** Fila de TOTAL médico. */
+  impBanco: number
+  impFactura: number
+  gastosAdm: number
+  /** Total Cuidar = repartido (% Cuidar) + Imp. Banco + Imp. Fact. + Gastos Adm. */
+  totalCuidar: number
+  /** Fila de TOTAL médico: Arancel − Total Cuidar. */
   total: number
   /** Motivos/prestaciones del detalle que Respaldan esta fila. */
   cantidadMotivos: number
@@ -82,6 +100,12 @@ export type DistribucionFilasInput = {
   obraSocialDe: (p: Payment) => string
   /** Motivos del pago. Si tiene motivo 1 y motivo 2, llegan los dos. */
   motivosDe: (p: Payment) => string[]
+  /** Prestación específica del pago/turno, si tiene. */
+  prestacionDe?: (p: Payment) => string
+  /** Arancel del catálogo de Obras Sociales para una cobertura. Sin esto, 0. */
+  arancelDe?: (obraSocial: string) => number
+  /** Porcentajes de impuestos y gastos para una cobertura. */
+  impuestosDe?: (obraSocial: string) => { impBancoPct: number; impFacturaPct: number; gastosAdmPct: number }
 }
 
 /**
@@ -94,6 +118,19 @@ export type DistribucionFilasInput = {
 export function esCoberturaParticular(cobertura: string): boolean {
   const t = (cobertura ?? '').trim().toLowerCase()
   return t === '' || t === COBERTURA_PARTICULAR.toLowerCase()
+}
+
+/**
+ * Coberturas de planes propios del sanatorio (Individual y Familiar).
+ * Para estas coberturas no aplica 30% ni monto: se controla sólo la cantidad (1).
+ */
+export function esPlanCoberturaCantidad(cobertura: string): boolean {
+  const norm = (cobertura ?? '').trim().toLowerCase()
+  return (
+    norm.includes('individual') ||
+    norm.includes('individa') ||
+    norm.includes('familiar')
+  )
 }
 
 /**
@@ -120,6 +157,10 @@ type FilaInterna = DistribucionFila & {
   pagoId: string
   /** Monto del pago completo, para poder mudarlo a la fila de arriba. */
   montoPago: number
+  arancelPago: number
+  impBancoPago: number
+  impFacturaPago: number
+  gastosAdmPago: number
   /** Va a la primera fila de la lista ordenada. */
   montoEnEstaFila: boolean
 }
@@ -142,6 +183,9 @@ export function buildDistribucionFilas({
   citaById,
   obraSocialDe,
   motivosDe,
+  prestacionDe,
+  arancelDe,
+  impuestosDe,
 }: DistribucionFilasInput): DistribucionFila[] {
   const mapa = new Map<string, FilaInterna>()
 
@@ -162,6 +206,9 @@ export function buildDistribucionFilas({
     // fecha del propio pago.
     const cita = p.citaId ? citaById?.(p.citaId) : undefined
     const fecha = ymdDe(cita?.fechaHora ?? '') || ymdDe(p.fecha)
+    const prestacion = (
+      prestacionDe ? prestacionDe(p) : (cita?.motivoConsulta2?.trim() || '')
+    ).trim()
 
     motivos.forEach((motivo) => {
       const clave = `${p.id}|${motivo}`
@@ -176,8 +223,19 @@ export function buildDistribucionFilas({
           paciente: nombrePaciente,
           mostrarPaciente: false,
           motivo,
+          prestacion: prestacion || '—',
           monto: 0,
+          arancel: 0,
+          impBanco: 0,
+          impFactura: 0,
+          gastosAdm: 0,
+          totalCuidar: 0,
+          total: 0,
           montoPago: 0,
+          arancelPago: 0,
+          impBancoPago: 0,
+          impFacturaPago: 0,
+          gastosAdmPago: 0,
           montoEnEstaFila: false,
           obras: new Set<string>(),
           cantidadPagos: 0,
@@ -192,6 +250,12 @@ export function buildDistribucionFilas({
       // Todas las filas del pago conocen el monto del pago: después de
       // ordenar, la primera es la que lo muestra y las demás quedan en 0.
       fila.montoPago = p.monto
+      const arancelVal = Math.round(Number(arancelDe?.(cobertura.trim()) || 0))
+      fila.arancelPago = arancelVal
+      const imp = impuestosDe?.(cobertura.trim()) ?? { impBancoPct: 0, impFacturaPct: 0, gastosAdmPct: 0 }
+      fila.impBancoPago = Math.round((arancelVal * imp.impBancoPct) / 100)
+      fila.impFacturaPago = Math.round((arancelVal * imp.impFacturaPct) / 100)
+      fila.gastosAdmPago = Math.round((arancelVal * imp.gastosAdmPct) / 100)
       for (const o of obras) fila.obras.add(o)
     })
   }
@@ -209,11 +273,30 @@ export function buildDistribucionFilas({
     f.montoEnEstaFila = true
   }
 
-  return ordenadas.map(({ pagoId: _pagoId, montoPago, montoEnEstaFila, ...f }) => ({
-    ...f,
-    monto: montoEnEstaFila ? montoPago : 0,
-    mostrarPaciente: montoEnEstaFila,
-  }))
+  return ordenadas.map(({ pagoId: _pagoId, montoPago, arancelPago, impBancoPago, impFacturaPago, gastosAdmPago, montoEnEstaFila, ...f }) => {
+    const arancel = montoEnEstaFila ? arancelPago : 0
+    const impBanco = montoEnEstaFila ? impBancoPago : 0
+    const impFactura = montoEnEstaFila ? impFacturaPago : 0
+    const gastosAdm = montoEnEstaFila ? gastosAdmPago : 0
+    const cantidadesPorObraSocial = new Map<string, number>()
+    for (const o of f.obras) {
+      if (esPlanCoberturaCantidad(o)) {
+        cantidadesPorObraSocial.set(o, 1)
+      }
+    }
+    return {
+      ...f,
+      monto: montoEnEstaFila ? montoPago : 0,
+      arancel,
+      impBanco,
+      impFactura,
+      gastosAdm,
+      totalCuidar: 0,
+      total: 0,
+      mostrarPaciente: montoEnEstaFila,
+      cantidadesPorObraSocial,
+    }
+  })
 }
 
 /**
@@ -224,13 +307,13 @@ export function buildDistribucionFilas({
  * (que daría decimales distintos).
  */
 export function repartoDeFila(
-  monto: number,
+  base: number,
   obras: Set<string>,
   pctDe: (obraSocial: string) => number,
   obraSocial: string,
 ): number {
   if (!obras.has(obraSocial)) return 0
-  return (monto * pctDe(obraSocial)) / 100
+  return (base * pctDe(obraSocial)) / 100
 }
 
 /**
@@ -249,7 +332,11 @@ export function consolidarPorMedico(
 ): DistribucionFilaResumen[] {
   const porMedico = new Map<
     string,
-    DistribucionFilaResumen & { pacienteNombres: Set<string>; montosPorMotivo: Map<string, number> }
+    DistribucionFilaResumen & {
+      pacienteNombres: Set<string>
+      montosPorMotivo: Map<string, number>
+      prestacionesSet: Set<string>
+    }
   >()
 
   for (const f of detalle) {
@@ -264,19 +351,28 @@ export function consolidarPorMedico(
         fechaHasta: f.fecha,
         paciente: '',
         motivo: f.motivo,
+        prestacion: f.prestacion || '—',
         motivosDetalle: [],
         monto: 0,
+        arancel: 0,
         porObraSocial: new Map<string, number>(),
+        cantidadesPorObraSocial: new Map<string, number>(),
         repartido: 0,
+        impBanco: 0,
+        impFactura: 0,
+        gastosAdm: 0,
+        totalCuidar: 0,
         total: 0,
         cantidadMotivos: 0,
         cantidadPagos: 0,
         pacienteNombres: new Set<string>(),
         montosPorMotivo: new Map<string, number>(),
+        prestacionesSet: new Set<string>(),
       }
       porMedico.set(f.id, fila)
     }
     if (f.paciente) fila.pacienteNombres.add(f.paciente)
+    if (f.prestacion && f.prestacion !== '—') fila.prestacionesSet.add(f.prestacion)
     // Período del médico en el filtro; la columna muestra la fecha más reciente.
     if (!fila.fechaDesde || f.fecha < fila.fechaDesde) fila.fechaDesde = f.fecha
     if (!fila.fechaHasta || f.fecha > fila.fechaHasta) {
@@ -288,6 +384,10 @@ export function consolidarPorMedico(
       fila.especialidad = f.especialidad
     }
     fila.monto += f.monto
+    fila.arancel += f.arancel
+    fila.impBanco += f.impBanco || 0
+    fila.impFactura += f.impFactura || 0
+    fila.gastosAdm += f.gastosAdm || 0
     fila.cantidadMotivos += 1
     fila.cantidadPagos += f.cantidadPagos
     fila.montosPorMotivo.set(
@@ -297,18 +397,39 @@ export function consolidarPorMedico(
     for (const o of f.obras) {
       fila.porObraSocial.set(
         o,
-        (fila.porObraSocial.get(o) ?? 0) + repartoDeFila(f.monto, f.obras, pctDe, o),
+        (fila.porObraSocial.get(o) ?? 0) + repartoDeFila(f.arancel, f.obras, pctDe, o),
       )
+    }
+    if (f.cantidadesPorObraSocial) {
+      if (!fila.cantidadesPorObraSocial) {
+        fila.cantidadesPorObraSocial = new Map<string, number>()
+      }
+      for (const [o, c] of f.cantidadesPorObraSocial.entries()) {
+        fila.cantidadesPorObraSocial.set(
+          o,
+          (fila.cantidadesPorObraSocial.get(o) ?? 0) + c,
+        )
+      }
     }
   }
 
   return Array.from(porMedico.values())
-    .map(({ pacienteNombres, montosPorMotivo, ...fila }) => {
+    .map(({ pacienteNombres, montosPorMotivo, prestacionesSet, ...fila }) => {
       const motivosDetalle = [...montosPorMotivo.entries()]
         .map(([motivo, monto]) => ({ motivo, monto }))
         // Mayor monto primero; a igual monto, alfabético para que sea estable.
         .sort((a, b) => b.monto - a.monto || a.motivo.localeCompare(b.motivo, 'es'))
-      const repartido = [...fila.porObraSocial.values()].reduce((s, v) => s + v, 0)
+      const repartido = [...fila.porObraSocial.entries()]
+        .filter(([obra]) => !esPlanCoberturaCantidad(obra))
+        .reduce((s, [, v]) => s + v, 0)
+      const totalCuidar = repartido + fila.impBanco + fila.impFactura + fila.gastosAdm
+      const prestList = [...prestacionesSet].filter(Boolean)
+      const prestacion =
+        prestList.length === 0
+          ? '—'
+          : prestList.length === 1
+            ? prestList[0]!
+            : `${prestList[0]!} +${prestList.length - 1}`
       return {
         ...fila,
         paciente: pacienteNombres.size === 1 ? [...pacienteNombres][0] : 'Varios',
@@ -316,9 +437,11 @@ export function consolidarPorMedico(
           motivosDetalle.length <= 1
             ? (motivosDetalle[0]?.motivo ?? '')
             : `${motivosDetalle[0]!.motivo} +${motivosDetalle.length - 1}`,
+        prestacion,
         motivosDetalle,
         repartido,
-        total: fila.monto - repartido,
+        totalCuidar,
+        total: fila.arancel - totalCuidar,
       }
     })
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }))

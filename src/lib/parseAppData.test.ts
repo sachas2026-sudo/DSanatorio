@@ -95,6 +95,60 @@ describe('parseDoctor', () => {
     expect(parseDoctor({ id: 'd1', alias: '  DR-G  ' })?.alias).toBe('DR-G')
     expect(parseDoctor({ id: 'd1', alias: '   ' })?.alias).toBeUndefined()
   })
+
+  it('parsea valor, particular y cuidar como enteros no negativos acotados', () => {
+    const doc = parseDoctor({
+      id: 'd1',
+      valor: 15000,
+      particular: '25000',
+      cuidar: 10000,
+    })
+    expect(doc?.valor).toBe(15000)
+    expect(doc?.particular).toBe(25000)
+    expect(doc?.cuidar).toBe(10000)
+
+    const docLegacy = parseDoctor({ id: 'd2' })
+    expect(docLegacy?.valor).toBe(0)
+    expect(docLegacy?.particular).toBe(0)
+    expect(docLegacy?.cuidar).toBe(0)
+
+    const docInvalid = parseDoctor({
+      id: 'd3',
+      valor: -500,
+      particular: 999_999_999,
+      cuidar: 'abc',
+    })
+    expect(docInvalid?.valor).toBe(0)
+    expect(docInvalid?.particular).toBe(100_000_000)
+    expect(docInvalid?.cuidar).toBe(0)
+  })
+
+  it('convierte obrasSociales viejas (strings sueltos) al nuevo formato con porcentaje 0 y monto 0', () => {
+    const doc = parseDoctor({
+      id: 'd-os-leg',
+      obrasSociales: ['Particular', 'OSDE', 'Particular', '  '],
+    })
+    expect(doc?.obrasSociales).toEqual([
+      { nombre: 'Particular', porcentaje: 0, monto: 0 },
+      { nombre: 'OSDE', porcentaje: 0, monto: 0 },
+    ])
+  })
+
+  it('parsea obrasSociales con objeto { nombre, porcentaje, monto }, acota valores y elimina duplicados', () => {
+    const doc = parseDoctor({
+      id: 'd-os-new',
+      obrasSociales: [
+        { nombre: 'OSDE', porcentaje: 15.54, monto: 12000 },
+        { nombre: 'osde', porcentaje: 10, monto: 5000 }, // duplicado case-insensitive
+        { nombre: '  ', porcentaje: 20, monto: 3000 }, // vacío
+        { nombre: 'Swiss Medical', porcentaje: 150, monto: -500 }, // fuera de rango
+      ],
+    })
+    expect(doc?.obrasSociales).toEqual([
+      { nombre: 'OSDE', porcentaje: 15.5, monto: 12000 },
+      { nombre: 'Swiss Medical', porcentaje: 100, monto: 0 },
+    ])
+  })
 })
 
 describe('parsePayment', () => {
@@ -188,6 +242,11 @@ describe('parseAppDataRecord', () => {
       clave: '',
       telefono: '',
       cuit: '',
+      supabaseUrl: 'https://mzfyzabgdlzqkvufqrxh.supabase.co',
+      supabaseAnonKey: 'sb_publishable_5E4thTDbweeAZOd4wcypsw_I5O7F4fM',
+      supabaseServiceRoleKey: '',
+      supabaseAutoSync: true,
+      supabaseUltimaSync: '',
     })
   })
 

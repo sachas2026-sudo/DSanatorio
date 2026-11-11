@@ -1,5 +1,4 @@
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
-use urlencoding::encode;
 
 const LABEL: &str = "whatsapp";
 
@@ -19,16 +18,10 @@ pub async fn abrir_whatsapp(app: AppHandle, telefono: String, mensaje: String) -
 
     if let Some(win) = app.get_webview_window(LABEL) {
         eprintln!("[WA] Ventana existente encontrada, navegando...");
-        // win.navigate puede no existir en Tauri v2, usamos eval como fallback
-        #[cfg(feature = "webview_navigate")]
-        {
-            win.navigate(url.clone()).map_err(|e| e.to_string())?;
-        }
-        #[cfg(not(feature = "webview_navigate"))]
-        {
-            let js = format!("window.location.replace({:?})", url.as_str());
-            win.eval(&js).map_err(|e| e.to_string())?;
-        }
+        // Tauri v2 no expone `navigate` en WebviewWindow. La navegación se
+        // realiza dentro de la webview existente para reutilizar la sesión.
+        let js = format!("window.location.replace({:?})", url.as_str());
+        win.eval(&js).map_err(|e| e.to_string())?;
         let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();

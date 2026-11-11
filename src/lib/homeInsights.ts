@@ -88,16 +88,41 @@ export function computeHomeStats(data: AppData, ref = new Date()): HomeStats {
   const mes = periodBounds('mes', ref)
   const mesAnt = periodBounds('mes', subMonths(ref, 1))
 
+  // Mapear planes de afiliados activos (titulares y adherentes)
+  const planPorPaciente = new Map<string, string>()
+  const planesMap = new Map((data.planesAfiliados ?? []).map((pl) => [pl.id, pl.nombre]))
+  for (const a of data.afiliados ?? []) {
+    if (!a.activo) continue
+    const planNombre = planesMap.get(a.planId)
+    if (!planNombre) continue
+    if (a.patientId && !planPorPaciente.has(a.patientId)) {
+      planPorPaciente.set(a.patientId, planNombre)
+    }
+    for (const adh of a.adherentes ?? []) {
+      if (adh.patientId && !planPorPaciente.has(adh.patientId)) {
+        planPorPaciente.set(adh.patientId, planNombre)
+      }
+    }
+  }
+
   const topMap = new Map<string, number>()
   for (const p of data.patients) {
+    if (p.activo === false) continue
+    const planNombre = planPorPaciente.get(p.id)
     const os = p.obraSocial?.trim()
-    if (!os) continue
-    topMap.set(os, (topMap.get(os) ?? 0) + 1)
+
+    if (planNombre) {
+      topMap.set(planNombre, (topMap.get(planNombre) ?? 0) + 1)
+    }
+
+    if (os && os.toLowerCase() !== 'particular' && (!planNombre || os.toLowerCase() !== planNombre.toLowerCase())) {
+      topMap.set(os, (topMap.get(os) ?? 0) + 1)
+    }
   }
   const topObrasSociales = [...topMap.entries()]
     .map(([nombre, cantidad]) => ({ nombre, cantidad }))
-    .sort((a, b) => b.cantidad - a.cantidad)
-    .slice(0, 6)
+    .sort((a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre, 'es'))
+    .slice(0, 8)
 
   return {
     ingresosHoy: sumPaymentsInInterval(data.payments, hoy.start, hoy.end),

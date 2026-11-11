@@ -12,6 +12,8 @@ import {
 } from './pagosPdfLayout'
 import { formatMonto } from './formatMonto'
 import { appendDoctorDebtSummaryPage, type DoctorDebtPdfRow } from './doctorDebtPdfTable'
+import { drawValoresConfiguradosBullets } from './resumenCuidarValores'
+import type { Doctor } from '../types'
 
 export type ResumenCuidarPdfRow = {
   day: string
@@ -19,8 +21,24 @@ export type ResumenCuidarPdfRow = {
   cantidad: number
   facturado: number
   transferencias: number
+  efectivo?: number
   medico: number
   cuidar: number
+  porcentajeLabel?: string
+}
+
+export type ResumenCuidarDoctorPdfRow = {
+  day: string
+  turno: string
+  doctorId: string
+  doctorNombre: string
+  cantidad: number
+  facturado: number
+  transferencias: number
+  efectivo?: number
+  medico: number
+  cuidar: number
+  porcentajeLabel?: string
 }
 
 /** Una fila del tablero de cobranzas agrupado por obra social. */
@@ -697,7 +715,14 @@ export function buildResumenCuidarPdf(
   hasta: string,
   medicoLabel: string,
   rows: ResumenCuidarPdfRow[],
-  totales: { facturado: number; transferencias: number; medico: number; cuidar: number },
+  totales: {
+    facturado: number
+    transferencias: number
+    efectivo?: number
+    medico: number
+    cuidar: number
+    porcentajeLabel?: string
+  },
   footerLabel?: string,
   turnoLabel?: string,
   options?: {
@@ -706,12 +731,18 @@ export function buildResumenCuidarPdf(
     filenamePrefix?: string
     doctorDebtRows?: DoctorDebtPdfRow[]
     doctorDebtLabel?: string
+    includeTotalEfectivo?: boolean
+    doctorRows?: ResumenCuidarDoctorPdfRow[]
+    /** Rótulo de la segunda hoja con el desglose diario por médico. */
+    doctorRowsLabel?: string
     /**
      * Con todo el export por transferencia, "Monto Cuidar" sale en negativo:
      * la plata nunca pasó por caja, así que lo del médico sale del lado del
      * centro y no es una deuda para él.
      */
     todosTransferencia?: boolean
+    doctor?: Doctor
+    doctors?: Doctor[]
   },
 ): { doc: jsPDF; filename: string; title: string } {
   const doc = new jsPDF({ format: 'a4', unit: 'mm' })
@@ -737,36 +768,88 @@ export function buildResumenCuidarPdf(
   y += 3 // Margen estético antes de la tabla
 
   const totalCantidad = rows.reduce((acc, r) => acc + r.cantidad, 0)
-  const totalPorcentaje = formatPorcentaje(totales.cuidar, totales.facturado)
+  const totalPorcentaje = totales.porcentajeLabel ?? formatPorcentaje(totales.cuidar, totales.facturado)
   // Invierte el signo de "Monto Cuidar" cuando todo entró por transferencia.
   const signoCuidar = options?.todosTransferencia ? -1 : 1
 
-  autoTable(doc, {
-    startY: y,
-    head: [
-      [
-        'Fecha',
-        'Turno',
-        'Cant. Pagos',
-        '% Cuidar',
-        'Total Facturado',
-        'Total\nTransferencias',
-        'Total Médico',
-        'Monto Cuidar',
-      ],
-    ],
-    body: [
-      ...rows.map((r) => [
+  const showTotalEfectivo = options?.includeTotalEfectivo ?? true
+
+  const head = showTotalEfectivo
+    ? [
+        [
+          'Fecha',
+          'Turno',
+          'Cant. Pagos',
+          '% Cuidar',
+          'Total\nFac.',
+          'Total\nTrans.',
+          'Total\nEfectivo',
+          'Total Médico',
+          'Monto Cuidar',
+        ],
+      ]
+    : [
+        [
+          'Fecha',
+          'Turno',
+          'Cant. Pagos',
+          '% Cuidar',
+          'Total\nFac.',
+          'Total\nTrans.',
+          'Total Médico',
+          'Monto Cuidar',
+        ],
+      ]
+
+  const body = rows.map((r) => {
+    const rowEfectivo =
+      r.efectivo !== undefined
+        ? r.efectivo
+        : Math.max(0, r.facturado - r.transferencias)
+
+    if (showTotalEfectivo) {
+      return [
         format(parseISO(`${r.day}T12:00:00`), 'dd/MM/yyyy'),
         r.turno || '—',
         r.cantidad.toString(),
-        formatPorcentaje(r.cuidar, r.facturado),
+        r.porcentajeLabel ?? formatPorcentaje(r.cuidar, r.facturado),
         formatMonto(r.facturado),
         formatMonto(r.transferencias),
+        formatMonto(rowEfectivo),
         formatMonto(r.medico),
         formatMonto(r.cuidar * signoCuidar),
-      ]),
-      [
+      ]
+    }
+    return [
+      format(parseISO(`${r.day}T12:00:00`), 'dd/MM/yyyy'),
+      r.turno || '—',
+      r.cantidad.toString(),
+      r.porcentajeLabel ?? formatPorcentaje(r.cuidar, r.facturado),
+      formatMonto(r.facturado),
+      formatMonto(r.transferencias),
+      formatMonto(r.medico),
+      formatMonto(r.cuidar * signoCuidar),
+    ]
+  })
+
+  const totalEfectivo =
+    totales.efectivo !== undefined
+      ? totales.efectivo
+      : Math.max(0, totales.facturado - totales.transferencias)
+
+  const totalsRow = showTotalEfectivo
+    ? [
+        'TOTALES',
+        '',
+        totalCantidad.toString(),
+        totalPorcentaje,
+        formatMonto(totales.facturado),
+        formatMonto(totales.transferencias),
+        formatMonto(totalEfectivo),
+        formatMonto(totales.medico),
+        formatMonto(totales.cuidar * signoCuidar),
+      ]
+    : [
         'TOTALES',
         '',
         totalCantidad.toString(),
@@ -775,8 +858,37 @@ export function buildResumenCuidarPdf(
         formatMonto(totales.transferencias),
         formatMonto(totales.medico),
         formatMonto(totales.cuidar * signoCuidar),
-      ],
-    ],
+      ]
+
+  body.push(totalsRow)
+
+  const columnStyles: Record<string, any> = showTotalEfectivo
+    ? {
+        0: { cellWidth: 20, halign: 'center' as const },
+        1: { cellWidth: 17, halign: 'center' as const },
+        2: { cellWidth: 15, halign: 'center' as const },
+        3: { cellWidth: 16, halign: 'center' as const, fontStyle: 'bold' as const },
+        4: { cellWidth: 24, halign: 'right' as const },
+        5: { cellWidth: 23, halign: 'right' as const },
+        6: { cellWidth: 23, halign: 'right' as const },
+        7: { cellWidth: 24, halign: 'right' as const },
+        8: { cellWidth: 24, halign: 'right' as const, fontStyle: 'bold' as const },
+      }
+    : {
+        0: { cellWidth: 21, halign: 'center' as const },
+        1: { cellWidth: 19, halign: 'center' as const },
+        2: { cellWidth: 16, halign: 'center' as const },
+        3: { cellWidth: 17, halign: 'center' as const, fontStyle: 'bold' as const },
+        4: { cellWidth: 27, halign: 'right' as const },
+        5: { cellWidth: 30, halign: 'right' as const },
+        6: { cellWidth: 28, halign: 'right' as const },
+        7: { cellWidth: 28, halign: 'right' as const, fontStyle: 'bold' as const },
+      }
+
+  autoTable(doc, {
+    startY: y,
+    head,
+    body,
     theme: 'plain',
     headStyles: {
       fillColor: [15, 41, 66], // #0f2942 Modern Pagos Navy
@@ -798,16 +910,7 @@ export function buildResumenCuidarPdf(
       lineWidth: 0.15,
       valign: 'middle',
     },
-    columnStyles: {
-      0: { cellWidth: 21, halign: 'center' },
-      1: { cellWidth: 19, halign: 'center' },
-      2: { cellWidth: 16, halign: 'center' },
-      3: { cellWidth: 17, halign: 'center', fontStyle: 'bold' },
-      4: { cellWidth: 27, halign: 'right' },
-      5: { cellWidth: 30, halign: 'right' },
-      6: { cellWidth: 28, halign: 'right' },
-      7: { cellWidth: 28, halign: 'right', fontStyle: 'bold' },
-    },
+    columnStyles,
     didParseCell: function (data) {
       if (data.section === 'head') {
         if (data.column.index <= 3) {
@@ -831,14 +934,15 @@ export function buildResumenCuidarPdf(
     margin: { left: PAGOS_PDF_MARGIN, right: PAGOS_PDF_MARGIN },
   })
 
+  let afterTableY =
+    (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable
+      ?.finalY ?? y
+
   const deudaConCuidar = Math.max(0, -totales.medico)
   if (deudaConCuidar > 0) {
-    const finalY =
-      (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable
-        ?.finalY ?? y
     const left = PAGOS_PDF_MARGIN
     const width = pageW - left * 2
-    const noticeY = finalY + 6
+    const noticeY = afterTableY + 6
 
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(8.5)
@@ -855,15 +959,179 @@ export function buildResumenCuidarPdf(
       noticeY + 4,
       { maxWidth: width },
     )
+    afterTableY = noticeY + 12
+  } else {
+    afterTableY += 7
   }
 
-  if (options?.doctorDebtRows) {
+  // --- PÁGINA 2: RESUMEN POR DÍA Y MÉDICO ---
+  const doctorRows = options?.doctorRows
+  if (doctorRows && doctorRows.length > 0) {
+    doc.addPage()
+    const page2HeaderBottom = drawPdfHeader(doc, pageW, headerTitle, {
+      secondLine: `Período: ${periodText} — ${options?.doctorRowsLabel ?? 'Resumen por Día y Médico'}`,
+      fontSize: 18,
+    })
+    const page2Y = pdfBodyStartYAfterHeader(page2HeaderBottom, PDF_BODY_EXTRA_DOWN_PLAIN) + 3
+
+    const headDoctor = [
+      [
+        'Fecha',
+        'Turno',
+        'Médico',
+        'Cant. Pagos',
+        '% Cuidar',
+        'Total\nFac.',
+        'Total\nTrans.',
+        'Total\nEfectivo',
+        'Total Médico',
+        'Monto Cuidar',
+      ],
+    ]
+
+    const bodyDoctor = doctorRows.map((r) => {
+      const rowEfectivo =
+        r.efectivo !== undefined
+          ? r.efectivo
+          : Math.max(0, r.facturado - r.transferencias)
+
+      return [
+        format(parseISO(`${r.day}T12:00:00`), 'dd/MM/yyyy'),
+        r.turno || '—',
+        r.doctorNombre,
+        r.cantidad.toString(),
+        r.porcentajeLabel ?? formatPorcentaje(r.cuidar, r.facturado),
+        formatMonto(r.facturado),
+        formatMonto(r.transferencias),
+        formatMonto(rowEfectivo),
+        formatMonto(r.medico),
+        formatMonto(r.cuidar * signoCuidar),
+      ]
+    })
+
+    const totalsDoctorRow = [
+      'TOTALES',
+      '',
+      '',
+      totalCantidad.toString(),
+      totalPorcentaje,
+      formatMonto(totales.facturado),
+      formatMonto(totales.transferencias),
+      formatMonto(totalEfectivo),
+      formatMonto(totales.medico),
+      formatMonto(totales.cuidar * signoCuidar),
+    ]
+
+    bodyDoctor.push(totalsDoctorRow)
+
+    const columnStylesDoctor: Record<string, any> = {
+      0: { cellWidth: 18, halign: 'center' as const },
+      1: { cellWidth: 14, halign: 'center' as const },
+      2: { cellWidth: 28, halign: 'left' as const },
+      3: { cellWidth: 11, halign: 'center' as const },
+      4: { cellWidth: 14, halign: 'center' as const, fontStyle: 'bold' as const },
+      5: { cellWidth: 20, halign: 'right' as const },
+      6: { cellWidth: 21, halign: 'right' as const },
+      7: { cellWidth: 20, halign: 'right' as const },
+      8: { cellWidth: 20, halign: 'right' as const },
+      9: { cellWidth: 20, halign: 'right' as const, fontStyle: 'bold' as const },
+    }
+
+    autoTable(doc, {
+      startY: page2Y,
+      head: headDoctor,
+      body: bodyDoctor,
+      theme: 'plain',
+      headStyles: {
+        fillColor: [15, 41, 66],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 7.2,
+        halign: 'center',
+        cellPadding: { top: 2, bottom: 2, left: 1.5, right: 1.5 },
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      styles: {
+        font: 'helvetica',
+        fontSize: 7.2,
+        cellPadding: { top: 1.5, bottom: 1.5, left: 1.5, right: 1.5 },
+        textColor: [30, 41, 59],
+        lineColor: [226, 232, 240],
+        lineWidth: 0.15,
+        valign: 'middle',
+      },
+      columnStyles: columnStylesDoctor,
+      didParseCell: function (data) {
+        if (data.section === 'head') {
+          if (data.column.index === 2) {
+            data.cell.styles.halign = 'left'
+          } else if (data.column.index <= 4) {
+            data.cell.styles.halign = 'center'
+          } else {
+            data.cell.styles.halign = 'right'
+          }
+        }
+        if (data.section === 'body' && data.row.index === doctorRows.length) {
+          data.cell.styles.fontStyle = 'bold'
+          data.cell.styles.fontSize = 7.5
+          data.cell.styles.fillColor = [226, 232, 240]
+          data.cell.styles.textColor = [15, 41, 66]
+          data.cell.styles.lineColor = [180, 195, 215]
+          data.cell.styles.lineWidth = 0.25
+          if (data.column.index === 5) {
+            data.cell.styles.textColor = [2, 132, 199] // #0284c7 Total Facturado
+          }
+        }
+      },
+      margin: { left: PAGOS_PDF_MARGIN, right: PAGOS_PDF_MARGIN },
+    })
+
+    afterTableY =
+      (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable
+        ?.finalY ?? page2Y
+    afterTableY += 7
+  }
+
+  const doctorsToList: Doctor[] = options?.doctor
+    ? [options.doctor]
+    : options?.doctors ?? []
+
+  if (doctorsToList.length === 1) {
+    const left = PAGOS_PDF_MARGIN
+    const maxW = pageW - PAGOS_PDF_MARGIN * 2
+    drawValoresConfiguradosBullets(doc, doctorsToList, afterTableY, left, maxW, {
+      twoColumns: true,
+      smallFont: true,
+      anchorToBottom: true,
+    })
+  }
+
+  if (options?.doctorDebtRows?.some((row) => row.saldo > 0)) {
     appendDoctorDebtSummaryPage(
       doc,
       options.doctorDebtRows,
       periodText,
       options.doctorDebtLabel,
     )
+  }
+
+  // Con varios médicos, la configuración de retenciones y obras sociales se
+  // reserva para una hoja final propia, para no interrumpir los resúmenes.
+  if (doctorsToList.length > 1) {
+    doc.addPage()
+    const valoresHeaderBottom = drawPdfHeader(doc, pageW, headerTitle, {
+      secondLine: `Período: ${periodText} — Configuración de médicos`,
+      fontSize: 18,
+    })
+    const left = PAGOS_PDF_MARGIN
+    const maxW = pageW - PAGOS_PDF_MARGIN * 2
+    const valoresStartY = pdfBodyStartYAfterHeader(valoresHeaderBottom, PDF_BODY_EXTRA_DOWN_PLAIN)
+    drawValoresConfiguradosBullets(doc, doctorsToList, valoresStartY, left, maxW, {
+      twoColumns: true,
+      smallFont: true,
+    })
   }
 
   stampPdfGeneratedFooterOnAllPages(

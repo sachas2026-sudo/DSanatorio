@@ -26,6 +26,14 @@ import { EliminarPagoModal } from '../../pagos/components/EliminarPagoModal'
 import { MotivosConsultaModal } from '../../pacientes/components/MotivosConsultaModal'
 import { ObrasSocialesModal } from '../../pacientes/components/ObrasSocialesModal'
 import { PdfPreviewModal } from '../../../shared/components/PdfPreviewModal'
+import { NuevoTurnoModal } from './agenda/NuevoTurnoModal'
+import { calcularMontoSugerido, normalizeOsName } from '../../../lib/turnoMonto'
+import {
+  buscarAfiliacionYPlanPaciente,
+  calcularConsumoAfiliadoMes,
+  validarCupoPlanParaTurno,
+} from '../../../lib/consumoAfiliados'
+import { esContratanteSuspendido } from '../../../lib/contratantesMovimientos'
 import { formatMonto } from '../../../lib/formatMonto'
 import { formatAppError, logAppError } from '../../../lib/persistAlert'
 import { APP_DISPLAY_NAME } from '../../../lib/pdfBranding'
@@ -88,7 +96,6 @@ import {
   URGENCIA_DURACION_DEFAULT,
   URGENCIA_DURACION_OPCIONES,
   doctorDuracionTurno,
-  formatAgendaRanges,
   isDoctorAgendaMensual,
 } from '../../../lib/doctorAgenda'
 import {
@@ -102,6 +109,7 @@ import {
 } from '../../../lib/weekSlots'
 import { isMedicoActivo, medicosActivos, pacientesActivos } from '../../../lib/activo'
 import {
+  afiliadoTieneCuotasImpagas,
   COBERTURA_PARTICULAR,
   coberturaGuardada,
   coberturaInicial,
@@ -117,6 +125,8 @@ import type {
   Appointment,
   AppointmentEstado,
   CoberturaTipo,
+  Doctor,
+  Patient,
   PlanAfiliado,
 } from '../../../types'
 import { createId } from '../../../lib/id'
@@ -169,6 +179,40 @@ import {
 } from '../../../lib/whatsapp'
 import '../../../shared/styles/pages.css'
 type Tab = AgendaTab
+
+function resolveDoctorCoverageMonto(
+  doc: Doctor | undefined | null,
+  coberturaTipo: CoberturaTipo,
+  obraSocialNombre?: string | null,
+): number {
+  if (!doc) return 0
+  if (coberturaTipo === 'particular') {
+    if (doc.particular != null && doc.particular > 0) {
+      return doc.particular
+    }
+    if (doc.valor != null && doc.valor > 0) {
+      return doc.valor
+    }
+    return 0
+  }
+  if (coberturaTipo === 'obraSocial') {
+    const osClean = (obraSocialNombre ?? '').trim().toLowerCase()
+    if (osClean && doc.obrasSociales) {
+      const match = doc.obrasSociales.find(
+        (o) => o.nombre.trim().toLowerCase() === osClean,
+      )
+      if (match && match.monto > 0) {
+        return match.monto
+      }
+    }
+    if (doc.valor != null && doc.valor > 0) {
+      return doc.valor
+    }
+    return 0
+  }
+  return 0
+}
+
 export function AgendaPage() {
   const { role, session } = useAuth()
   const puedeVerPorcentaje = canViewDoctorPorcentaje(role)
@@ -194,6 +238,7 @@ export function AgendaPage() {
     patientById,
     doctorById,
     localidadesOpciones,
+    obrasSocialesOpciones,
     motivosConsultaOpciones,
     addMotivoConsultaCustom,
     removeMotivoConsultaCustom,
@@ -201,6 +246,8 @@ export function AgendaPage() {
     addObraSocialCustom,
     removeObraSocialCustom,
     renameObraSocialCustom,
+    obrasSocialesCatalog,
+    saveObraSocialCatalog,
   } = useAppState()
   const { confirm } = useConfirm()
   const pacientesOperativos = useMemo(
@@ -283,7 +330,7 @@ export function AgendaPage() {
    * igual que antes; lo que cambia es que ahora hay tres valores posibles
    * en vez de dos.
    */
-  const [bookingCobertura, setBookingCobertura] = useState<CoberturaTipo>('particular')
+  const [bookingCobertura, setBookingCobertura] = useState<string>('Particular')
   const [bookingPatientPickerOpen, setBookingPatientPickerOpen] = useState(false)
   const obrasSocialesDisponibles = useMemo(() => {
     const s = new Set<string>()
@@ -322,16 +369,25 @@ export function AgendaPage() {
     [bookingCtxCobertura],
   )
   /**
-   * Cobertura realmente elegida. Si la seleccionada dejó de estar disponible
-   * —obra social vaciada, plan con cuotas impagas, paciente cambiado— cae a
-   * la inicial del paciente. Se resuelve al renderizar y no con un efecto, así
-   * el selector nunca queda desincronizado con lo que hay disponible.
+   * Cobertura elegida. Mapea tanto coberturas del catálogo (strings con el nombre)
+   * como el tipo particular/plan para compatibilidad hacia atrás.
    */
   const bookingCoberturaActual = useMemo(() => {
-    const sel = bookingOpcionesCobertura.find((o) => o.tipo === bookingCobertura)
+    const sel = bookingOpcionesCobertura.find(
+      (o) =>
+        normalizeOsName(o.valor) === normalizeOsName(bookingCobertura) ||
+        o.tipo === bookingCobertura,
+    )
     if (sel && !sel.disabled) return sel
-    return coberturaInicial(bookingCtxCobertura)
-  }, [bookingOpcionesCobertura, bookingCobertura, bookingCtxCobertura])
+    return {
+      tipo: (normalizeOsName(bookingCobertura) === 'particular'
+        ? 'particular'
+        : 'obraSocial') as CoberturaTipo,
+      valor: bookingCobertura,
+      label: bookingCobertura,
+      disabled: false,
+    }
+  }, [bookingOpcionesCobertura, bookingCobertura])
   /** Por qué el plan está deshabilitado, para mostrarlo debajo del selector. */
   const bookingPlanMotivo = useMemo(() => {
     const op = bookingOpcionesCobertura.find((o) => o.tipo === 'plan')
@@ -340,7 +396,7 @@ export function AgendaPage() {
   const [quickPacienteOpen, setQuickPacienteOpen] = useState(false)
   const [quickPacienteInitialDni, setQuickPacienteInitialDni] = useState<string>('')
   const [bookingDuracion, setBookingDuracion] = useState(30)
-  const [bookingEstado, setBookingEstado] = useState<AppointmentEstado>('programado')
+  const [bookingEstado, setBookingEstado] = useState<AppointmentEstado | 'pagado'>('programado')
   const [bookingMotivoConsulta, setBookingMotivoConsulta] = useState<string>(
     MOTIVO_CONSULTA_DEFAULT,
   )
@@ -1000,19 +1056,18 @@ export function AgendaPage() {
   const bookingScheduleHint = useMemo(() => {
     if (!bookingDate) return null
     if (!bookingDoctorId) {
-      return 'Seleccioná un médico para ver su horario'
+      return null
     }
     const doc = doctorById(bookingDoctorId)
     const plan = planDoctorDay(bookingDoctorId, bookingDate, data)
-    const mins = bookingDuracion || (doc ? doctorDuracionTurno(doc) : 30)
     if (plan.kind !== 'slots' || plan.ranges.length === 0) {
       if (isDoctorAgendaMensual(doc)) {
         return 'Sin atención configurada este día. Revisá la pestaña Atención mensual.'
       }
       return 'Sin franja horaria este día.'
     }
-    return `Turnos cada ${mins} min · Atiende ${formatAgendaRanges(plan.ranges)}`
-  }, [bookingDoctorId, bookingDate, bookingDuracion, data, doctorById])
+    return null
+  }, [bookingDoctorId, bookingDate, data, doctorById])
   const bookingDoctors = useMemo(() => {
     const list = !bookingDate
       ? medicosOperativos
@@ -1213,7 +1268,7 @@ export function AgendaPage() {
     setBookingPatientId('')
     setBookingPatientQuery('')
     setBookingPatientObraSocial('')
-    setBookingCobertura('particular')
+    setBookingCobertura('Particular')
     setBookingPatientPickerOpen(false)
     setBookingSlotHm(null)
     setBookingFueraGrilla(false)
@@ -1227,6 +1282,16 @@ export function AgendaPage() {
     )
     if (disponibles.length === 1) {
       setBookingDoctorId(disponibles[0]!.id)
+      const res = calcularMontoSugerido({
+        doctor: disponibles[0],
+        cobertura: 'Particular',
+        obrasSocialesCatalog,
+      })
+      if (res.montoCalculado !== null && res.montoCalculado > 0) {
+        setBookingMonto(res.montoCalculadoFormateado)
+      } else {
+        setBookingMonto('')
+      }
     } else {
       setBookingDoctorId('')
     }
@@ -1247,7 +1312,7 @@ export function AgendaPage() {
     setBookingPatientId('')
     setBookingPatientQuery('')
     setBookingPatientObraSocial('')
-    setBookingCobertura('particular')
+    setBookingCobertura('Particular')
     setBookingPatientPickerOpen(false)
     setBookingSlotHm(hm)
     setBookingFueraGrilla(false)
@@ -1257,6 +1322,16 @@ export function AgendaPage() {
     setBookingEstado('programado')
     const doc = doctorById(doctorId)
     setBookingDuracion(doc ? doctorDuracionTurno(doc) : 30)
+    const res = calcularMontoSugerido({
+      doctor: doc,
+      cobertura: 'Particular',
+      obrasSocialesCatalog,
+    })
+    if (res.montoCalculado !== null && res.montoCalculado > 0) {
+      setBookingMonto(res.montoCalculadoFormateado)
+    } else {
+      setBookingMonto('')
+    }
     setBookingOpen(true)
   }
   function openBookingAtSlotOnDay(doctorId: string, day: Date, hm: string) {
@@ -1276,7 +1351,7 @@ export function AgendaPage() {
     setBookingPatientId('')
     setBookingPatientQuery('')
     setBookingPatientObraSocial('')
-    setBookingCobertura('particular')
+    setBookingCobertura('Particular')
     setBookingPatientPickerOpen(false)
     setBookingSlotHm(hm)
     setBookingFueraGrilla(false)
@@ -1286,7 +1361,48 @@ export function AgendaPage() {
     setBookingEstado('programado')
     const doc = doctorById(doctorId)
     setBookingDuracion(doc ? doctorDuracionTurno(doc) : 30)
+    const res = calcularMontoSugerido({
+      doctor: doc,
+      cobertura: 'Particular',
+      obrasSocialesCatalog,
+    })
+    if (res.montoCalculado !== null && res.montoCalculado > 0) {
+      setBookingMonto(res.montoCalculadoFormateado)
+    } else {
+      setBookingMonto('')
+    }
     setBookingOpen(true)
+  }
+  function applyPatientSelection(p: Patient) {
+    setBookingPatientId(p.id)
+    setBookingPatientQuery(
+      patientPickerLineLegacy(p.dni, p.apellido, p.nombre) || `${p.apellido}, ${p.nombre}`,
+    )
+    setBookingPatientPickerOpen(false)
+
+    // Cobertura automática con la OS que tiene el paciente cargada en Pacientes (o Particular si no tiene)
+    const pacOs = (p.obraSocial || '').trim()
+    const canonicalMatch = pacOs
+      ? obrasSocialesCatalog.find((o) => normalizeOsName(o.nombre) === normalizeOsName(pacOs))?.nombre
+      : null
+    const targetCob = canonicalMatch || pacOs || 'Particular'
+    setBookingCobertura(targetCob)
+
+    if (!bookingEditingId && bookingDoctorId) {
+      const doc = doctorById(bookingDoctorId)
+      const res = calcularMontoSugerido({
+        doctor: doc,
+        cobertura: targetCob,
+        obrasSocialesCatalog,
+        montoActualInput: '',
+        usuarioEditoManualmente: false,
+      })
+      if (res.montoCalculado !== null && res.montoCalculado > 0) {
+        setBookingMonto(res.montoCalculadoFormateado)
+      } else {
+        setBookingMonto('')
+      }
+    }
   }
   function openBookingForEdit(c: Appointment) {
     if (secretariaNoPuedeModificarCita(c)) {
@@ -1316,20 +1432,8 @@ export function AgendaPage() {
       p ? patientPickerLineLegacy(p.dni, p.apellido, p.nombre) : '',
     )
     setBookingPatientObraSocial(p?.obraSocial ?? '')
-    // Al editar se recupera la cobertura con la que se guardó el turno. Si ya no
-    // está disponible (plan dado de baja, obra social cambiada), `bookingCoberturaActual`
-    // la reemplaza por la inicial del paciente sin tocar el histórico.
-    setBookingCobertura(
-      coberturaGuardada(
-        c.obraSocialOverride,
-        contextoCoberturaDe(
-          p,
-          data.afiliados ?? [],
-          data.planesAfiliados ?? [],
-          data.cuotasAfiliados ?? [],
-        ),
-      ).tipo,
-    )
+    const cobGuardada = (c.obraSocialOverride || p?.obraSocial || 'Particular').trim()
+    setBookingCobertura(cobGuardada || 'Particular')
     setBookingPatientPickerOpen(false)
     setBookingDuracion(c.duracionMinutos)
     setBookingEstado(c.estado)
@@ -1391,10 +1495,44 @@ export function AgendaPage() {
     setBookingEditingId(null)
     setBookingPatientId('')
     setBookingPatientQuery('')
-    setBookingCobertura('particular')
+    setBookingCobertura('Particular')
     setBookingFormError(null)
+    resetBookingMotivo()
     resetBookingPayment()
     setBookingPatientPickerOpen(false)
+  }
+  function resetBookingForm() {
+    if (bookingEditingId) {
+      const original = data.appointments.find((c) => c.id === bookingEditingId)
+      if (original) {
+        openBookingForEdit(original)
+        return
+      }
+    }
+    setBookingPatientId('')
+    setBookingPatientQuery('')
+    setBookingPatientObraSocial('')
+    setBookingCobertura('Particular')
+    setBookingPatientPickerOpen(false)
+    setBookingSlotHm(null)
+    setBookingFueraGrilla(false)
+    setBookingManualHm('')
+    resetBookingMotivo()
+    resetBookingPayment()
+    setBookingEstado('programado')
+    if (bookingDoctorId) {
+      const doc = doctorById(bookingDoctorId)
+      const res = calcularMontoSugerido({
+        doctor: doc,
+        cobertura: 'Particular',
+        obrasSocialesCatalog,
+      })
+      if (res.montoCalculado !== null && res.montoCalculado > 0) {
+        setBookingMonto(res.montoCalculadoFormateado)
+      } else {
+        setBookingMonto('')
+      }
+    }
   }
   function resetCita() {
     setCitaEditing(null)
@@ -1628,13 +1766,69 @@ function registrarAtencionEnCuota(
     // Se guarda siempre el override: al elegir el plan queda el nombre del plan
     // y los informes lo toman como una cobertura más, sin código nuevo.
     const obraSocialOverride = coberturaValor
+
+    // Validar si el turno se intenta cubrir con el plan y el paciente superó el tope del mes
+    const infoPlan = buscarAfiliacionYPlanPaciente(
+      patientId,
+      data.afiliados ?? [],
+      data.planesAfiliados ?? [],
+    )
+    if (
+      infoPlan &&
+      (coberturaTipo === 'plan' ||
+        normalizeOsName(obraSocialOverride) === normalizeOsName(infoPlan.plan.nombre))
+    ) {
+      const fechaTurno = parseISO(fechaHora)
+      const hoyRef = new Date()
+      const fechaEvalDeuda = fechaTurno > hoyRef ? fechaTurno : hoyRef
+      if (esContratanteSuspendido(infoPlan.afiliado)) {
+        setBookingFormError(
+          'Contratante suspendido. No se puede usar la cobertura mientras esté suspendido (cambiá la cobertura a Particular u otra obra social).',
+        )
+        return
+      }
+      if (
+        afiliadoTieneCuotasImpagas(
+          infoPlan.afiliado,
+          data.cuotasAfiliados ?? [],
+          fechaEvalDeuda,
+        )
+      ) {
+        setBookingFormError(
+          'El paciente no está al día con la cuota de su cobertura (registra deuda). Regularizá el pago en Afiliados o cambiá la cobertura a Particular u otra obra social.',
+        )
+        return
+      }
+      const consumo = calcularConsumoAfiliadoMes({
+        patientId,
+        anio: fechaTurno.getFullYear(),
+        mes: fechaTurno.getMonth() + 1,
+        plan: infoPlan.plan,
+        appointments: data.appointments ?? [],
+        excludeAppointmentId: bookingEditingId ?? undefined,
+        ordenesMedicas: data.ordenesMedicas ?? [],
+      })
+      const check = validarCupoPlanParaTurno(
+        consumo,
+        buildBookingNotas(),
+        buildBookingMotivo2(),
+      )
+      if (!check.permitido) {
+        setBookingFormError(
+          check.motivoBloqueo ||
+            'El paciente ya alcanzó el tope mensual de su plan. Cambiá la cobertura a Particular u otra obra social.',
+        )
+        return
+      }
+    }
+
     upsertAppointment({
       id: appointmentId,
       patientId,
       doctorId: bookingDoctorId,
       fechaHora,
       duracionMinutos: bookingDuracion,
-      estado: bookingEstado,
+      estado: (bookingEstado === 'pagado' ? 'programado' : bookingEstado) as AppointmentEstado,
       notas: buildBookingNotas(),
       motivoConsulta2: buildBookingMotivo2(),
       obraSocialOverride,
@@ -1681,9 +1875,10 @@ function registrarAtencionEnCuota(
     } else if (bookingPaymentId2) {
       deletePayment(bookingPaymentId2)
     }
-    const okText = bookingEditingId
-      ? 'Turno actualizado.'
-      : 'Turno creado desde la agenda semanal.'
+    const doc = doctorById(bookingDoctorId)
+    const docNombre = doc ? `${doc.apellido}, ${doc.nombre}` : 'Médico'
+    const totalMontoStr = formatMonto(bookingTotalMonto)
+    const okText = `${bookingEditingId ? 'Turno modificado' : 'Turno confirmado'}: ${docNombre} · ${hm} hs · ${obraSocialOverride} · Total $ ${totalMontoStr}`
     closeBooking()
     setMsg({ type: 'ok', text: okText })
     if (closeAgendaMedicoAfterBooking) {
@@ -2336,6 +2531,10 @@ function prepareTurnoWhatsApp(
       ? dayCitaEstadoParts(c, isPagado).join(' - ')
       : undefined
     const actionsOpen = citaActionsOpenId === c.id
+    const p = patientById(c.patientId)
+    const motivosText = joinMotivosConsulta(c.notas ?? '', c.motivoConsulta2)
+    const cobText = c.obraSocialOverride || p?.obraSocial || 'Particular'
+    const whoTitle = `${secondary} (${cobText}${motivosText ? ` · ${motivosText}` : ''}) · Click: mostrar u ocultar acciones · Doble click: editar`
     return (
       <li
         key={c.id}
@@ -2350,7 +2549,7 @@ function prepareTurnoWhatsApp(
             <span className="day-cita__sep">-</span>
             <span
               className="day-cita__who day-cita__who--tap"
-              title="Click: mostrar u ocultar acciones · Doble click: editar"
+              title={whoTitle}
               onClick={() => handleCitaNameClick(c)}
               onDoubleClick={() => handleCitaNameDoubleClick(c)}
             >
@@ -2748,653 +2947,104 @@ function prepareTurnoWhatsApp(
             </div>
           </section>
           {bookingOpen && bookingDate && (
-            <div
-              className="booking-backdrop"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="booking-title"
-              onMouseDown={(ev) => {
-                if (ev.target === ev.currentTarget) closeBooking()
-              }}
-            >
-          {quickPacienteOpen && (
-            <QuickPacienteModal
-              initial={{ dni: quickPacienteInitialDni }}
-              existingPatients={data.patients}
-              localidadesOpciones={localidadesOpciones}
-              onSave={(pac) => {
-                const id = createId()
-                upsertPatient({
-                  id,
-                  apellido: pac.apellido,
-                  nombre: pac.nombre,
-                  dni: pac.dni,
-                  telefono: pac.telefono,
-                  email: pac.email,
-                  domicilio: '',
-                  localidad: pac.localidad,
-                  fechaNacimiento: '',
-                  obraSocial: pac.obraSocial,
-                  notas: '',
-                  activo: true,
-                })
-                setBookingPatientId(id)
-                setBookingPatientQuery(
-                  patientPickerLineLegacy(pac.dni, pac.apellido, pac.nombre) ||
-                    `${pac.apellido}, ${pac.nombre}`,
-                )
-                setBookingPatientPickerOpen(false)
-                setQuickPacienteOpen(false)
-                setQuickPacienteInitialDni('')
-              }}
-              onClose={() => {
-                setQuickPacienteOpen(false)
-              }}
-            />
-          )}
-              <div className="booking-sheet" onMouseDown={(e) => e.stopPropagation()}>
-                <div className="booking-modal-header" id="booking-title">
-                  <div className="booking-modal-header__brand">
-                    <div className="booking-modal-header__logo">C</div>
-                    <div className="booking-modal-header__titles">
-                      <div className="booking-modal-header__title">{APP_DISPLAY_NAME}</div>
-                      <div className="booking-modal-header__subtitle">
-                        {bookingEditingId ? 'Modificar turno' : 'Nuevo turno'}
-                      </div>
-                    </div>
-                  </div>
-                  {bookingDate && (
-                    <div className="booking-modal-header__date">
-                      {format(bookingDate, "EEEE d 'de' MMMM", { locale: es })
-                        .split(' ')
-                        .map((w) =>
-                          w.toLowerCase() === 'de' ? 'de' : w.charAt(0).toUpperCase() + w.slice(1),
-                        )
-                        .join(' ')}
-                    </div>
-                  )}
-                </div>
-                {!puedeAgenda ? (
-                  <p className="empty-hint" style={{ padding: '24px' }}>
-                    Cargá pacientes y médicos para poder reservar desde acá.
-                  </p>
-                ) : (
-                  <form className="booking-modal-form" onSubmit={submitBooking} noValidate>
-                    <div className="booking-modal-body">
-                      {/* Columna Izquierda */}
-                      <div className="booking-modal-col--left">
-                        {/* 1. Selector Médico y aviso de agenda */}
-                        <div className="booking-modal-row--medico">
-                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
-                            <label htmlFor="bk-doc">Médico</label>
-                            <select
-                              id="bk-doc"
-                              value={bookingDoctorId}
-                              onChange={(e) => {
-                                const id = e.target.value
-                                setBookingDoctorId(id)
-                                setBookingSlotHm(null)
-                                setBookingManualHm('')
-                                const doc = doctorById(id)
-                                if (doc && !bookingFueraGrilla) {
-                                  setBookingDuracion(doctorDuracionTurno(doc))
-                                }
-                              }}
-                              required
-                              disabled={bookingDoctors.length === 0}
-                            >
-                              <option value="">
-                                {bookingDoctors.length === 0
-                                  ? 'Sin médicos ese día'
-                                  : 'Elegir…'}
-                              </option>
-                              {bookingDoctors.map((d) => (
-                                <option key={d.id} value={d.id}>
-                                  {d.apellido}, {d.nombre}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          {bookingScheduleHint ? (
-                            <div className="booking-schedule-badge">
-                              {bookingScheduleHint}
-                            </div>
-                          ) : (
-                            <div style={{ flex: 1, minWidth: 0 }} />
-                          )}
-                        </div>
-                        {bookingDoctors.length === 0 && (
-                          <p className="empty-hint" style={{ margin: 0 }}>
-                            Ningún médico atiende ese día en las franjas horarias (o está marcado como día libre).
-                          </p>
-                        )}
-                        {/* 2. Campo Paciente a todo el ancho */}
-                        <div className="booking-field">
-                          <label htmlFor="bk-pac">Paciente</label>
-                          <div className="booking-patient-picker">
-                            <input
-                              id="bk-pac"
-                              name="sanatorio-agenda-paciente"
-                              autoComplete="off"
-                              value={bookingPatientQuery}
-                              onChange={(e) => {
-                                const q = e.target.value
-                                setBookingPatientQuery(q)
-                                setBookingPatientPickerOpen(true)
-                                if (bookingPatientId) setBookingPatientId('')
-                                const trimmed = q.trim()
-                                if (!trimmed) return
-                                const matches = pacientesOperativos.filter((p) =>
-                                  patientMatchesPickerQuery(p, trimmed),
-                                )
-                                const unique = matches.length === 1 ? matches[0]! : null
-                                const isNumeric = /^\d+$/.test(trimmed)
-                                const shouldAutoPick =
-                                  Boolean(unique) &&
-                                  (isNumeric ? trimmed.length >= 2 : trimmed.length >= 4)
-                                if (unique && shouldAutoPick) {
-                                  setBookingPatientId(unique.id)
-                                }
-                              }}
-                              onFocus={() => setBookingPatientPickerOpen(true)}
-                              onKeyDown={(e) => {
-                                if (e.key !== 'Enter') return
-                                e.preventDefault()
-                                e.stopPropagation()
-                                const q = bookingPatientQuery.trim()
-                                if (!q) return
-                                const matches = pacientesOperativos.filter((p) =>
-                                  patientMatchesPickerQuery(p, q),
-                                )
-                                const pick = matches[0]
-                                if (!pick) {
-                                  if (/^\d+$/.test(q)) {
-                                    setQuickPacienteInitialDni(q)
-                                    setQuickPacienteOpen(true)
-                                  }
-                                  return
-                                }
-                                setBookingPatientId(pick.id)
-                                setBookingPatientQuery(
-                                  patientPickerLineLegacy(
-                                    pick.dni,
-                                    pick.apellido,
-                                    pick.nombre,
-                                  ),
-                                )
-                                setBookingPatientPickerOpen(false)
-                              }}
-                              onBlur={() => {
-                                window.setTimeout(() => {
-                                  setBookingPatientPickerOpen(false)
-                                  const q = bookingPatientQuery.trim()
-                                  if (!q) return
-                                  const matches = pacientesOperativos.filter((p) =>
-                                    patientMatchesPickerQuery(p, q),
-                                  )
-                                  if (matches.length === 1) {
-                                    const p = matches[0]!
-                                    setBookingPatientId(p.id)
-                                    setBookingPatientQuery(
-                                      patientPickerLineLegacy(
-                                        p.dni,
-                                        p.apellido,
-                                        p.nombre,
-                                      ),
-                                    )
-                                  }
-                                }, 120)
-                              }}
-                              placeholder="Buscar por DNI o apellido…"
-                            />
-                            {bookingPatientPickerOpen && (
-                              <div className="booking-patient-picker__menu">
-                                {(bookingPatientQuery.trim()
-                                  ? pacientesOperativos.filter((p) =>
-                                      patientMatchesPickerQuery(
-                                        p,
-                                        bookingPatientQuery.trim(),
-                                      ),
-                                    )
-                                  : pacientesOperativos
-                                ).map((p) => (
-                                  <button
-                                    type="button"
-                                    key={p.id}
-                                    className="booking-patient-picker__opt"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => {
-                                      setBookingPatientId(p.id)
-                                      setBookingPatientQuery(
-                                        patientPickerLineLegacy(
-                                          p.dni,
-                                          p.apellido,
-                                          p.nombre,
-                                        ),
-                                      )
-                                      setBookingPatientPickerOpen(false)
-                                    }}
-                                  >
-                                    <span className="booking-patient-picker__opt-line">
-                                      {patientPickerLineLegacy(
-                                        p.dni,
-                                        p.apellido,
-                                        p.nombre,
-                                      ) || `${p.apellido}, ${p.nombre}`}
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        {/* 3. Fila: Cobertura (obra social / plan / particular), + Nuevo paciente */}
-                        <div className="booking-modal-row--obra">
-                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
-                            <label htmlFor="bk-cobertura">Cobertura</label>
-                            <select
-                              id="bk-cobertura"
-                              value={bookingCoberturaActual.tipo}
-                              onChange={(e) => setBookingCobertura(e.target.value as CoberturaTipo)}
-                            >
-                              {bookingOpcionesCobertura.map((o) => (
-                                <option
-                                  key={o.tipo}
-                                  value={o.tipo}
-                                  disabled={o.disabled}
-                                  title={o.motivo}
-                                >
-                                  {o.label}
-                                </option>
-                              ))}
-                            </select>
-                            {/* Si el plan no se puede usar se dice por qué acá
-                                abajo, en vez de dejar una opción muerta. */}
-                            {bookingPlanMotivo && (
-                              <span className="booking-cobertura-motivo">{bookingPlanMotivo}</span>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            className="booking-btn-new-patient"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => {
-                              const raw = bookingPatientQuery.trim()
-                              setQuickPacienteInitialDni(
-                                raw && /^\d{6,}$/.test(raw) ? raw : '',
-                              )
-                              setQuickPacienteOpen(true)
-                            }}
-                          >
-                            + Nuevo paciente
-                          </button>
-                        </div>
-                        <datalist id="booking-os-list">
-                          {obrasSocialesDisponibles.map((os) => (
-                            <option key={os} value={os} />
-                          ))}
-                        </datalist>
-                        {/* 4. Línea divisoria */}
-                        <hr className="booking-modal-divider" />
-                        {/* 5. Título PAGO (OPCIONAL) */}
-                        <div className="booking-section-title">PAGO (OPCIONAL)</div>
-                        {/* 6. Grilla de 3 columnas */}
-                        <div className="booking-payment-grid">
-                          <div className="booking-field">
-                            <label htmlFor="bk-monto">Monto</label>
-                            <input
-                              id="bk-monto"
-                              inputMode="decimal"
-                              placeholder="0"
-                              value={bookingMonto}
-                              onChange={(e) =>
-                                setBookingMonto(formatMontoFieldInput(e.target.value))
-                              }
-                            />
-                          </div>
-                          <div className="booking-field">
-                            <label htmlFor="bk-met">Método</label>
-                            <select
-                              id="bk-met"
-                              value={bookingMetodo}
-                              onChange={(e) => setBookingMetodo(e.target.value)}
-                            >
-                              {PAYMENT_METODOS.map((m) => (
-                                <option key={m} value={m}>
-                                  {m}
-                                </option>
-                              ))}
-                                                          <option value="Trasf. Gerencia">Trasf. Gerencia</option>
-</select>
-                          </div>
-                          <div className="booking-field">
-                            <label htmlFor="bk-est">Estado</label>
-                            <select
-                              id="bk-est"
-                              value={bookingEstado}
-                              onChange={(e) =>
-                                setBookingEstado(e.target.value as AppointmentEstado)
-                              }
-                            >
-                              {AGENDA_ESTADOS.map((x) => (
-                                <option key={x.value} value={x.value}>
-                                  {x.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="booking-field">
-                            <label htmlFor="bk-monto-2">Monto (2)</label>
-                            <input
-                              id="bk-monto-2"
-                              inputMode="decimal"
-                              placeholder="0"
-                              value={bookingMonto2}
-                              onChange={(e) =>
-                                setBookingMonto2(formatMontoFieldInput(e.target.value))
-                              }
-                            />
-                          </div>
-                          <div className="booking-field">
-                            <label htmlFor="bk-met-2">Método (2)</label>
-                            <select
-                              id="bk-met-2"
-                              value={bookingMetodo2}
-                              onChange={(e) => setBookingMetodo2(e.target.value)}
-                            >
-                              {PAYMENT_METODOS.map((m) => (
-                                <option key={m} value={m}>
-                                  {m}
-                                </option>
-                              ))}
-                                                          <option value="Trasf. Gerencia">Trasf. Gerencia</option>
-</select>
-                          </div>
-                          <div className="booking-field">
-                            <label htmlFor="bk-total-monto">Total Monto</label>
-                            <output
-                              id="bk-total-monto"
-                              className="booking-total-monto-box"
-                              aria-live="polite"
-                            >
-                              {formatMonto(bookingTotalMonto)}
-                            </output>
-                          </div>
-                        </div>
-                        {/* 7. Aviso métodos iguales */}
-                        {bookingMetodosIguales && (
-                          <p className="booking-methods-warning" role="status">
-                            Método y Método (2) son iguales. Elegí formas de pago distintas para cada monto.
-                          </p>
-                        )}
-                        {/* 8. Fila Motivo Consulta 1 */}
-                        <div className="booking-field">
-                          <label htmlFor="bk-historia-clinica" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                            Motivo Consulta 1
-                            <span style={{ color: '#1976d2', fontWeight: 600, fontSize: '0.85rem', marginLeft: '0.5rem' }}>
-                              Ingresar el Motivo de la consulta
-                            </span>
-                          </label>
-                          <div className="booking-modal-row--motivo">
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <select
-                                id="bk-historia-clinica"
-                                value={bookingMotivoConsulta}
-                                onChange={(e) =>
-                                  setBookingMotivoConsulta(e.target.value)
-                                }
-                              >
-                                {motivosConsultaOpciones.map((m) => (
-                                  <option key={m} value={m}>
-                                    {m}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <button
-                              type="button"
-                              className="booking-btn-add-motivo"
-                              aria-label="Agregar motivo"
-                              onClick={() =>
-                                openMotivosConsultaModal(setBookingMotivoConsulta)
-                              }
-                            >
-                              <IconPlus />
-                            </button>
-                          </div>
-                          {bookingMotivoConsulta === 'Otro' && (
-                            <input
-                              id="bk-historia-clinica-otro"
-                              type="text"
-                              className="booking-input-motivo-otro"
-                              placeholder="Especificar motivo"
-                              value={bookingMotivoOtro}
-                              onChange={(e) => setBookingMotivoOtro(e.target.value)}
-                            />
-                          )}
-                        </div>
-                        {/* 9. Fila Motivo Consulta 2 */}
-                        <div className="booking-field">
-                          <label htmlFor="bk-historia-clinica-2">Motivo Consulta 2</label>
-                          <div className="booking-modal-row--motivo">
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <select
-                                id="bk-historia-clinica-2"
-                                value={bookingMotivoConsulta2}
-                                onChange={(e) => {
-                                  setBookingMotivoConsulta2(e.target.value)
-                                  if (e.target.value !== 'Otro') setBookingMotivoOtro2('')
-                                }}
-                              >
-                                <option value={MOTIVO_CONSULTA_2_NINGUNO}>
-                                  Sin motivo 2
-                                </option>
-                                {motivosConsultaOpciones.map((m) => (
-                                  <option key={m} value={m}>
-                                    {m}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          <button
-                            type="button"
-                            className="booking-btn-add-motivo"
-                            aria-label="Agregar motivo"
-                            onClick={() =>
-                              openMotivosConsultaModal(setBookingMotivoConsulta2)
-                            }
-                          >
-                            <IconPlus />
-                          </button>
-                          </div>
-                          {bookingMotivoConsulta2 === 'Otro' && (
-                            <input
-                              id="bk-historia-clinica-otro-2"
-                              type="text"
-                              className="booking-input-motivo-otro"
-                              placeholder="Especificar motivo"
-                              value={bookingMotivoOtro2}
-                              onChange={(e) => setBookingMotivoOtro2(e.target.value)}
-                            />
-                          )}
-                        </div>
-
-                        {bookingFormError && (
-                          <p className="msg msg-error booking-form-error" role="alert" style={{ margin: 0 }}>
-                            {bookingFormError}
-                          </p>
-                        )}
-                      </div>
-                      {/* Columna Derecha */}
-                      <div className="booking-modal-col--right">
-                        {/* 1. Título HORARIO */}
-                        <div className="booking-section-title">HORARIO</div>
-                        {/* 2. Fila Hora y Duración */}
-                        <div className="booking-modal-row--hora">
-                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
-                            <label htmlFor="bk-hora">Hora</label>
-                            <input
-                              id="bk-hora"
-                              type="time"
-                              value={bookingFueraGrilla ? bookingManualHm : (bookingSlotHm ?? '')}
-                              onChange={(e) => {
-                                if (bookingFueraGrilla) {
-                                  setBookingManualHm(e.target.value)
-                                }
-                              }}
-                              readOnly={!bookingFueraGrilla}
-                              required
-                            />
-                          </div>
-                          <div className="booking-field" style={{ flex: 1, minWidth: 0 }}>
-                            <label htmlFor="bk-duracion">Duración (min)</label>
-                            <select
-                              id="bk-duracion"
-                              value={bookingDuracion}
-                              onChange={(e) =>
-                                setBookingDuracion(Number(e.target.value))
-                              }
-                            >
-                              {URGENCIA_DURACION_OPCIONES.map((m) => (
-                                <option key={m} value={m}>
-                                  {m} min
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                        {/* 3. Casilla urgencia */}
-                        <label className="booking-urgencia-box">
-                          <input
-                            type="checkbox"
-                            id="bk-urgencia"
-                            checked={bookingFueraGrilla}
-                            onChange={(e) => setBookingUrgencia(e.target.checked)}
-                          />
-                          <span>Urgencia / fuera de grilla (hora manual)</span>
-                        </label>
-                        {/* 4. Mensaje de disponibilidad */}
-                        {bookingManualSlotCheck && !bookingManualSlotCheck.ok ? (
-                          <p className="booking-slot-availability booking-slot-availability--err">
-                            {bookingManualSlotCheck.message}
-                          </p>
-                        ) : (bookingFueraGrilla
-                            ? (bookingManualSlotCheck?.ok && normalizeHmInput(bookingManualHm))
-                            : bookingSlotHm) ? (
-                          <p className="booking-slot-availability booking-slot-availability--ok">
-                            Horario disponible para este médico.
-                          </p>
-                        ) : null}
-                        {/* 5. Franjas y grilla de horarios de referencia */}
-                        {bookingDoctorId && bookingDayPlan?.kind === 'no-day' && (
-                          <p className="msg msg-error" style={{ margin: 0 }}>
-                            Este médico no tiene franja ese día de la semana. Ajustá
-                            horarios o elegí otro día.
-                          </p>
-                        )}
-                        {bookingDoctorId && bookingDayPlan?.kind !== 'no-day' && (
-                          <>
-                            <span className="booking-slots-label">
-                              Horarios de referencia (tocá para copiar la hora)
-                            </span>
-                            {bookingSlots.length === 0 ? (
-                              <p className="empty-hint" style={{ padding: '0.5rem 0' }}>
-                                No hay cupos de {bookingDuracion} min en las franjas de ese
-                                día (o ya están ocupados).
-                              </p>
-                            ) : (
-                              <div className="booking-slots-grid-4">
-                                {bookingSlots.map((s) => (
-                                  <button
-                                    key={s.hm}
-                                    type="button"
-                                    disabled={!bookingFueraGrilla && !s.available}
-                                    title={s.available ? 'Disponible' : s.reason}
-                                    className={`booking-slot-chip${
-                                      (bookingFueraGrilla
-                                        ? normalizeHmInput(bookingManualHm) === s.hm
-                                        : bookingSlotHm === s.hm)
-                                        ? ' booking-slot-chip--picked'
-                                        : ''
-                                    }`}
-                                    onClick={() => {
-                                      if (bookingFueraGrilla) {
-                                        setBookingManualHm(s.hm)
-                                        return
-                                      }
-                                      if (!s.available) return
-                                      setBookingSlotHm(s.hm)
-                                    }}
-                                  >
-                                    {s.hm}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    {/* Pie fijo */}
-                    <div className="booking-modal-footer">
-                      {bookingEditingId !== null &&
-                        !bookingPaymentId &&
-                        !bookingPaymentId2 && (
-                          <span
-                            style={{
-                              color: '#dc2626',
-                              fontWeight: 600,
-                              fontSize: '0.85rem',
-                              alignSelf: 'center',
-                              marginRight: 'auto',
-                            }}
-                          >
-                            DEBE ABONAR AL SER ATENDIDO
-                          </span>
-                        )}
-                        {!bookingMotivoConsulta.trim() && (
-                          <span
-                            style={{
-                              color: '#dc2626',
-                              fontWeight: 600,
-                              fontSize: '0.85rem',
-                              alignSelf: 'center',
-                              marginRight: 'auto',
-                            }}
-                          >
-                          </span>
-                        )}
-                      <button
-                        type="button"
-                        className="booking-footer-btn booking-footer-btn--secondary"
-                        onClick={closeBooking}
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        className="booking-footer-btn booking-footer-btn--primary"
-                        disabled={
-                          !bookingResolvedHm() ||
-                          (bookingFueraGrilla &&
-                            bookingManualSlotCheck !== null &&
-                            !bookingManualSlotCheck.ok)
-                        }
-                      >
-                        {bookingEditingId ? 'Guardar cambios' : 'Confirmar turno'}
-                      </button>
-                      <button
-                        type="button"
-                        className="booking-footer-btn booking-footer-btn--secondary"
-                        onClick={closeBooking}
-                      >
-                        Salir
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            </div>
+            <>
+              {quickPacienteOpen && (
+                <QuickPacienteModal
+                  initial={{ dni: quickPacienteInitialDni }}
+                  existingPatients={data.patients}
+                  localidadesOpciones={localidadesOpciones}
+                  obrasSocialesOpciones={obrasSocialesOpciones}
+                  onSave={(pac) => {
+                    const id = createId()
+                    const createdPatient: Patient = {
+                      id,
+                      apellido: pac.apellido,
+                      nombre: pac.nombre,
+                      dni: pac.dni,
+                      telefono: pac.telefono,
+                      email: pac.email,
+                      domicilio: '',
+                      localidad: pac.localidad,
+                      fechaNacimiento: '',
+                      obraSocial: pac.obraSocial,
+                      notas: '',
+                      activo: true,
+                    }
+                    upsertPatient(createdPatient)
+                    applyPatientSelection(createdPatient)
+                    setQuickPacienteOpen(false)
+                    setQuickPacienteInitialDni('')
+                  }}
+                  onClose={() => {
+                    setQuickPacienteOpen(false)
+                  }}
+                />
+              )}
+              <NuevoTurnoModal
+                bookingDate={bookingDate}
+                bookingEditingId={bookingEditingId}
+                bookingDoctorId={bookingDoctorId}
+                setBookingDoctorId={setBookingDoctorId}
+                bookingPatientId={bookingPatientId}
+                setBookingPatientId={setBookingPatientId}
+                bookingPatientQuery={bookingPatientQuery}
+                setBookingPatientQuery={setBookingPatientQuery}
+                bookingPatientPickerOpen={bookingPatientPickerOpen}
+                setBookingPatientPickerOpen={setBookingPatientPickerOpen}
+                bookingSlotHm={bookingSlotHm}
+                setBookingSlotHm={setBookingSlotHm}
+                bookingManualHm={bookingManualHm}
+                setBookingManualHm={setBookingManualHm}
+                bookingFueraGrilla={bookingFueraGrilla}
+                setBookingFueraGrilla={setBookingFueraGrilla}
+                bookingDuracion={bookingDuracion}
+                setBookingDuracion={setBookingDuracion}
+                bookingCobertura={bookingCobertura}
+                setBookingCobertura={setBookingCobertura}
+                bookingMonto={bookingMonto}
+                setBookingMonto={setBookingMonto}
+                bookingMonto2={bookingMonto2}
+                setBookingMonto2={setBookingMonto2}
+                bookingMetodo={bookingMetodo}
+                setBookingMetodo={setBookingMetodo}
+                bookingMetodo2={bookingMetodo2}
+                setBookingMetodo2={setBookingMetodo2}
+                bookingEstado={bookingEstado}
+                setBookingEstado={setBookingEstado}
+                bookingMotivoConsulta={bookingMotivoConsulta}
+                setBookingMotivoConsulta={setBookingMotivoConsulta}
+                bookingMotivoConsulta2={bookingMotivoConsulta2}
+                setBookingMotivoConsulta2={setBookingMotivoConsulta2}
+                bookingMotivoOtro={bookingMotivoOtro}
+                setBookingMotivoOtro={setBookingMotivoOtro}
+                bookingMotivoOtro2={bookingMotivoOtro2}
+                setBookingMotivoOtro2={setBookingMotivoOtro2}
+                bookingFormError={bookingFormError}
+                bookingScheduleHint={bookingScheduleHint}
+                bookingDoctors={bookingDoctors}
+                pacientesOperativos={pacientesOperativos}
+                bookingSlots={bookingSlots}
+                bookingManualSlotCheck={bookingManualSlotCheck}
+                bookingTotalMonto={bookingTotalMonto}
+                bookingMetodosIguales={bookingMetodosIguales}
+                bookingPaymentId={bookingPaymentId}
+                bookingPaymentId2={bookingPaymentId2}
+                obrasSocialesCatalog={obrasSocialesCatalog}
+                saveObraSocialCatalog={saveObraSocialCatalog}
+                motivosConsultaOpciones={motivosConsultaOpciones}
+                openMotivosConsultaModal={openMotivosConsultaModal}
+                onClose={closeBooking}
+                onResetForm={resetBookingForm}
+                onSubmitBooking={submitBooking}
+                onOpenNewPatient={(initialDni) => {
+                  setQuickPacienteInitialDni(initialDni)
+                  setQuickPacienteOpen(true)
+                }}
+                applyPatientSelection={applyPatientSelection}
+                doctorById={doctorById}
+                bookingResolvedHm={bookingResolvedHm}
+              />
+            </>
           )}
         </div>
       )}

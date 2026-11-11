@@ -1,4 +1,5 @@
 import { hashPassword, verifyPassword } from './passwordHash'
+import { hasPermission, PERMISSIONS } from './permissions'
 import { getTurnoFromFecha } from './dayTurnos'
 import {
   checkLoginRateLimit,
@@ -498,6 +499,10 @@ export function canAccessPath(role: AppRole, pathname: string): boolean {
   const path = pathname.split('?')[0]?.replace(/\/$/, '') || '/'
   if (role === 'afiliado') {
     return path === '/afiliados' || path === '/pacientes'
+  }
+  // Pantalla reducida de cobranza: no es el módulo Afiliados completo.
+  if (path === '/pagos-afiliados') {
+    return hasPermission(role, PERMISSIONS.PAGOS_AFILIADOS)
   }
   // La secretaria trabaja sin el módulo Afiliados; Admi sí puede verlo.
   if (path === '/afiliados') return role === 'admin'

@@ -1,0 +1,1 @@
+import{i as e}from"./core-BAkq8kE-.js";async function t(t=0){await e(`plugin:process|exit`,{code:t})}export{t as exit};

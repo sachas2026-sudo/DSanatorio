@@ -26,6 +26,7 @@ const ALL_LINKS: { to: string; label: string; end?: boolean }[] = [
   { to: '/pagos', label: 'Pagos' },
   { to: '/pagos-cancelados', label: 'Pagos Cancelados' },
   { to: '/afiliados', label: 'Afiliados' },
+  { to: '/pagos-afiliados', label: 'Pagos de afiliados' },
   { to: '/configuracion', label: 'Configuración' },
   { to: '/mantenimiento', label: 'Mantenimiento' },
 ]
@@ -90,6 +91,15 @@ function getNavIcon(to: string) {
           <line x1="14" y1="9" x2="17.5" y2="9" />
           <line x1="14" y1="13" x2="17.5" y2="13" />
           <path d="M5.5 16c0-1.5 1.5-2 3-2s3 .5 3 2" />
+        </svg>
+      )
+    case '/pagos-afiliados':
+      return (
+        <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="2" y="6" width="20" height="13" rx="2" />
+          <path d="M2 10h20" />
+          <circle cx="16.5" cy="14.5" r="1.3" />
+          <path d="M6 15h4" />
         </svg>
       )
     case '/configuracion':

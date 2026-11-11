@@ -2,10 +2,14 @@ import { useState, useMemo } from 'react'
 import { format, parseISO, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns'
 import { es } from 'date-fns/locale'
 import type { Payment, Doctor } from '../../../types'
-import { computeDoctorPorcentajeSettlement, computeEfectivoAEntregar, resolvePaymentPorcentaje } from '../../../lib/pagosPdfLayout'
+import {
+  computeEfectivoAEntregar,
+  resolveDoctorPaymentSettlement,
+  buildPaymentsSettlementMap,
+} from '../../../lib/pagosPdfLayout'
 import { formatMonto } from '../../../lib/formatMonto'
 import { getTurnoFromFecha } from '../../../lib/dayTurnos'
-import { buildResumenCuidarPdf } from '../../../lib/resumenCuidarPdf'
+import { buildResumenCuidarPdf, type ResumenCuidarDoctorPdfRow } from '../../../lib/resumenCuidarPdf'
 import { PdfPreviewModal } from '../../../shared/components/PdfPreviewModal'
 import '../../../shared/styles/pages.css'
 
@@ -30,7 +34,16 @@ export function ResumenCuidarModal({ payments, doctors, onClose }: Props) {
     )
   }, [doctors])
 
-  const { rows, totalCuidar, totalFacturado, totalTransferencias, totalMedico } = useMemo(() => {
+  const {
+    rows,
+    doctorRows,
+    totalCuidar,
+    totalFacturado,
+    totalTransferencias,
+    totalMedico,
+    totalPorcentajeLabel,
+    doctorsWithPayments,
+  } = useMemo(() => {
     let tCuidar = 0
     let tFacturado = 0
     let tTransferencias = 0
@@ -50,7 +63,44 @@ export function ResumenCuidarModal({ payments, doctors, onClose }: Props) {
       return true
     })
 
-    const byDayAndTurno = new Map<string, { day: string; turno: string; facturado: number; cuidar: number; transferencias: number; medico: number; cantidad: number }>()
+    const byDayAndTurno = new Map<
+      string,
+      {
+        day: string
+        turno: string
+        facturado: number
+        cuidar: number
+        transferencias: number
+        medico: number
+        cantidad: number
+        pctSet: Set<number>
+        hasFixed: boolean
+      }
+    >()
+
+    const settlementMap = buildPaymentsSettlementMap(
+      validPayments,
+      (id) => doctors.find((d) => d.id === id),
+      (p) => p.obraSocialOverride,
+    )
+
+    const byDayTurnoDoctor = new Map<
+      string,
+      {
+        day: string
+        turno: string
+        doctorId: string
+        doctorNombre: string
+        facturado: number
+        cuidar: number
+        transferencias: number
+        efectivo: number
+        medico: number
+        cantidad: number
+        pctSet: Set<number>
+        hasFixed: boolean
+      }
+    >()
 
     for (const p of validPayments) {
       const day = format(parseISO(p.fecha), 'yyyy-MM-dd')
@@ -58,8 +108,9 @@ export function ResumenCuidarModal({ payments, doctors, onClose }: Props) {
       const key = `${day}__${turno}`
 
       const doctor = doctors.find((d) => d.id === p.doctorId)
-      const pct = resolvePaymentPorcentaje(p, doctor?.porcentaje)
-      const s = computeDoctorPorcentajeSettlement(p.monto, pct)
+      const s =
+        settlementMap.get(p.id) ??
+        resolveDoctorPaymentSettlement(p, doctor, p.obraSocialOverride)
 
       const cuidar = s.totalPorcentaje || 0
       const transferencias = p.metodo.trim().toLowerCase() === 'transferencia' ? p.monto : 0
@@ -71,13 +122,58 @@ export function ResumenCuidarModal({ payments, doctors, onClose }: Props) {
       tTransferencias += transferencias
       tMedico += medico
 
-      const existing = byDayAndTurno.get(key) ?? { day, turno, facturado: 0, cuidar: 0, transferencias: 0, medico: 0, cantidad: 0 }
+      const existing = byDayAndTurno.get(key) ?? {
+        day,
+        turno,
+        facturado: 0,
+        cuidar: 0,
+        transferencias: 0,
+        medico: 0,
+        cantidad: 0,
+        pctSet: new Set<number>(),
+        hasFixed: false,
+      }
       existing.facturado += facturado
       existing.cuidar += cuidar
       existing.transferencias += transferencias
       existing.medico += medico
       existing.cantidad += 1
+      if (s.esMontoFijo) {
+        existing.hasFixed = true
+      } else if (s.porcentaje > 0) {
+        existing.pctSet.add(s.porcentaje)
+      }
       byDayAndTurno.set(key, existing)
+
+      const docObj = doctors.find((d) => d.id === p.doctorId)
+      const docName = docObj ? `${docObj.apellido}, ${docObj.nombre}` : 'Médico'
+      const docKey = `${day}__${turno}__${p.doctorId}`
+      const existingDoc = byDayTurnoDoctor.get(docKey) ?? {
+        day,
+        turno,
+        doctorId: p.doctorId,
+        doctorNombre: docName,
+        facturado: 0,
+        cuidar: 0,
+        transferencias: 0,
+        efectivo: 0,
+        medico: 0,
+        cantidad: 0,
+        pctSet: new Set<number>(),
+        hasFixed: false,
+      }
+      existingDoc.facturado += facturado
+      existingDoc.cuidar += cuidar
+      existingDoc.transferencias += transferencias
+      existingDoc.efectivo += (p.metodo.trim().toLowerCase() === 'efectivo' ? p.monto : Math.max(0, p.monto - transferencias))
+      existingDoc.medico += medico
+      existingDoc.cantidad += 1
+      if (s.esMontoFijo) {
+        existingDoc.hasFixed = true
+      } else if (s.porcentaje > 0) {
+        existingDoc.pctSet.add(s.porcentaje)
+      }
+      byDayTurnoDoctor.set(docKey, existingDoc)
     }
 
     const turnoOrder: Record<string, number> = { 'Mañana': 1, 'Tarde': 2, 'Noche': 3 }
@@ -87,8 +183,88 @@ export function ResumenCuidarModal({ payments, doctors, onClose }: Props) {
         if (cmp !== 0) return cmp
         return (turnoOrder[a.turno] ?? 9) - (turnoOrder[b.turno] ?? 9)
       })
+      .map((r) => {
+        const porcentajeLabel =
+          r.pctSet.size === 1
+            ? `${[...r.pctSet][0]}%`
+            : r.pctSet.size > 1
+              ? 'Var.'
+              : '—'
+        return {
+          day: r.day,
+          turno: r.turno,
+          facturado: r.facturado,
+          cuidar: r.cuidar,
+          transferencias: r.transferencias,
+          efectivo: r.facturado - r.transferencias,
+          medico: r.medico,
+          cantidad: r.cantidad,
+          porcentajeLabel,
+        }
+      })
 
-    return { rows: rowList, totalCuidar: tCuidar, totalFacturado: tFacturado, totalTransferencias: tTransferencias, totalMedico: tMedico }
+    const doctorRowList: ResumenCuidarDoctorPdfRow[] = Array.from(byDayTurnoDoctor.values())
+      .sort((a, b) => {
+        const cmpDay = a.day.localeCompare(b.day)
+        if (cmpDay !== 0) return cmpDay
+        const cmpTurno = (turnoOrder[a.turno] ?? 9) - (turnoOrder[b.turno] ?? 9)
+        if (cmpTurno !== 0) return cmpTurno
+        return a.doctorNombre.localeCompare(b.doctorNombre, 'es', { sensitivity: 'base' })
+      })
+      .map((r) => {
+        const porcentajeLabel =
+          r.pctSet.size === 1
+            ? `${[...r.pctSet][0]}%`
+            : r.pctSet.size > 1
+              ? 'Var.'
+              : '—'
+        return {
+          day: r.day,
+          turno: r.turno,
+          doctorId: r.doctorId,
+          doctorNombre: r.doctorNombre,
+          cantidad: r.cantidad,
+          facturado: r.facturado,
+          transferencias: r.transferencias,
+          efectivo: r.efectivo,
+          medico: r.medico,
+          cuidar: r.cuidar,
+          porcentajeLabel,
+        }
+      })
+
+    const totalPctSet = new Set<number>()
+    let totalHasFixed = false
+    for (const r of byDayAndTurno.values()) {
+      for (const pct of r.pctSet) totalPctSet.add(pct)
+      if (r.hasFixed) totalHasFixed = true
+    }
+    const totalPorcentajeLabel =
+      !totalHasFixed && totalPctSet.size === 1
+        ? `${[...totalPctSet][0]}%`
+        : totalPctSet.size > 1
+          ? 'Var.'
+          : '—'
+
+    const doctorIdsWithPayments = new Set(validPayments.map((p) => p.doctorId))
+    const doctorsWithPayments = doctors
+      .filter((d) => doctorIdsWithPayments.has(d.id))
+      .sort((a, b) =>
+        `${a.apellido} ${a.nombre}`.localeCompare(`${b.apellido} ${b.nombre}`, 'es', {
+          sensitivity: 'base',
+        }),
+      )
+
+    return {
+      rows: rowList,
+      doctorRows: doctorRowList,
+      totalCuidar: tCuidar,
+      totalFacturado: tFacturado,
+      totalTransferencias: tTransferencias,
+      totalMedico: tMedico,
+      totalPorcentajeLabel,
+      doctorsWithPayments,
+    }
   }, [payments, doctors, desde, hasta, medicoId, turno])
 
   return (
@@ -166,14 +342,29 @@ export function ResumenCuidarModal({ payments, doctors, onClose }: Props) {
                   ? `${doctors.find((d) => d.id === medicoId)?.apellido}, ${doctors.find((d) => d.id === medicoId)?.nombre}`
                   : 'Todos los médicos'
                 const turnoLabel = turno !== 'todos' ? turno : undefined
+                const selectedDoctor = medicoId
+                  ? doctors.find((d) => d.id === medicoId)
+                  : undefined
                 const built = buildResumenCuidarPdf(
                   desde,
                   hasta,
                   medicoLabel,
                   rows,
-                  { facturado: totalFacturado, transferencias: totalTransferencias, medico: totalMedico, cuidar: totalCuidar },
+                  {
+                    facturado: totalFacturado,
+                    transferencias: totalTransferencias,
+                    efectivo: totalFacturado - totalTransferencias,
+                    medico: totalMedico,
+                    cuidar: totalCuidar,
+                    porcentajeLabel: totalPorcentajeLabel,
+                  },
                   undefined,
                   turnoLabel,
+                  {
+                    doctor: selectedDoctor,
+                    doctors: doctorsWithPayments,
+                    doctorRows: selectedDoctor ? undefined : doctorRows,
+                  },
                 )
                 setPdfPreview({ url: URL.createObjectURL(built.doc.output('blob')), filename: built.filename, title: built.title })
               }}
@@ -206,14 +397,12 @@ export function ResumenCuidarModal({ payments, doctors, onClose }: Props) {
                 </tr>
               ) : (
                 rows.map((r) => {
-                  const pct = r.facturado > 0 ? Math.round((r.cuidar / r.facturado) * 1000) / 10 : 0
-                  const pctStr = r.facturado > 0 ? `${pct % 1 === 0 ? pct : pct.toFixed(1)}%` : '—'
                   return (
                     <tr key={`${r.day}__${r.turno}`}>
                       <td>{format(parseISO(r.day), 'dd/MM/yyyy')}</td>
                       <td>{r.turno}</td>
                       <td style={{ textAlign: 'right' }}>{r.cantidad}</td>
-                      <td style={{ textAlign: 'center', fontWeight: '600' }}>{pctStr}</td>
+                      <td style={{ textAlign: 'center', fontWeight: '600' }}>{r.porcentajeLabel || '—'}</td>
                       <td style={{ textAlign: 'right' }}>{formatMonto(r.facturado)}</td>
                       <td style={{ textAlign: 'right' }}>{formatMonto(r.transferencias)}</td>
                       <td style={{ textAlign: 'right' }}>{formatMonto(r.medico)}</td>

@@ -225,7 +225,7 @@ export function AgendaManualModal({
                 </div>
 
                 <div className="field field--pill" style={{ gridColumn: '1 / -1' }}>
-                  <label htmlFor="am-motivo">Motivo Consulta 1</label>
+                  <label htmlFor="am-motivo">Motivo Consulta</label>
                   <div className="motivo-consulta-row">
                     <div className="pill-select motivo-consulta-row__select">
                       <select
@@ -265,7 +265,7 @@ export function AgendaManualModal({
                 </div>
 
                 <div className="field field--pill" style={{ gridColumn: '1 / -1' }}>
-                  <label htmlFor="am-motivo-2">Motivo Consulta 2</label>
+                  <label htmlFor="am-motivo-2">Prestación</label>
                   <div className="motivo-consulta-row">
                     <div className="pill-select motivo-consulta-row__select">
                       <select

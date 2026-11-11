@@ -1,0 +1,36 @@
+{
+  "updatedAt": "2026-05-30T02:10:12.061Z",
+  "turnosHoyFecha": "viernes 29 de mayo 2026",
+  "turnosHoy": [
+    {
+      "hora": "08:00",
+      "paciente": "Rodríguez, Juan",
+      "medico": "Torres, Elena",
+      "estado": "Programado"
+    },
+    {
+      "hora": "09:00",
+      "paciente": "Rodríguez, Juan",
+      "medico": "Ruiz, Fernando",
+      "estado": "Programado"
+    },
+    {
+      "hora": "10:40",
+      "paciente": "López, Carlos",
+      "medico": "Herrera, Paula",
+      "estado": "Programado"
+    }
+  ],
+  "pagosMes": {
+    "mesLabel": "mayo 2026",
+    "total": 357450,
+    "cantidad": 19
+  },
+  "cobranzasMesTemporal": {
+    "mesLabel": "mayo 2026",
+    "total": 357450,
+    "cantidad": 19,
+    "totalFacturado": 412000,
+    "computedAt": "2026-05-30T02:10:12.061Z"
+  }
+}

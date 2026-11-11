@@ -10,7 +10,22 @@ import { useConfirm } from '../../../context/ConfirmContext'
 import { format, isWithinInterval, parseISO, subMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { ResumenCuidarModal } from '../components/ResumenCuidarModal'
+import { PdfMensualModal } from '../components/PdfMensualModal'
 import { DistribucionObrasSociales } from '../components/DistribucionObrasSociales'
+import { PagosCustomCalendar } from '../components/PagosCustomCalendar'
+import { normalizeOsName } from '../../../lib/turnoMonto'
+import {
+  clearRange,
+  formatRecuadroDate,
+  formatYMD,
+  getPresetDateRange,
+  getSemanaMesRange,
+  nextRangeState,
+  resolveListoRange,
+  setTodayRange,
+  type DatePresetType,
+  type DateRangeState,
+} from '../../../lib/pagosDateRange'
 import { useAuth } from '../../../context/AuthContext'
 import { useAppState } from '../../../context/AppStateContext'
 import {
@@ -47,12 +62,19 @@ import {
   buildMotivosListadoPdf,
   type ObraSocialListadoPdfRow,
   buildResumenCuidarPdf,
+  type ResumenCuidarPdfRow,
+  type ResumenCuidarDoctorPdfRow,
 } from '../../../lib/resumenCuidarPdf'
+import { calcularResumenMensual } from '../../../lib/pdfMensualCalculo'
+import { buildPdfMensual } from '../../../lib/pdfMensualGenerator'
+import { calcularDetalleMensual } from '../../../lib/pdfMensualBCalculo'
+import { buildPdfMensualB } from '../../../lib/pdfMensualBGenerator'
 import { DNI_MED_LABEL, DNI_PAC_LABEL } from '../../../lib/dniLabels'
 import {
   joinMotivosConsulta,
   mergeMotivosConsulta,
   motivoConsultaFromNotas,
+  MOTIVO_CONSULTA_2_NINGUNO,
 } from '../../../lib/motivoConsulta'
 import {
   buildPagosGerenciaWorkbook,
@@ -76,6 +98,7 @@ import {
 import { formatMonto } from '../../../lib/formatMonto'
 import { patientObraSocial } from '../../../lib/patientObraSocial'
 import { buildDistribucionObrasSocialesPdf } from '../../../lib/distribucionObrasSocialesPdf'
+import { buildPacientesListadoPdf } from '../../../lib/pacientesPdf'
 import {
   buildDistribucionObrasSocialesWorkbook,
   distribucionObrasSocialesExcelFilename,
@@ -86,6 +109,7 @@ import {
   consolidarPorMedico,
   repartoDeFila,
   textoFechaColumna,
+  esPlanCoberturaCantidad,
   PCT_CUIDAR_POR_DEFECTO,
   type DistribucionModo,
 } from '../../../lib/distribucionObrasSocialesFilas'
@@ -95,6 +119,8 @@ import {
   computeDoctorPorcentajeSettlement,
   computeEfectivoAEntregar,
   pdfGeneratedLabel,
+  resolveDoctorPaymentSettlement,
+  buildPaymentsSettlementMap,
   resolvePaymentPorcentaje,
   sumPagosNetTotalByDoctor,
 } from '../../../lib/pagosPdfLayout'
@@ -107,6 +133,7 @@ import { dateRangeBounds, periodBounds, type Periodo } from '../../../lib/period
 import { parseMontoInput, PAYMENT_METODOS } from '../../../lib/paymentInput'
 import type jsPDF from 'jspdf'
 import type { Appointment, Payment } from '../../../types'
+import { ObrasSocialesModal } from '../../pacientes/components/ObrasSocialesModal'
 import '../../../shared/styles/pages.css'
 import './PagosModern.css'
 
@@ -122,37 +149,6 @@ const PDF_MEDICO_TODOS = '__todos__'
  * sociales; abajo se suman los demás que haya cargados en la base.
  */
 const METODOS_FILTRO = ['Efectivo', 'Transferencia'] as const
-
-function getSemanaMesRange(d: Date = new Date()): { desde: string; hasta: string } {
-  const y = d.getFullYear()
-  const m = d.getMonth()
-  const day = d.getDate()
-  const lastDayOfMonth = new Date(y, m + 1, 0).getDate()
-
-  let startDay = 1
-  let endDay = 7
-
-  if (day <= 7) {
-    startDay = 1
-    endDay = Math.min(7, lastDayOfMonth)
-  } else if (day <= 14) {
-    startDay = 8
-    endDay = Math.min(14, lastDayOfMonth)
-  } else if (day <= 21) {
-    startDay = 15
-    endDay = Math.min(21, lastDayOfMonth)
-  } else if (day <= 28) {
-    startDay = 22
-    endDay = Math.min(28, lastDayOfMonth)
-  } else {
-    startDay = 29
-    endDay = lastDayOfMonth
-  }
-
-  const desde = format(new Date(y, m, startDay), 'yyyy-MM-dd')
-  const hasta = format(new Date(y, m, endDay), 'yyyy-MM-dd')
-  return { desde, hasta }
-}
 
 /** Limpia un motivo de consulta: descarta el sector ("Urgencia — ") y deja
  *  el valor real ("Consulta", "Ecografía", ...). */
@@ -177,12 +173,29 @@ function motivosConsultaDePago(
     return n ? [cleanMotivo(n)] : []
   }
   const motivos: string[] = []
-  for (const texto of [appt.notas ?? '', appt.motivoConsulta2 ?? '']) {
-    const { motivo, otroDetalle } = motivoConsultaFromNotas(texto, motivosCustom)
+  const texto1 = (appt.notas ?? notasPago ?? '').trim()
+  if (texto1) {
+    const { motivo, otroDetalle } = motivoConsultaFromNotas(texto1, motivosCustom)
     const limpio = cleanMotivo(motivo === 'Otro' ? (otroDetalle || '') : motivo)
-    if (!limpio || motivos.includes(limpio)) continue
-    motivos.push(limpio)
+    if (limpio) motivos.push(limpio)
+  } else {
+    motivos.push('Consulta')
   }
+
+  const m2 = (appt.motivoConsulta2 ?? '').trim()
+  if (
+    m2 &&
+    m2 !== MOTIVO_CONSULTA_2_NINGUNO &&
+    m2.toLowerCase() !== 'sin motivo 2' &&
+    m2.toLowerCase() !== 'ninguno'
+  ) {
+    const { motivo, otroDetalle } = motivoConsultaFromNotas(m2, motivosCustom)
+    const limpio = cleanMotivo(motivo === 'Otro' ? (otroDetalle || '') : motivo)
+    if (limpio && !motivos.includes(limpio)) {
+      motivos.push(limpio)
+    }
+  }
+
   return motivos
 }
 
@@ -210,6 +223,7 @@ export function PagosPage() {
 
   const {
     data,
+    obrasSocialesCatalog,
     upsertPayment,
     deletePayment,
     archivePagoCancelado,
@@ -224,13 +238,19 @@ export function PagosPage() {
   const [pendientesOpen, setPendientesOpen] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
   const [resumenCuidarOpen, setResumenCuidarOpen] = useState(false)
+  const [pdfMensualOpen, setPdfMensualOpen] = useState(false)
+  const [pdfMensualBOpen, setPdfMensualBOpen] = useState(false)
   const [gestionDeudasOpen, setGestionDeudasOpen] = useState(false)
   const [tabListado, setTabListado] = useState<'medicos' | 'obrasSociales'>('medicos')
+  const [obrasSocialesModalOpen, setObrasSocialesModalOpen] = useState(false)
   /** Dentro de Obras Sociales: listado de turnos o distribución por médico. */
   const [vistaOS, setVistaOS] = useState<'listado' | 'distribucion'>('listado')
   // Resumen = una fila por médico + motivo. Completo = una fila por consulta.
   const [distribucionModo, setDistribucionModo] = useState<DistribucionModo>('resumen')
   const [datePickerOpen, setDatePickerOpen] = useState(false)
+  const [calendarTarget, setCalendarTarget] = useState<'desde' | 'hasta'>('desde')
+  const [isRangeComplete, setIsRangeComplete] = useState(true)
+  const [targetMonthDate, setTargetMonthDate] = useState('')
   const datePickerRef = useRef<HTMLDivElement | null>(null)
 
   const [form, setForm] = useState(() => ({
@@ -435,21 +455,36 @@ const mediosPagoDisponibles = useMemo(() => {
     [data.appointments, data.afiliados, data.planesAfiliados, patientById],
   )
 
-  /** Motivos de consulta de un pago: sale de las notas del turno, o de las
- *  notas del pago si no hay turno. Se muestra solo el motivo (sin el
- *  sector "Urgencia —", que es ruido para el listado).
- *
- *  Vuelve una lista porque la distribución por obra social muestra cada
- *  motivo en su propia fila, en vez de juntarlos con " + ". */
+  /** Motivo de consulta principal de un pago para la distribución por médico / obras sociales. */
   const motivosDePago = useCallback(
     (p: Payment) => {
       const appt = p.citaId
         ? data.appointments.find(a => a.id === p.citaId)
         : undefined
       const motivos = motivosConsultaDePago(appt, p.notas ?? '', data.motivosConsultaCustom ?? [])
-      return motivos.length ? motivos : ['—']
+      return [motivos[0] || 'Consulta']
     },
     [data.appointments, data.motivosConsultaCustom],
+  )
+
+  /** Prestación específica de un pago para la distribución por médico / obras sociales. */
+  const prestacionDePago = useCallback(
+    (p: Payment) => {
+      const appt = p.citaId
+        ? data.appointments.find((a) => a.id === p.citaId)
+        : undefined
+      const m2 = appt?.motivoConsulta2?.trim()
+      if (
+        m2 &&
+        m2 !== MOTIVO_CONSULTA_2_NINGUNO &&
+        m2.toLowerCase() !== 'sin motivo 2' &&
+        m2.toLowerCase() !== 'ninguno'
+      ) {
+        return m2
+      }
+      return ''
+    },
+    [data.appointments],
   )
 
   /**
@@ -556,38 +591,58 @@ const hayFiltrosActivos =
       return true
     })
 
-    // If a plan is selected in Obra Social filter, also include turnos/appointments
-    // that have that plan but may not have payments yet
+    // Incluir turnos de la agenda que tienen Cobertura (Individual, Familiar, o planes de afiliados)
+    // para que se reflejen en la pestaña de Obras Sociales y Distribución por médico (%)
     const result = [...filtered]
-    if (pdfObraSocialEnPestana && pdfObraSocialEnPestana !== 'Particular') {
-      // Check if the selected obra social is a plan name
-      const planMatches = data.planesAfiliados?.find((p) => p.nombre === pdfObraSocial)
-      if (planMatches) {
-        // Add turnos that have this plan assigned but no payment yet
-        const planAppointments = data.appointments.filter((a) => {
-          const os = a.obraSocialOverride || patientById(a.patientId)?.obraSocial?.trim() || 'Particular'
-          return os === pdfObraSocialEnPestana
-        })
-        // Turnos without payments: create dummy payment-like objects
-        for (const apt of planAppointments) {
-          // Check if there's already a payment for this cita
-          const hasPayment = filtered.some(p => p.citaId === apt.id)
-          if (!hasPayment) {
-            result.push({
-              id: `turno-${apt.id}`,
-              patientId: apt.patientId,
-              doctorId: apt.doctorId,
-              citaId: apt.id,
-                monto: 0,
-                fecha: apt.fechaHora || '',
-                metodo: '—',
-                notas: '',
-                porcentajeAplicado: 0,
-                obraSocialOverride: pdfObraSocialEnPestana,
-              })
-          }
-        }
+    const paidCitaIds = new Set(filtered.map((p) => p.citaId).filter((id): id is string => Boolean(id)))
+
+    const isPlanCobertura = (os: string) => {
+      const norm = normalizeOsName(os)
+      if (!norm) return false
+      if ((data.planesAfiliados ?? []).some((pl) => normalizeOsName(pl.nombre) === norm)) return true
+      if (norm.includes('individual') || norm.includes('familiar')) return true
+      if (norm.startsWith('plan ') || norm.startsWith('cobertura ')) return true
+      return false
+    }
+
+    const planAppointments = data.appointments.filter((a) => {
+      if (a.estado === 'cancelado') return false
+      if (paidCitaIds.has(a.id)) return false
+      const t = parseISO(a.fechaHora)
+      if (!isWithinInterval(t, { start: bounds.start, end: bounds.end })) return false
+      if (pdfMedicoId !== PDF_MEDICO_TODOS && a.doctorId !== pdfMedicoId) return false
+      if (pdfTurnoFiltro !== 'todos') {
+        const mins = t.getHours() * 60 + t.getMinutes()
+        const esManana = mins < 810
+        if (pdfTurnoFiltro === 'manana' && !esManana) return false
+        if (pdfTurnoFiltro === 'tarde' && esManana) return false
       }
+      const pac = patientById(a.patientId)
+      const os = a.obraSocialOverride || patientObraSocial(pac, data.afiliados, data.planesAfiliados) || 'Particular'
+      if (!isPlanCobertura(os)) return false
+      if (pdfObraSocialEnPestana && normalizeOsName(os) !== normalizeOsName(pdfObraSocialEnPestana)) return false
+      if (pdfMotivo) {
+        const motivos = motivosConsultaDePago(a, a.notas ?? '', data.motivosConsultaCustom ?? [])
+        if (!motivos.includes(pdfMotivo)) return false
+      }
+      return true
+    })
+
+    for (const apt of planAppointments) {
+      const pac = patientById(apt.patientId)
+      const os = apt.obraSocialOverride || patientObraSocial(pac, data.afiliados, data.planesAfiliados) || 'Particular'
+      result.push({
+        id: `turno-${apt.id}`,
+        patientId: apt.patientId,
+        doctorId: apt.doctorId,
+        citaId: apt.id,
+        monto: 0,
+        fecha: apt.fechaHora || '',
+        metodo: '—',
+        notas: apt.notas || '',
+        porcentajeAplicado: 0,
+        obraSocialOverride: os,
+      })
     }
 
     return result
@@ -607,7 +662,7 @@ const hayFiltrosActivos =
   ])
 
   const pagosPrevPeriodo = useMemo(() => {
-    return data.payments.filter((p) => {
+    const filtered = data.payments.filter((p) => {
       if (pdfMedicoId !== PDF_MEDICO_TODOS && p.doctorId !== pdfMedicoId) {
         return false
       }
@@ -640,10 +695,67 @@ const hayFiltrosActivos =
       }
       return true
     })
+
+    const result = [...filtered]
+    const paidCitaIds = new Set(filtered.map((p) => p.citaId).filter((id): id is string => Boolean(id)))
+
+    const isPlanCobertura = (os: string) => {
+      const norm = normalizeOsName(os)
+      if (!norm) return false
+      if ((data.planesAfiliados ?? []).some((pl) => normalizeOsName(pl.nombre) === norm)) return true
+      if (norm.includes('individual') || norm.includes('familiar')) return true
+      if (norm.startsWith('plan ') || norm.startsWith('cobertura ')) return true
+      return false
+    }
+
+    const prevPlanAppointments = data.appointments.filter((a) => {
+      if (a.estado === 'cancelado') return false
+      if (paidCitaIds.has(a.id)) return false
+      const t = parseISO(a.fechaHora)
+      if (!isWithinInterval(t, { start: prevPeriodBounds.start, end: prevPeriodBounds.end })) return false
+      if (pdfMedicoId !== PDF_MEDICO_TODOS && a.doctorId !== pdfMedicoId) return false
+      if (pdfTurnoFiltro !== 'todos') {
+        const mins = t.getHours() * 60 + t.getMinutes()
+        const esManana = mins < 810
+        if (pdfTurnoFiltro === 'manana' && !esManana) return false
+        if (pdfTurnoFiltro === 'tarde' && esManana) return false
+      }
+      const pac = patientById(a.patientId)
+      const os = a.obraSocialOverride || patientObraSocial(pac, data.afiliados, data.planesAfiliados) || 'Particular'
+      if (!isPlanCobertura(os)) return false
+      if (pdfObraSocialEnPestana && normalizeOsName(os) !== normalizeOsName(pdfObraSocialEnPestana)) return false
+      if (pdfMotivo) {
+        const motivos = motivosConsultaDePago(a, a.notas ?? '', data.motivosConsultaCustom ?? [])
+        if (!motivos.includes(pdfMotivo)) return false
+      }
+      return true
+    })
+
+    for (const apt of prevPlanAppointments) {
+      const pac = patientById(apt.patientId)
+      const os = apt.obraSocialOverride || patientObraSocial(pac, data.afiliados, data.planesAfiliados) || 'Particular'
+      result.push({
+        id: `turno-prev-${apt.id}`,
+        patientId: apt.patientId,
+        doctorId: apt.doctorId,
+        citaId: apt.id,
+        monto: 0,
+        fecha: apt.fechaHora || '',
+        metodo: '—',
+        notas: apt.notas || '',
+        porcentajeAplicado: 0,
+        obraSocialOverride: os,
+      })
+    }
+
+    return result
   }, [
     data.payments,
     data.appointments,
     data.motivosConsultaCustom,
+    data.afiliados,
+    data.planesAfiliados,
+    patientById,
     prevPeriodBounds,
     pdfMedicoId,
     pdfObraSocialEnPestana,
@@ -805,13 +917,33 @@ const hayFiltrosActivos =
 
   const totalPeriodoMedico = useMemo(
     () =>
-      sumPagosNetTotalByDoctor(pagosEnPeriodo, (doctorId) =>
-        data.doctors.find((d) => d.id === doctorId)?.porcentaje,
+      sumPagosNetTotalByDoctor(
+        pagosEnPeriodo,
+        (doctorId) => data.doctors.find((d) => d.id === doctorId),
+        (p) => {
+          const appt = p.citaId ? data.appointments.find((a) => a.id === p.citaId) : undefined
+          const pac = patientById(p.patientId)
+          return p.obraSocialOverride || appt?.obraSocialOverride || pac?.obraSocial?.trim() || 'Particular'
+        },
       ),
-    [pagosEnPeriodo, data.doctors],
+    [pagosEnPeriodo, data.doctors, data.appointments, data.patients, patientById],
   )
 
   const totalPeriodoCuidar = totalPeriodo - totalPeriodoMedico
+
+  const periodoSettlementMap = useMemo(
+    () =>
+      buildPaymentsSettlementMap(
+        pagosEnPeriodo,
+        doctorById,
+        (p) => {
+          const appt = p.citaId ? data.appointments.find((a) => a.id === p.citaId) : undefined
+          const pac = patientById(p.patientId)
+          return p.obraSocialOverride || appt?.obraSocialOverride || pac?.obraSocial?.trim() || 'Particular'
+        },
+      ),
+    [pagosEnPeriodo, data.appointments, data.patients, doctorById, patientById],
+  )
 
   const totalPeriodoTransferencias = useMemo(
     () =>
@@ -830,10 +962,16 @@ const hayFiltrosActivos =
 
   const totalPrevPeriodoMedico = useMemo(
     () =>
-      sumPagosNetTotalByDoctor(pagosPrevPeriodo, (doctorId) =>
-        data.doctors.find((d) => d.id === doctorId)?.porcentaje,
+      sumPagosNetTotalByDoctor(
+        pagosPrevPeriodo,
+        (doctorId) => data.doctors.find((d) => d.id === doctorId),
+        (p) => {
+          const appt = p.citaId ? data.appointments.find((a) => a.id === p.citaId) : undefined
+          const pac = patientById(p.patientId)
+          return p.obraSocialOverride || appt?.obraSocialOverride || pac?.obraSocial?.trim() || 'Particular'
+        },
       ),
-    [pagosPrevPeriodo, data.doctors],
+    [pagosPrevPeriodo, data.doctors, data.appointments, data.patients, patientById],
   )
 
   const totalPrevPeriodoCuidar = totalPrevPeriodo - totalPrevPeriodoMedico
@@ -891,10 +1029,11 @@ const hayFiltrosActivos =
     const porMedico = new Map<string, { neto: number; transferencias: number }>()
     for (const pago of pagosEnPeriodo) {
       const doctor = doctorById(pago.doctorId)
-      const settlement = computeDoctorPorcentajeSettlement(
-        pago.monto,
-        resolvePaymentPorcentaje(pago, doctor?.porcentaje),
-      )
+      const appt = pago.citaId ? data.appointments.find((a) => a.id === pago.citaId) : undefined
+      const pac = patientById(pago.patientId)
+      const os = pago.obraSocialOverride || appt?.obraSocialOverride || pac?.obraSocial?.trim() || 'Particular'
+      const settlement =
+        periodoSettlementMap.get(pago.id) ?? resolveDoctorPaymentSettlement(pago, doctor, os)
       const actual = porMedico.get(pago.doctorId) ?? { neto: 0, transferencias: 0 }
       actual.neto += settlement.totalGeneral || 0
       if (pago.metodo.trim().toLowerCase() === 'transferencia') {
@@ -922,41 +1061,14 @@ const hayFiltrosActivos =
     }
   }, [pagosEnPeriodo, doctorById])
 
-  function setDatePreset(type: 'hoy' | 'ayer' | 'semana' | 'mes' | 'mes-anterior' | 'anio') {
-    const now = new Date()
-    if (type === 'hoy') {
-      const d = format(now, 'yyyy-MM-dd')
-      setExcelDesdeRef(d)
-      setExcelHastaRef(d)
-    } else if (type === 'ayer') {
-      const d = format(
-        new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
-        'yyyy-MM-dd',
-      )
-      setExcelDesdeRef(d)
-      setExcelHastaRef(d)
-    } else if (type === 'semana') {
-      const { desde, hasta } = getSemanaMesRange(now)
-      setExcelDesdeRef(desde)
-      setExcelHastaRef(hasta)
-    } else if (type === 'mes') {
-      const first = new Date(now.getFullYear(), now.getMonth(), 1)
-      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-      setExcelDesdeRef(format(first, 'yyyy-MM-dd'))
-      setExcelHastaRef(format(last, 'yyyy-MM-dd'))
-    } else if (type === 'mes-anterior') {
-      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      const last = new Date(now.getFullYear(), now.getMonth(), 0)
-      setExcelDesdeRef(format(first, 'yyyy-MM-dd'))
-      setExcelHastaRef(format(last, 'yyyy-MM-dd'))
-    } else if (type === 'anio') {
-      const first = new Date(now.getFullYear(), 0, 1)
-      const last = new Date(now.getFullYear(), 11, 31)
-      setExcelDesdeRef(format(first, 'yyyy-MM-dd'))
-      setExcelHastaRef(format(last, 'yyyy-MM-dd'))
-    }
+  function setDatePreset(type: DatePresetType) {
+    const { desde, hasta } = getPresetDateRange(type)
+    setExcelDesdeRef(desde)
+    setExcelHastaRef(hasta)
+    setCalendarTarget('hasta')
+    setIsRangeComplete(true)
+    setTargetMonthDate(hasta)
     setPdfMedicoFiltro('rango')
-    setDatePickerOpen(false)
   }
 
   const resumenMedicoPdfScope = useMemo((): ResumenMedicoScope => {
@@ -1143,6 +1255,7 @@ const hayFiltrosActivos =
         doctorPorcentaje: puedeVerPorcentaje
           ? (id) => doctorById(id)?.porcentaje
           : undefined,
+        doctorResolver: (id) => doctorById(id),
         doctorEspecialidad: (id) => doctorById(id)?.especialidad,
         scope: resumenMedicoPdfScope,
         dateFormat: resumenMedicoPdfScope === 'dia' ? 'HH:mm' : 'dd/MM/yyyy',
@@ -1258,15 +1371,41 @@ const hayFiltrosActivos =
       citaById: (id) => data.appointments.find((a) => a.id === id),
       obraSocialDe: obraSocialDePago,
       motivosDe: motivosDePago,
+      prestacionDe: prestacionDePago,
+      arancelDe: (os) => {
+        const norm = normalizeOsName(os)
+        const item = (obrasSocialesCatalog ?? []).find((c) => normalizeOsName(c.nombre) === norm)
+        return Math.round(Number(item?.arancel || 0))
+      },
+      impuestosDe: (os) => {
+        const norm = normalizeOsName(os)
+        const item = (obrasSocialesCatalog ?? []).find((c) => normalizeOsName(c.nombre) === norm)
+        return {
+          impBancoPct: (item?.impBanco || 0) / 100,
+          impFacturaPct: (item?.impFactura || 0) / 100,
+          gastosAdmPct: (item?.gastosAdm || 0) / 100,
+        }
+      },
     })
     // Sin % guardado se usa el mismo 30 % por defecto que la tabla de la
     // pantalla. Con 0 el reparto daba cero y todas las celdas de obra social
     // salían vacías en el PDF, mientras la pantalla sí mostraba los importes.
-    const pctDePdf = (os: string) =>
-      (data.distribucionOSPercentajes ?? []).find(p => p.obraSocial === os)?.porcentaje ??
-      PCT_CUIDAR_POR_DEFECTO
+    const pctDePdf = (os: string) => {
+      const norm = normalizeOsName(os)
+      const catalogItem = (obrasSocialesCatalog ?? []).find(
+        (c) => normalizeOsName(c.nombre) === norm,
+      )
+      if (catalogItem && catalogItem.cuidar > 0) {
+        return catalogItem.cuidar / 100
+      }
+      return (
+        (data.distribucionOSPercentajes ?? []).find((p) => normalizeOsName(p.obraSocial) === norm)?.porcentaje ??
+        PCT_CUIDAR_POR_DEFECTO
+      )
+    }
 
-    // Obras sociales presentes en el filtro + las que ya tengan % cargado.
+    // Obras sociales presentes en el filtro + las que ya tengan % cargado en catálogo o porcentajes.
+    // Obras sociales presentes en el filtro + las que ya tengan % cargado en catálogo o porcentajes.
     const setObras = new Set<string>()
     // "Particular" no es una obra social: se excluye de las columnas y también
     // de la resta del Total, para que el PDF muestre lo mismo que la pantalla.
@@ -1274,6 +1413,9 @@ const hayFiltrosActivos =
     for (const f of detalle) for (const o of f.obras) if (!esParticular(o)) setObras.add(o)
     for (const pc of (data.distribucionOSPercentajes ?? [])) {
       if (pc.porcentaje > 0 && !esParticular(pc.obraSocial)) setObras.add(pc.obraSocial)
+    }
+    for (const c of (obrasSocialesCatalog ?? [])) {
+      if (c.cuidar > 0 && !esParticular(c.nombre)) setObras.add(c.nombre)
     }
     const nombresObras = Array.from(setObras).sort((a, b) =>
       a.localeCompare(b, 'es', { sensitivity: 'base' }),
@@ -1287,19 +1429,41 @@ const hayFiltrosActivos =
       nombre: string
       paciente: string
       motivo: string
+      prestacion?: string
       monto: number
       porObraSocial: Map<string, number>
+      cantidadesPorObraSocial?: Map<string, number>
+      obras?: Set<string>
+      impBanco: number
+      impFactura: number
+      gastosAdm: number
+      totalCuidar: number
       total: number
+      especialidad: string
+      arancel: number
+      cantidadMotivos?: number
     }[]) =>
       filas.map((f) => ({
         fecha: f.fecha,
         medico: f.nombre,
         paciente: f.paciente,
+        especialidad: f.especialidad,
         motivo: f.motivo,
+        prestacion: f.prestacion || '',
         monto: fmtMontoCelda(f.monto),
-        porObraSocial: nombresObras.map((o) =>
-          f.porObraSocial.has(o) ? fmtMontoCelda(f.porObraSocial.get(o) ?? 0) : '',
-        ),
+        arancel: fmtMontoCelda(f.arancel),
+        cantidadMotivos: f.cantidadMotivos,
+        porObraSocial: nombresObras.map((o) => {
+          if (esPlanCoberturaCantidad(o)) {
+            const cant = f.cantidadesPorObraSocial?.get(o) ?? (f.obras?.has(o) ? 1 : 0)
+            return cant > 0 ? String(cant) : ''
+          }
+          return f.porObraSocial.has(o) ? fmtMontoCelda(f.porObraSocial.get(o) ?? 0) : ''
+        }),
+        impBanco: fmtMontoCelda(f.impBanco),
+        impFactura: fmtMontoCelda(f.impFactura),
+        gastosAdm: fmtMontoCelda(f.gastosAdm),
+        totalCuidar: fmtMontoCelda(f.totalCuidar),
         total: fmtMontoCelda(f.total),
       }))
 
@@ -1309,26 +1473,48 @@ const hayFiltrosActivos =
         nombre: f.nombre,
         paciente: f.paciente,
         motivo: f.motivo || '—',
+        prestacion: f.prestacion || '—',
         monto: f.monto,
         porObraSocial: f.porObraSocial,
+        cantidadesPorObraSocial: f.cantidadesPorObraSocial,
+        impBanco: f.impBanco,
+        impFactura: f.impFactura,
+        gastosAdm: f.gastosAdm,
+        totalCuidar: f.totalCuidar,
         total: f.total,
+        especialidad: f.especialidad,
+        arancel: f.arancel,
+        cantidadMotivos: f.cantidadMotivos,
       })),
     )
     const pdfRowsDetalle = aPdfRows(
-      detalle.map((f) => {
+      detalle.map((f, idx) => {
+        const isFirst = idx === 0 || detalle[idx - 1].id !== f.id
         const porObraSocial = new Map<string, number>()
         for (const o of f.obras) {
-          porObraSocial.set(o, repartoDeFila(f.monto, f.obras, pctDe, o))
+          porObraSocial.set(o, repartoDeFila(f.arancel, f.obras, pctDe, o))
         }
-        const repartido = [...porObraSocial.values()].reduce((s, v) => s + v, 0)
+        const repartido = [...porObraSocial.entries()]
+          .filter(([o]) => !esPlanCoberturaCantidad(o))
+          .reduce((s, [, v]) => s + v, 0)
+        const totalCuidar = repartido + f.impBanco + f.impFactura + f.gastosAdm
         return {
           fecha: textoFechaColumna(f.fecha),
-          nombre: f.nombre,
+          nombre: isFirst ? f.nombre : '',
           paciente: f.mostrarPaciente ? f.paciente : '',
           motivo: f.motivo || '—',
+          prestacion: f.prestacion || '—',
           monto: f.monto,
           porObraSocial,
-          total: f.monto - repartido,
+          cantidadesPorObraSocial: f.cantidadesPorObraSocial,
+          obras: f.obras,
+          impBanco: f.impBanco,
+          impFactura: f.impFactura,
+          gastosAdm: f.gastosAdm,
+          totalCuidar,
+          total: f.arancel - totalCuidar,
+          especialidad: isFirst ? f.especialidad : '',
+          arancel: f.arancel,
         }
       }),
     )
@@ -1350,7 +1536,11 @@ const hayFiltrosActivos =
       desde: format(bounds.start, 'yyyy-MM-dd'),
       hasta: format(bounds.end, 'yyyy-MM-dd'),
       filterLabel: filterParts.join(' | '),
-      obras: nombresObras.map(o => ({ nombre: o, porcentaje: pctDe(o) })),
+      obras: nombresObras.map(o => ({
+        nombre: o,
+        porcentaje: esPlanCoberturaCantidad(o) ? 0 : pctDe(o),
+        esCantidad: esPlanCoberturaCantidad(o),
+      })),
       rows: pdfRowsResumen,
       rowsDetalle: pdfRowsDetalle,
       footerLabel: pdfGeneratedLabel(userForPdfShift, turnoTextForPdf),
@@ -1358,16 +1548,16 @@ const hayFiltrosActivos =
   }
 
   /**
-   * Genera el PDF de la distribución.
-   *
-   * La vista previa lleva resumen + detalle; el botón "Exportar PDF" manda sólo
-   * el resumen, porque el detalle son decenas de páginas de listado.
+   * Genera el PDF de la distribución (Fac Obras Sociales) tomando como fuente de verdad
+   * la tabla de datos en pantalla (según esté en COMPLETO o RESUMEN).
    */
-  function construirDistribucionPdf(conDetalle: boolean) {
-    const { rowsDetalle, ...resto } = construirDistribucionDatos()
+  function construirDistribucionPdf(modo?: DistribucionModo) {
+    const modoEfectivo = modo ?? distribucionModo
+    const { rows, rowsDetalle, ...resto } = construirDistribucionDatos()
+    const filasParaPdf = modoEfectivo === 'completo' ? rowsDetalle : rows
     return buildDistribucionObrasSocialesPdf({
       ...resto,
-      rowsCompletas: conDetalle ? rowsDetalle : undefined,
+      rows: filasParaPdf,
     })
   }
 
@@ -1381,8 +1571,8 @@ const hayFiltrosActivos =
         hasta: datos.hasta,
         filterLabel: datos.filterLabel,
         obras: datos.obras,
-        rows: datos.rows,
-        rowsCompletas: datos.rowsDetalle,
+        rows: distribucionModo === 'completo' ? datos.rowsDetalle : datos.rows,
+        rowsCompletas: distribucionModo === 'completo' ? undefined : datos.rowsDetalle,
         footerLabel: datos.footerLabel,
       })
       await savePagosGerenciaExcelFile(wb, distribucionObrasSocialesExcelFilename())
@@ -1397,7 +1587,7 @@ const hayFiltrosActivos =
   /** Vista previa del PDF de la distribución, con resumen y detalle. */
   async function handleDistribucionObrasSocialesPdfPreview() {
     try {
-      const built = construirDistribucionPdf(true)
+      const built = construirDistribucionPdf(distribucionModo)
 
       pdfDocRef.current = built.doc
       if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url)
@@ -1420,7 +1610,7 @@ const hayFiltrosActivos =
    * resultado con un aviso y un "Abrir".
    */
   async function handleExportarDistribucionPdf(): Promise<string | null> {
-    const built = construirDistribucionPdf(false)
+    const built = construirDistribucionPdf(distribucionModo)
     // Nombre con la fecha del reporte, no con la hora: es lo que el usuario
     // reconoce después en la carpeta.
     const nombre = `Distribucion_medico_${format(bounds.start, 'yyyy-MM-dd')}.pdf`
@@ -1493,6 +1683,35 @@ const hayFiltrosActivos =
     } catch (err) {
       console.error(err)
       void confirm({ message: 'No se pudo generar el PDF de Obra Social.' })
+    }
+  }
+
+  async function handlePacientesListadoPdfPreview() {
+    try {
+      await preloadPdfHeaderBanner()
+      let groups: { obraSocial: string; patients: typeof data.patients }[] = []
+      if (pdfObraSocial) {
+        groups = [{ obraSocial: pdfObraSocial, patients: data.patients.filter((p) => (p.obraSocial?.trim() || '') === pdfObraSocial) }]
+      } else {
+        const map = new Map<string, typeof data.patients>()
+        for (const p of data.patients) {
+          const os = (p.obraSocial?.trim() || 'Sin obra social')
+          if (!map.has(os)) map.set(os, [])
+          map.get(os)!.push(p)
+        }
+        groups = Array.from(map.entries()).map(([obraSocial, patients]) => ({ obraSocial, patients })).sort((a, b) => a.obraSocial.localeCompare(b.obraSocial, 'es'))
+      }
+      const built = buildPacientesListadoPdf(groups)
+      pdfDocRef.current = built.doc
+      if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url)
+      setPdfPreview({
+        url: pdfBlobUrl(built.doc),
+        filename: built.filename,
+        title: built.title,
+      })
+    } catch (err) {
+      console.error(err)
+      void confirm({ message: 'No se pudo generar el PDF Listado.' })
     }
   }
 
@@ -1606,8 +1825,38 @@ async function handlePendientesPdfPreview() {
       await preloadPdfHeaderBanner()
       const byDayAndTurno = new Map<
         string,
-        { day: string; turno: string; facturado: number; cuidar: number; transferencias: number; medico: number; cantidad: number }
+        {
+          day: string
+          turno: string
+          facturado: number
+          cuidar: number
+          transferencias: number
+          efectivo: number
+          medico: number
+          cantidad: number
+          pctSet: Set<number>
+          hasFixed: boolean
+        }
       >()
+
+      const byDayTurnoDoctor = new Map<
+        string,
+        {
+          day: string
+          turno: string
+          doctorId: string
+          doctorNombre: string
+          facturado: number
+          cuidar: number
+          transferencias: number
+          efectivo: number
+          medico: number
+          cantidad: number
+          pctSet: Set<number>
+          hasFixed: boolean
+        }
+      >()
+      const doctorDetalleRowList: ResumenCuidarDoctorPdfRow[] = []
 
       for (const p of pagosEnPeriodo) {
         const day = format(parseISO(p.fecha), 'yyyy-MM-dd')
@@ -1616,11 +1865,14 @@ async function handlePendientesPdfPreview() {
         const key = `${day}__${turno}`
 
         const doctor = doctorById(p.doctorId)
-        const pct = resolvePaymentPorcentaje(p, doctor?.porcentaje)
-        const s = computeDoctorPorcentajeSettlement(p.monto, pct)
+        const pac = patientById(p.patientId)
+        const os = p.obraSocialOverride || appt?.obraSocialOverride || pac?.obraSocial?.trim() || 'Particular'
+        const s =
+          periodoSettlementMap.get(p.id) ?? resolveDoctorPaymentSettlement(p, doctor, os)
 
         const cuidar = s.totalPorcentaje || 0
         const transferencias = p.metodo.trim().toLowerCase() === 'transferencia' ? p.monto : 0
+        const efectivo = p.metodo.trim().toLowerCase() === 'efectivo' ? p.monto : Math.max(0, p.monto - transferencias)
         const medico = computeEfectivoAEntregar(s.totalGeneral || 0, transferencias)
         const facturado = p.monto
 
@@ -1630,23 +1882,144 @@ async function handlePendientesPdfPreview() {
           facturado: 0,
           cuidar: 0,
           transferencias: 0,
+          efectivo: 0,
           medico: 0,
           cantidad: 0,
+          pctSet: new Set<number>(),
+          hasFixed: false,
         }
         existing.facturado += facturado
         existing.cuidar += cuidar
         existing.transferencias += transferencias
+        existing.efectivo += efectivo
         existing.medico += medico
         existing.cantidad += 1
+        if (s.esMontoFijo) {
+          existing.hasFixed = true
+        } else if (s.porcentaje > 0) {
+          existing.pctSet.add(s.porcentaje)
+        }
         byDayAndTurno.set(key, existing)
+
+        const docObj = doctorById(p.doctorId)
+        const docName = docObj ? `${docObj.apellido}, ${docObj.nombre}` : 'Médico'
+        doctorDetalleRowList.push({
+          day,
+          turno,
+          doctorId: p.doctorId,
+          doctorNombre: docName,
+          cantidad: 1,
+          facturado,
+          transferencias,
+          efectivo,
+          medico,
+          cuidar,
+          porcentajeLabel: s.esMontoFijo ? '—' : s.porcentaje > 0 ? `${s.porcentaje}%` : '—',
+        })
+        const docKey = `${day}__${turno}__${p.doctorId}`
+        const existingDoc = byDayTurnoDoctor.get(docKey) ?? {
+          day,
+          turno,
+          doctorId: p.doctorId,
+          doctorNombre: docName,
+          facturado: 0,
+          cuidar: 0,
+          transferencias: 0,
+          efectivo: 0,
+          medico: 0,
+          cantidad: 0,
+          pctSet: new Set<number>(),
+          hasFixed: false,
+        }
+        existingDoc.facturado += facturado
+        existingDoc.cuidar += cuidar
+        existingDoc.transferencias += transferencias
+        existingDoc.efectivo += efectivo
+        existingDoc.medico += medico
+        existingDoc.cantidad += 1
+        if (s.esMontoFijo) {
+          existingDoc.hasFixed = true
+        } else if (s.porcentaje > 0) {
+          existingDoc.pctSet.add(s.porcentaje)
+        }
+        byDayTurnoDoctor.set(docKey, existingDoc)
       }
 
       const turnoOrder: Record<string, number> = { Mañana: 1, Tarde: 2, Noche: 3 }
-      const rowList = Array.from(byDayAndTurno.values()).sort((a, b) => {
-        const cmp = a.day.localeCompare(b.day)
-        if (cmp !== 0) return cmp
+      const rowList: ResumenCuidarPdfRow[] = Array.from(byDayAndTurno.values())
+        .sort((a, b) => {
+          const cmp = a.day.localeCompare(b.day)
+          if (cmp !== 0) return cmp
+          return (turnoOrder[a.turno] ?? 9) - (turnoOrder[b.turno] ?? 9)
+        })
+        .map((r) => {
+          const porcentajeLabel =
+            r.pctSet.size === 1
+              ? `${[...r.pctSet][0]}%`
+              : r.pctSet.size > 1
+                ? 'Var.'
+                : '—'
+          return {
+            day: r.day,
+            turno: r.turno,
+            cantidad: r.cantidad,
+            facturado: r.facturado,
+            transferencias: r.transferencias,
+            efectivo: r.efectivo,
+            medico: r.medico,
+            cuidar: r.cuidar,
+            porcentajeLabel,
+          }
+        })
+
+      const doctorRowList: ResumenCuidarDoctorPdfRow[] = Array.from(byDayTurnoDoctor.values())
+        .sort((a, b) => {
+          const cmpDay = a.day.localeCompare(b.day)
+          if (cmpDay !== 0) return cmpDay
+          const cmpTurno = (turnoOrder[a.turno] ?? 9) - (turnoOrder[b.turno] ?? 9)
+          if (cmpTurno !== 0) return cmpTurno
+          return a.doctorNombre.localeCompare(b.doctorNombre, 'es', { sensitivity: 'base' })
+        })
+        .map((r) => {
+          const porcentajeLabel =
+            r.pctSet.size === 1
+              ? `${[...r.pctSet][0]}%`
+              : r.pctSet.size > 1
+                ? 'Var.'
+                : '—'
+          return {
+            day: r.day,
+            turno: r.turno,
+            doctorId: r.doctorId,
+            doctorNombre: r.doctorNombre,
+            cantidad: r.cantidad,
+            facturado: r.facturado,
+            transferencias: r.transferencias,
+            efectivo: r.efectivo,
+            medico: r.medico,
+            cuidar: r.cuidar,
+            porcentajeLabel,
+          }
+        })
+
+      doctorDetalleRowList.sort((a, b) => {
+        const cmpDay = a.day.localeCompare(b.day)
+        if (cmpDay !== 0) return cmpDay
         return (turnoOrder[a.turno] ?? 9) - (turnoOrder[b.turno] ?? 9)
       })
+
+      const totalPctSet = new Set<number>()
+      let totalHasFixed = false
+      for (const r of byDayAndTurno.values()) {
+        for (const pct of r.pctSet) totalPctSet.add(pct)
+        if (r.hasFixed) totalHasFixed = true
+      }
+      const totalPorcentajeLabel =
+        !totalHasFixed && totalPctSet.size === 1
+          ? `${[...totalPctSet][0]}%`
+          : totalPctSet.size > 1
+            ? 'Var.'
+            : '—'
 
       const medicoLabel =
         pdfMedicoId && pdfMedicoId !== PDF_MEDICO_TODOS
@@ -1666,24 +2039,47 @@ async function handlePendientesPdfPreview() {
               ? 'Noche'
               : undefined
 
+      const selectedDoctor =
+        pdfMedicoId && pdfMedicoId !== PDF_MEDICO_TODOS
+          ? doctorById(pdfMedicoId)
+          : undefined
+      const doctorIdsWithPayments = new Set(pagosEnPeriodo.map((p) => p.doctorId))
+      const doctorsWithPayments = data.doctors
+        .filter((d) => doctorIdsWithPayments.has(d.id))
+        .sort((a, b) =>
+          `${a.apellido} ${a.nombre}`.localeCompare(`${b.apellido} ${b.nombre}`, 'es', {
+            sensitivity: 'base',
+          }),
+        )
+
       const built = buildResumenCuidarPdf(
         format(bounds.start, 'yyyy-MM-dd'),
         format(bounds.end, 'yyyy-MM-dd'),
         medicoLabel,
         rowList,
-        rowList.reduce(
-          (totales, row) => ({
-            facturado: totales.facturado + row.facturado,
-            transferencias: totales.transferencias + row.transferencias,
-            medico: totales.medico + row.medico,
-            cuidar: totales.cuidar + row.cuidar,
-          }),
-          { facturado: 0, transferencias: 0, medico: 0, cuidar: 0 },
-        ),
+        {
+          ...rowList.reduce(
+            (totales, row) => ({
+              facturado: totales.facturado + row.facturado,
+              transferencias: totales.transferencias + row.transferencias,
+              efectivo: totales.efectivo + (row.efectivo ?? (row.facturado - row.transferencias)),
+              medico: totales.medico + row.medico,
+              cuidar: totales.cuidar + row.cuidar,
+            }),
+            { facturado: 0, transferencias: 0, efectivo: 0, medico: 0, cuidar: 0 },
+          ),
+          porcentajeLabel: totalPorcentajeLabel,
+        },
         currentPdfFooterLabel,
         turnoLabel,
         {
           todosTransferencia: sonTodosTransferencia(pagosEnPeriodo),
+          doctor: selectedDoctor,
+          doctors: doctorsWithPayments,
+          // Para un médico seleccionado se lista cada pago del período, en vez
+          // de agruparlo, en la segunda hoja.
+          doctorRows: selectedDoctor ? doctorDetalleRowList : doctorRowList,
+          doctorRowsLabel: selectedDoctor ? 'Detalle de pagos por Día y Médico' : undefined,
           ...(pdfTurnoFiltro === 'todos'
             ? {
                 doctorDebtRows: buildDoctorDebtPdfRows(
@@ -1708,6 +2104,66 @@ async function handlePendientesPdfPreview() {
     } catch (err) {
       console.error(err)
       void confirm({ message: 'No se pudo generar el resumen PDF.' })
+    }
+  }
+
+  async function handleGenerarPdfMensual(anioMes: string, doctorId: string) {
+    setPdfMensualOpen(false)
+    try {
+      await preloadPdfHeaderBanner()
+      const calculo = calcularResumenMensual({
+        anioMes,
+        doctorId: doctorId === 'todos' ? undefined : doctorId,
+        payments: data.payments ?? [],
+        appointments: data.appointments ?? [],
+        doctors: data.doctors ?? [],
+        patients: data.patients ?? [],
+        obrasSocialesCatalog: obrasSocialesCatalog ?? [],
+        pagosCancelados: data.pagosCancelados ?? [],
+      })
+
+      const { doc, filename } = buildPdfMensual(calculo)
+
+      pdfDocRef.current = doc
+      if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url)
+      setPdfPreview({
+        url: pdfBlobUrl(doc),
+        filename,
+        title: filename.replace(/\.pdf$/i, ''),
+      })
+    } catch (err) {
+      console.error(err)
+      void confirm({ message: 'No se pudo generar el PDF mensual.' })
+    }
+  }
+
+  async function handleGenerarPdfMensualB(anioMes: string, doctorId: string) {
+    setPdfMensualBOpen(false)
+    try {
+      await Promise.all([preloadPdfLogo(), preloadPdfHeaderBanner()])
+      const calculo = calcularDetalleMensual({
+        anioMes,
+        doctorId: doctorId === 'todos' ? undefined : doctorId,
+        payments: data.payments ?? [],
+        appointments: data.appointments ?? [],
+        doctors: data.doctors ?? [],
+        patients: data.patients ?? [],
+        obrasSocialesCatalog: obrasSocialesCatalog ?? [],
+        pagosCancelados: data.pagosCancelados ?? [],
+      })
+
+      const { doc, filename, title } = buildPdfMensualB(calculo, anioMes)
+
+      pdfDocRef.current = doc
+      if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url)
+      setPdfPreview({
+        url: pdfBlobUrl(doc),
+        filename,
+        title,
+      })
+    } catch (err) {
+      console.error(err)
+      void confirm({ message: 'No se pudo generar el PDF mensual B.' })
     }
   }
 
@@ -1798,8 +2254,11 @@ async function handlePendientesPdfPreview() {
           .reduce((s, p) => s + p.monto, 0)
         const totalCuidar = pagosExcel.reduce((sum, p) => {
           const doctor = doctorById(p.doctorId)
-          const pct = resolvePaymentPorcentaje(p, doctor?.porcentaje)
-          const s = computeDoctorPorcentajeSettlement(p.monto, pct)
+          const appt = p.citaId ? data.appointments.find((a) => a.id === p.citaId) : undefined
+          const pac = patientById(p.patientId)
+          const os = p.obraSocialOverride || appt?.obraSocialOverride || pac?.obraSocial?.trim() || 'Particular'
+          const s =
+            periodoSettlementMap.get(p.id) ?? resolveDoctorPaymentSettlement(p, doctor, os)
           return sum + (s.totalPorcentaje || 0)
         }, 0)
 
@@ -1863,7 +2322,14 @@ async function handlePendientesPdfPreview() {
           <button
             type="button"
             className={`pagos-date-pill-btn${datePickerOpen ? ' is-active' : ''}`}
-            onClick={() => setDatePickerOpen(!datePickerOpen)}
+            onClick={() => {
+              if (!datePickerOpen) {
+                setCalendarTarget('desde')
+                setIsRangeComplete(false)
+                setTargetMonthDate(excelDesdeRef)
+              }
+              setDatePickerOpen(!datePickerOpen)
+            }}
             aria-label="Seleccionar rango de fechas"
           >
             <span className="pagos-date-pill-btn__icon">
@@ -1906,34 +2372,95 @@ async function handlePendientesPdfPreview() {
               </div>
 
               <div className="pagos-date-popover__inputs">
-                <div className="pagos-date-popover__field">
-                  <label htmlFor="pagos-desde-input">Desde</label>
-                  <input
-                    id="pagos-desde-input"
-                    type="date"
-                    value={excelDesdeRef}
-                    onChange={(e) => {
-                      setExcelDesdeRef(e.target.value)
-                      setPdfMedicoFiltro('rango')
+                <div className="pagos-date-targets">
+                  <button
+                    type="button"
+                    className={`pagos-date-target-tab${calendarTarget === 'desde' ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setCalendarTarget('desde')
+                      setIsRangeComplete(false)
                     }}
-                  />
-                </div>
-                <div className="pagos-date-popover__field">
-                  <label htmlFor="pagos-hasta-input">Hasta</label>
-                  <input
-                    id="pagos-hasta-input"
-                    type="date"
-                    value={excelHastaRef}
-                    onChange={(e) => {
-                      setExcelHastaRef(e.target.value)
-                      setPdfMedicoFiltro('rango')
+                  >
+                    <span className="pagos-date-target-label">Desde</span>
+                    <span className="pagos-date-target-value">
+                      {formatRecuadroDate(excelDesdeRef)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`pagos-date-target-tab${calendarTarget === 'hasta' ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setCalendarTarget('hasta')
+                      setIsRangeComplete(false)
                     }}
-                  />
+                  >
+                    <span className="pagos-date-target-label">Hasta</span>
+                    <span className="pagos-date-target-value">
+                      {formatRecuadroDate(excelHastaRef)}
+                    </span>
+                  </button>
                 </div>
+
+                <PagosCustomCalendar
+                  range={{
+                    desde: excelDesdeRef,
+                    hasta: excelHastaRef,
+                    activeTarget: calendarTarget,
+                    isRangeComplete,
+                  }}
+                  targetMonthDate={targetMonthDate}
+                  onSelectDate={(dateStr) => {
+                    const next = nextRangeState(
+                      {
+                        desde: excelDesdeRef,
+                        hasta: excelHastaRef,
+                        activeTarget: calendarTarget,
+                        isRangeComplete,
+                      },
+                      dateStr,
+                    )
+                    setExcelDesdeRef(next.desde)
+                    setExcelHastaRef(next.hasta)
+                    setCalendarTarget(next.activeTarget)
+                    setIsRangeComplete(next.isRangeComplete)
+                    setPdfMedicoFiltro('rango')
+                  }}
+                  onClear={() => {
+                    const next = clearRange()
+                    setExcelDesdeRef(next.desde)
+                    setExcelHastaRef(next.hasta)
+                    setCalendarTarget(next.activeTarget)
+                    setIsRangeComplete(next.isRangeComplete)
+                  }}
+                  onToday={() => {
+                    const now = new Date()
+                    const todayStr = formatYMD(now.getFullYear(), now.getMonth() + 1, now.getDate())
+                    const next = setTodayRange(todayStr)
+                    setExcelDesdeRef(next.desde)
+                    setExcelHastaRef(next.hasta)
+                    setCalendarTarget(next.activeTarget)
+                    setIsRangeComplete(next.isRangeComplete)
+                    setTargetMonthDate(todayStr)
+                    setPdfMedicoFiltro('rango')
+                  }}
+                  onClose={() => setDatePickerOpen(false)}
+                />
+
                 <button
                   type="button"
-                  className="pagos-date-popover__apply-btn"
-                  onClick={() => setDatePickerOpen(false)}
+                  className={`pagos-date-popover__apply-btn${isRangeComplete ? ' is-ready' : ''}`}
+                  onClick={() => {
+                    const resolved = resolveListoRange({
+                      desde: excelDesdeRef,
+                      hasta: excelHastaRef,
+                      activeTarget: calendarTarget,
+                      isRangeComplete,
+                    })
+                    setExcelDesdeRef(resolved.desde)
+                    setExcelHastaRef(resolved.hasta)
+                    setIsRangeComplete(true)
+                    setDatePickerOpen(false)
+                  }}
                 >
                   Listo
                 </button>
@@ -2153,6 +2680,34 @@ async function handlePendientesPdfPreview() {
         )}
 
         {tabListado === 'medicos' && (
+          <>
+          <div className="pagos-filter-group">
+            <label htmlFor="pagos-filter-os-medicos">Obra Social</label>
+            <div className="pagos-filter-select-wrap">
+              <span className="pagos-filter-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+              </span>
+              <select
+                id="pagos-filter-os-medicos"
+                value={pdfObraSocial}
+                onChange={(e) => setPdfObraSocial(e.target.value)}
+              >
+                <option value="">Todas las obras sociales</option>
+                {obrasSocialesDisponibles.map((os) => (
+                  <option key={os} value={os}>
+                    {os}
+                  </option>
+                ))}
+              </select>
+              <span className="pagos-filter-chevron">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </span>
+            </div>
+          </div>
           <div className="pagos-filter-group">
             <label htmlFor="pagos-filter-metodo">Medio de Pago</label>
             <div className="pagos-filter-select-wrap">
@@ -2181,6 +2736,7 @@ async function handlePendientesPdfPreview() {
               </span>
             </div>
           </div>
+          </>
         )}
 
         {/* Turno filter */}
@@ -2229,6 +2785,7 @@ async function handlePendientesPdfPreview() {
                 else if (opt === 'resumen') void handleResumenEjecutivoPdfPreview()
                 else if (opt === 'cuidar') void handleResumenCuidarPdfPreview()
                 else if (opt === 'obra-social') void handleObraSocialPdfPreview()
+                else if (opt === 'pacientes-listado') void handlePacientesListadoPdfPreview()
                 else if (opt === 'fac-obras-sociales') void handleDistribucionObrasSocialesPdfPreview()
                 else if (opt === 'motivos') void handleMotivosPdfPreview()
                 else if (opt === 'pendientes') void handlePendientesPdfPreview()
@@ -2236,10 +2793,12 @@ async function handlePendientesPdfPreview() {
             >
               <option value="" disabled>Seleccionar PDF...</option>
               {muestraResumenPdf && <option value="medico">PDF Médico</option>}
-              {role === 'admin' && <option value="resumen">PDF Resumen</option>}
               <option value="cuidar">PDF Cuidar</option>
               <option value="obra-social">PDF Obra Social</option>
-              <option value="fac-obras-sociales">Fac Obras Sociales</option>
+              <option value="pacientes-listado">PDF Listado</option>
+              {(import.meta.env.VITE_APP_FLAVOR as string | undefined)?.toLowerCase() === 'administrador' && (
+                <option value="fac-obras-sociales">Fac Obras Sociales</option>
+              )}
               <option value="motivos">PDF Motivos</option>
               <option value="pendientes">PDF Pendientes</option>
             </select>
@@ -2250,6 +2809,41 @@ async function handlePendientesPdfPreview() {
             </span>
           </div>
         </div>
+
+        {/* PDF Mensual selector dropdown (solo Administración) */}
+        {role !== 'afiliado' && (import.meta.env.VITE_APP_FLAVOR as string | undefined)?.toLowerCase() === 'administrador' && (
+          <div className="pagos-filter-group">
+            <label htmlFor="pagos-filter-pdf-mensual">PDF Mensual</label>
+            <div className="pagos-filter-select-wrap">
+              <span className="pagos-filter-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+              </span>
+              <select
+                id="pagos-filter-pdf-mensual"
+                value=""
+                onChange={(e) => {
+                  const opt = e.target.value
+                  if (opt === 'mensual') setPdfMensualOpen(true)
+                  else if (opt === 'mensual-b') setPdfMensualBOpen(true)
+                }}
+              >
+                <option value="" disabled>Seleccionar...</option>
+                <option value="mensual">PDF Mensual A</option>
+                <option value="mensual-b">PDF Mensual B</option>
+              </select>
+              <span className="pagos-filter-chevron">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Registrar selector dropdown OR Motivos filter dropdown */}
         {tabListado === 'medicos' ? (
@@ -2373,7 +2967,7 @@ async function handlePendientesPdfPreview() {
               }}
               title="Restablecer todos los filtros"
             >
-              <span>Limpiar filtros</span>
+              <span>Limpiar</span>
             </button>
           </div>
         )}
@@ -2641,6 +3235,29 @@ async function handlePendientesPdfPreview() {
                     ))}
                   </select>
                 </label>
+                <button
+                  type="button"
+                  className="pagos-os-btn-manage"
+                  onClick={() => setObrasSocialesModalOpen(true)}
+                  title="Gestionar catálogo de obras sociales"
+                  aria-label="Obras Sociales"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <path d="M16 10a4 4 0 0 1-8 0" />
+                  </svg>
+                  <span>Obras Sociales</span>
+                </button>
               </>
             )}
           </>
@@ -2654,6 +3271,7 @@ async function handlePendientesPdfPreview() {
           doctorById={doctorById}
           obraSocialDe={obraSocialDePago}
           motivosDe={motivosDePago}
+          prestacionDe={prestacionDePago}
           modo={distribucionModo}
           onModoChange={setDistribucionModo}
           onExportarPdf={handleExportarDistribucionPdf}
@@ -2735,11 +3353,16 @@ async function handlePendientesPdfPreview() {
                   const pacienteLabel = pac
                     ? `${pac.apellido}, ${pac.nombre}`
                     : '—'
-                  const pct = resolvePaymentPorcentaje(p, doc?.porcentaje)
-                  const s = computeDoctorPorcentajeSettlement(p.monto, pct)
+                  const os =
+                    p.obraSocialOverride ||
+                    appt?.obraSocialOverride ||
+                    pac?.obraSocial?.trim() ||
+                    'Particular'
+                  const s =
+                    periodoSettlementMap.get(p.id) ??
+                    resolveDoctorPaymentSettlement(p, doc, os)
+                  const pct = s.porcentaje
                   const montoCuidar = s.totalPorcentaje || 0
-                  // Todo el listado por transferencia: lo que se le separa al
-                  // médico sale del lado del centro, así que va en negativo.
                   const cuidarPctLabel = formatMonto(
                     listadoTodosTransferencia ? -montoCuidar : montoCuidar,
                   )
@@ -2862,7 +3485,7 @@ async function handlePendientesPdfPreview() {
                       <td>{doc ? `${doc.apellido}, ${doc.nombre}` : '—'}</td>
                       <td>{doc?.especialidad || '—'}</td>
                       <td>{p.obraSocialOverride || appt?.obraSocialOverride || pac?.obraSocial?.trim() || 'Particular'}</td>
-                      <td>{pct}%</td>
+                      <td>{s.esMontoFijo ? '—' : `${pct}%`}</td>
                       <td>{p.metodo || '—'}</td>
                       <td className="text-right" style={{ fontWeight: 600 }}>
                         {formatMonto(p.monto)}
@@ -2874,9 +3497,9 @@ async function handlePendientesPdfPreview() {
                         style={{ cursor: cuidarTooltip ? 'help' : undefined }}
                       >
                         {cuidarPctLabel}
-                        </td>
-                        <td className="text-right">
-                          {formatMonto(listadoTodosTransferencia ? -montoCuidar : montoCuidar)}
+                      </td>
+                      <td className="text-right">
+                        {formatMonto(pagoQueCancelo ? pagoQueCancelo.monto : 0)}
                       </td>
                       <td>
                         <span style={{ fontWeight: 500, color: '#334155' }}>
@@ -3036,6 +3659,28 @@ async function handlePendientesPdfPreview() {
         />
       )}
 
+      {pdfMensualOpen && (
+        <PdfMensualModal
+          title="PDF Mensual A"
+          doctors={data.doctors ?? []}
+          payments={data.payments ?? []}
+          onClose={() => setPdfMensualOpen(false)}
+          onGenerate={handleGenerarPdfMensual}
+        />
+      )}
+
+      {pdfMensualBOpen && (
+        <PdfMensualModal
+          title="PDF Mensual B"
+          doctors={data.doctors ?? []}
+          payments={data.payments ?? []}
+          appointments={data.appointments ?? []}
+          emptyCheckMode="turnos"
+          onClose={() => setPdfMensualBOpen(false)}
+          onGenerate={handleGenerarPdfMensualB}
+        />
+      )}
+
       {pdfPreview && (
         <PdfPreviewModal
           title={pdfPreview.title}
@@ -3071,6 +3716,10 @@ async function handlePendientesPdfPreview() {
       )}
 
       {logOpen && <GerenciaExportLogModal onClose={() => setLogOpen(false)} />}
+
+      {obrasSocialesModalOpen && (
+        <ObrasSocialesModal onClose={() => setObrasSocialesModalOpen(false)} />
+      )}
     </div>
   )
 }

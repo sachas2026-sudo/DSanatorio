@@ -47,6 +47,7 @@ export function buildDebtRows(
       const settlement = aggregateResumenSettlementForPayments(
         list,
         () => doctor?.porcentaje,
+        () => doctor,
       )
       const deuda = Math.max(0, -settlement.efectivoAEntregar)
       const pagosDeuda = debtPayments.filter((payment) => payment.deudaKey === key)

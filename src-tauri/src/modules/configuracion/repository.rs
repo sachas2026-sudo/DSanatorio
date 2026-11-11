@@ -2,8 +2,28 @@ use rusqlite::{params, Connection, Transaction, OptionalExtension};
 use crate::core::error::AppError;
 use super::dto::*;
 
+fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
+    let sql = format!("PRAGMA table_info({table})");
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(1)) {
+            for r in rows.flatten() {
+                if r.eq_ignore_ascii_case(column) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 pub fn load_patients(conn: &Connection) -> Result<Vec<Patient>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, COALESCE(version, 1), deleted_at FROM patients WHERE deleted_at IS NULL")?;
+    let has_os_ant = has_column(conn, "patients", "obra_social_anterior");
+    let query = if has_os_ant {
+        "SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, COALESCE(version, 1), deleted_at, obra_social_anterior FROM patients WHERE deleted_at IS NULL"
+    } else {
+        "SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, COALESCE(version, 1), deleted_at, NULL FROM patients WHERE deleted_at IS NULL"
+    };
+    let mut stmt = conn.prepare(query)?;
     let rows = stmt.query_map([], |row| {
         Ok(Patient {
             id: row.get(0)?,
@@ -16,6 +36,7 @@ pub fn load_patients(conn: &Connection) -> Result<Vec<Patient>, AppError> {
             localidad: row.get(7)?,
             fecha_nacimiento: row.get(8)?,
             obra_social: row.get(9)?,
+            obra_social_anterior: row.get(14)?,
             notas: row.get(10)?,
             activo: Some(row.get::<_, i32>(11)? != 0),
             version: row.get(12)?,
@@ -33,8 +54,14 @@ pub fn load_patients(conn: &Connection) -> Result<Vec<Patient>, AppError> {
 /// Lee un paciente directo de la tabla por id, INCLUYENDO los dados de baja.
 /// No usa load_patients (esa filtra deleted_at IS NULL). Se usa para el cuerpo 409.
 pub fn get_patient_by_id(conn: &Connection, id: &str) -> Result<Option<Patient>, AppError> {
+    let has_os_ant = has_column(conn, "patients", "obra_social_anterior");
+    let query = if has_os_ant {
+        "SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, COALESCE(version, 1), deleted_at, obra_social_anterior FROM patients WHERE id = ?1"
+    } else {
+        "SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, COALESCE(version, 1), deleted_at, NULL FROM patients WHERE id = ?1"
+    };
     let patient = conn.query_row(
-        "SELECT id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, COALESCE(version, 1), deleted_at FROM patients WHERE id = ?1",
+        query,
         params![id],
         |row| {
             Ok(Patient {
@@ -48,6 +75,7 @@ pub fn get_patient_by_id(conn: &Connection, id: &str) -> Result<Option<Patient>,
                 localidad: row.get(7)?,
                 fecha_nacimiento: row.get(8)?,
                 obra_social: row.get(9)?,
+                obra_social_anterior: row.get(14)?,
                 notas: row.get(10)?,
                 activo: Some(row.get::<_, i32>(11)? != 0),
                 version: row.get(12)?,
@@ -59,53 +87,95 @@ pub fn get_patient_by_id(conn: &Connection, id: &str) -> Result<Option<Patient>,
 }
 
 pub fn save_patients(tx: &Transaction<'_>, patients: &[Patient]) -> Result<(), AppError> {
+    let has_os_ant = has_column(tx, "patients", "obra_social_anterior");
     for p in patients {
         let activo_val = if p.activo.unwrap_or(true) { 1 } else { 0 };
         
-        let existing = tx.query_row(
-            "SELECT nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version FROM patients WHERE id = ?1", 
-            params![p.id], 
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, i32>(10)?,
-                    row.get::<_, i32>(11)?,
-                ))
-            }
-        ).optional()?;
+        let existing = if has_os_ant {
+            tx.query_row(
+                "SELECT nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version, obra_social_anterior FROM patients WHERE id = ?1", 
+                params![p.id], 
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, i32>(10)?,
+                        row.get::<_, i32>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                    ))
+                }
+            ).optional()?
+        } else {
+            tx.query_row(
+                "SELECT nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version FROM patients WHERE id = ?1", 
+                params![p.id], 
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, i32>(10)?,
+                        row.get::<_, i32>(11)?,
+                        None,
+                    ))
+                }
+            ).optional()?
+        };
 
         let changed = match &existing {
-            Some((n, a, d, t, e, dom, l, fn_date, os, nt, act, _v)) => {
+            Some((n, a, d, t, e, dom, l, fn_date, os, nt, act, _v, os_ant)) => {
                 n != &p.nombre || a != &p.apellido || d != &p.dni || t != &p.telefono || e != &p.email ||
                 dom != &p.domicilio || l != &p.localidad || fn_date != &p.fecha_nacimiento ||
                 os != &p.obra_social || nt != &p.notas || 
                 (*act != 0 && !p.activo.unwrap_or(true)) || 
-                (*act == 0 && p.activo.unwrap_or(true))
+                (*act == 0 && p.activo.unwrap_or(true)) ||
+                (has_os_ant && os_ant.as_deref().unwrap_or("") != p.obra_social_anterior.as_deref().unwrap_or(""))
             }
             None => true,
         };
 
         if changed {
             if existing.is_some() {
-                tx.execute(
-                    "UPDATE patients SET nombre=?1, apellido=?2, dni=?3, telefono=?4, email=?5, domicilio=?6, localidad=?7, fecha_nacimiento=?8, obra_social=?9, notas=?10, activo=?11, version=version+1 WHERE id=?12",
-                    params![p.nombre, p.apellido, p.dni, p.telefono, p.email, p.domicilio, p.localidad, p.fecha_nacimiento, p.obra_social, p.notas, activo_val, p.id],
-                )?;
+                if has_os_ant {
+                    tx.execute(
+                        "UPDATE patients SET nombre=?1, apellido=?2, dni=?3, telefono=?4, email=?5, domicilio=?6, localidad=?7, fecha_nacimiento=?8, obra_social=?9, notas=?10, activo=?11, obra_social_anterior=?12, version=version+1 WHERE id=?13",
+                        params![p.nombre, p.apellido, p.dni, p.telefono, p.email, p.domicilio, p.localidad, p.fecha_nacimiento, p.obra_social, p.notas, activo_val, p.obra_social_anterior, p.id],
+                    )?;
+                } else {
+                    tx.execute(
+                        "UPDATE patients SET nombre=?1, apellido=?2, dni=?3, telefono=?4, email=?5, domicilio=?6, localidad=?7, fecha_nacimiento=?8, obra_social=?9, notas=?10, activo=?11, version=version+1 WHERE id=?12",
+                        params![p.nombre, p.apellido, p.dni, p.telefono, p.email, p.domicilio, p.localidad, p.fecha_nacimiento, p.obra_social, p.notas, activo_val, p.id],
+                    )?;
+                }
             } else {
-                tx.execute(
-                    "INSERT INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                    params![p.id, p.nombre, p.apellido, p.dni, p.telefono, p.email, p.domicilio, p.localidad, p.fecha_nacimiento, p.obra_social, p.notas, activo_val, 1],
-                )?;
+                if has_os_ant {
+                    tx.execute(
+                        "INSERT INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version, obra_social_anterior)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                        params![p.id, p.nombre, p.apellido, p.dni, p.telefono, p.email, p.domicilio, p.localidad, p.fecha_nacimiento, p.obra_social, p.notas, activo_val, 1, p.obra_social_anterior],
+                    )?;
+                } else {
+                    tx.execute(
+                        "INSERT INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                        params![p.id, p.nombre, p.apellido, p.dni, p.telefono, p.email, p.domicilio, p.localidad, p.fecha_nacimiento, p.obra_social, p.notas, activo_val, 1],
+                    )?;
+                }
             }
         }
     }
@@ -113,10 +183,10 @@ pub fn save_patients(tx: &Transaction<'_>, patients: &[Patient]) -> Result<(), A
 }
 
 pub fn load_doctors(conn: &Connection) -> Result<Vec<Doctor>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, nombre, apellido, dni, matricula, especialidad, obra_social, obras_sociales_json, telefono, localidad, email, alias, porcentaje, duracion_turno_minutos, tipo_agenda, activo FROM doctors")?;
+    let mut stmt = conn.prepare("SELECT id, nombre, apellido, dni, matricula, especialidad, obra_social, obras_sociales_json, telefono, localidad, email, alias, porcentaje, duracion_turno_minutos, tipo_agenda, activo, COALESCE(valor, 0), COALESCE(particular, 0), COALESCE(cuidar, 0) FROM doctors")?;
     let rows = stmt.query_map([], |row| {
         let obras_sociales_json: String = row.get(7)?;
-        let obras_sociales: Option<Vec<String>> = serde_json::from_str(&obras_sociales_json).ok();
+        let obras_sociales: Option<Vec<DoctorObraSocial>> = serde_json::from_str(&obras_sociales_json).ok();
         Ok(Doctor {
             id: row.get(0)?,
             nombre: row.get(1)?,
@@ -134,6 +204,9 @@ pub fn load_doctors(conn: &Connection) -> Result<Vec<Doctor>, AppError> {
             duracion_turno_minutos: Some(row.get(13)?),
             tipo_agenda: Some(row.get(14)?),
             activo: Some(row.get::<_, i32>(15)? != 0),
+            valor: row.get(16)?,
+            particular: row.get(17)?,
+            cuidar: row.get(18)?,
         })
     })?;
     
@@ -146,8 +219,8 @@ pub fn load_doctors(conn: &Connection) -> Result<Vec<Doctor>, AppError> {
 
 pub fn save_doctors(tx: &Transaction<'_>, doctors: &[Doctor]) -> Result<(), AppError> {
     let mut stmt = tx.prepare(
-        "INSERT OR REPLACE INTO doctors (id, nombre, apellido, dni, matricula, especialidad, obra_social, obras_sociales_json, telefono, localidad, email, alias, porcentaje, duracion_turno_minutos, tipo_agenda, activo)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+        "INSERT OR REPLACE INTO doctors (id, nombre, apellido, dni, matricula, especialidad, obra_social, obras_sociales_json, telefono, localidad, email, alias, porcentaje, duracion_turno_minutos, tipo_agenda, activo, valor, particular, cuidar)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"
     )?;
 
     for d in doctors {
@@ -169,7 +242,10 @@ pub fn save_doctors(tx: &Transaction<'_>, doctors: &[Doctor]) -> Result<(), AppE
             d.porcentaje.unwrap_or(0.0),
             d.duracion_turno_minutos.unwrap_or(30),
             d.tipo_agenda.clone().unwrap_or_else(|| "semanal".to_string()),
-            activo_val
+            activo_val,
+            d.valor,
+            d.particular,
+            d.cuidar
         ])?;
     }
     Ok(())
@@ -267,7 +343,7 @@ pub fn save_atenciones_mensuales(tx: &Transaction<'_>, atenciones: &[DoctorAtenc
 }
 
 pub fn load_appointments(conn: &Connection) -> Result<Vec<Appointment>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, patient_id, doctor_id, fecha_hora, duracion_minutos, notas, estado, whatsapp_recordatorio_enviado_en, obra_social_override FROM appointments")?;
+    let mut stmt = conn.prepare("SELECT id, patient_id, doctor_id, fecha_hora, duracion_minutos, notas, estado, whatsapp_recordatorio_enviado_en, obra_social_override, motivo_consulta_2, creado_por, modificado_por, modificado_en FROM appointments")?;
     let rows = stmt.query_map([], |row| {
         Ok(Appointment {
             id: row.get(0)?,
@@ -279,6 +355,10 @@ pub fn load_appointments(conn: &Connection) -> Result<Vec<Appointment>, AppError
             estado: row.get(6)?,
             whatsapp_recordatorio_enviado_en: row.get(7)?,
             obra_social_override: row.get(8)?,
+            motivo_consulta_2: row.get(9)?,
+            creado_por: row.get(10)?,
+            modificado_por: row.get(11)?,
+            modificado_en: row.get(12)?,
         })
     })?;
 
@@ -291,8 +371,8 @@ pub fn load_appointments(conn: &Connection) -> Result<Vec<Appointment>, AppError
 
 pub fn save_appointments(tx: &Transaction<'_>, appointments: &[Appointment]) -> Result<(), AppError> {
     let mut stmt = tx.prepare(
-        "INSERT OR REPLACE INTO appointments (id, patient_id, doctor_id, fecha_hora, duracion_minutos, notas, estado, whatsapp_recordatorio_enviado_en, obra_social_override)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        "INSERT OR REPLACE INTO appointments (id, patient_id, doctor_id, fecha_hora, duracion_minutos, notas, estado, whatsapp_recordatorio_enviado_en, obra_social_override, motivo_consulta_2, creado_por, modificado_por, modificado_en)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
     )?;
 
     for a in appointments {
@@ -305,7 +385,11 @@ pub fn save_appointments(tx: &Transaction<'_>, appointments: &[Appointment]) -> 
             a.notas,
             a.estado,
             a.whatsapp_recordatorio_enviado_en,
-            a.obra_social_override
+            a.obra_social_override,
+            a.motivo_consulta_2,
+            a.creado_por,
+            a.modificado_por,
+            a.modificado_en
         ])?;
     }
     Ok(())
@@ -774,7 +858,34 @@ pub fn load_cuotas_table(conn: &Connection) -> Result<Vec<serde_json::Value>, Ap
 }
 
 pub fn save_afiliados_table(tx: &Transaction<'_>, values: &[serde_json::Value]) -> Result<(), AppError> {
-    save_json_table(tx, "afiliados", "nombre", values)
+    save_json_table(tx, "afiliados", "nombre", values)?;
+    if has_column(tx, "contratante_movimientos", "afiliado_id") {
+        tx.execute("DELETE FROM contratante_movimientos", [])?;
+        let mut stmt = tx.prepare(
+            "INSERT OR REPLACE INTO contratante_movimientos (id, afiliado_id, tipo, fecha, detalle, motivo, usuario, creado_en, data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        )?;
+        for afil in values {
+            let afil_id = afil.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            if let Some(movs) = afil.get("movimientos").and_then(|x| x.as_array()) {
+                for m in movs {
+                    let id = m.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                    if id.is_empty() || afil_id.is_empty() {
+                        continue;
+                    }
+                    let tipo = m.get("tipo").and_then(|x| x.as_str()).unwrap_or("alta");
+                    let fecha = m.get("fecha").and_then(|x| x.as_str()).unwrap_or("");
+                    let detalle = m.get("detalle").and_then(|x| x.as_str()).unwrap_or("");
+                    let motivo = m.get("motivo").and_then(|x| x.as_str());
+                    let usuario = m.get("usuario").and_then(|x| x.as_str()).unwrap_or("");
+                    let creado_en = m.get("creadoEn").and_then(|x| x.as_str()).unwrap_or(fecha);
+                    let raw = serde_json::to_string(m).unwrap_or_default();
+                    stmt.execute(params![id, afil_id, tipo, fecha, detalle, motivo, usuario, creado_en, raw])?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 
@@ -1172,6 +1283,267 @@ pub fn load_audit_log(conn: &Connection) -> Result<Vec<AuditLogEntry>, AppError>
     Ok(result)
 }
 
+pub fn load_obras_sociales(conn: &Connection) -> Result<Vec<ObraSocialCatalog>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT nombre, plus, arancel, cuidar, imp_banco, imp_factura, gastos_adm, suspendida, version FROM obras_sociales ORDER BY nombre ASC"
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ObraSocialCatalog {
+            nombre: row.get(0)?,
+            plus: row.get(1)?,
+            arancel: row.get(2)?,
+            cuidar: row.get(3)?,
+            imp_banco: row.get(4)?,
+            imp_factura: row.get(5)?,
+            gastos_adm: row.get(6)?,
+            suspendida: row.get::<_, i32>(7)? != 0,
+            version: row.get(8)?,
+        })
+    })?;
+    let mut result = Vec::new();
+    for r in rows {
+        result.push(r?);
+    }
+    Ok(result)
+}
+
+pub fn save_obras_sociales(tx: &Transaction<'_>, items: &[ObraSocialCatalog]) -> Result<(), AppError> {
+    let mut stmt = tx.prepare(
+        "INSERT INTO obras_sociales (nombre, plus, arancel, cuidar, imp_banco, imp_factura, gastos_adm, suspendida, version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(nombre) DO UPDATE SET
+            plus = excluded.plus,
+            arancel = excluded.arancel,
+            cuidar = excluded.cuidar,
+            imp_banco = excluded.imp_banco,
+            imp_factura = excluded.imp_factura,
+            gastos_adm = excluded.gastos_adm,
+            suspendida = excluded.suspendida,
+            version = obras_sociales.version + 1"
+    )?;
+    for item in items {
+        stmt.execute(params![
+            item.nombre,
+            item.plus,
+            item.arancel,
+            item.cuidar,
+            item.imp_banco,
+            item.imp_factura,
+            item.gastos_adm,
+            if item.suspendida { 1 } else { 0 },
+            if item.version > 0 { item.version } else { 1 }
+        ])?;
+    }
+    Ok(())
+}
+
+pub fn save_obra_social_single(
+    conn: &Connection,
+    item: &ObraSocialCatalog,
+) -> Result<ObraSocialWriteResult, AppError> {
+    let existing: Option<ObraSocialCatalog> = conn
+        .query_row(
+            "SELECT nombre, plus, arancel, cuidar, imp_banco, imp_factura, gastos_adm, suspendida, version FROM obras_sociales WHERE nombre = ?1 COLLATE NOCASE",
+            params![&item.nombre],
+            |row| {
+                Ok(ObraSocialCatalog {
+                    nombre: row.get(0)?,
+                    plus: row.get(1)?,
+                    arancel: row.get(2)?,
+                    cuidar: row.get(3)?,
+                    imp_banco: row.get(4)?,
+                    imp_factura: row.get(5)?,
+                    gastos_adm: row.get(6)?,
+                    suspendida: row.get::<_, i32>(7)? != 0,
+                    version: row.get(8)?,
+                })
+            },
+        )
+        .optional()?;
+
+    if let Some(curr) = existing {
+        if item.version != 0 && item.version != curr.version {
+            return Ok(ObraSocialWriteResult::Conflict { current: Some(curr) });
+        }
+        let next_version = curr.version + 1;
+        conn.execute(
+            "UPDATE obras_sociales SET plus=?1, arancel=?2, cuidar=?3, imp_banco=?4, imp_factura=?5, gastos_adm=?6, suspendida=?7, version=?8 WHERE nombre=?9 COLLATE NOCASE",
+            params![
+                item.plus,
+                item.arancel,
+                item.cuidar,
+                item.imp_banco,
+                item.imp_factura,
+                item.gastos_adm,
+                if item.suspendida { 1 } else { 0 },
+                next_version,
+                &item.nombre
+            ],
+        )?;
+        let mut saved = item.clone();
+        saved.version = next_version;
+        Ok(ObraSocialWriteResult::Saved(saved))
+    } else {
+        conn.execute(
+            "INSERT INTO obras_sociales (nombre, plus, arancel, cuidar, imp_banco, imp_factura, gastos_adm, suspendida, version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
+            params![
+                item.nombre,
+                item.plus,
+                item.arancel,
+                item.cuidar,
+                item.imp_banco,
+                item.imp_factura,
+                item.gastos_adm,
+                if item.suspendida { 1 } else { 0 },
+            ],
+        )?;
+        let mut saved = item.clone();
+        saved.version = 1;
+        Ok(ObraSocialWriteResult::Saved(saved))
+    }
+}
+
+pub fn delete_obra_social(conn: &Connection, nombre: &str) -> Result<Result<(), String>, AppError> {
+    let doctors = load_doctors(conn)?;
+    let in_use_count = doctors.iter().filter(|d| {
+        let direct_match = d.obra_social.as_deref().map(|s| s.eq_ignore_ascii_case(nombre)).unwrap_or(false);
+        let list_match = d.obras_sociales.as_ref().map(|list| {
+            list.iter().any(|os| os.nombre.eq_ignore_ascii_case(nombre))
+        }).unwrap_or(false);
+        direct_match || list_match
+    }).count();
+
+    if in_use_count > 0 {
+        return Ok(Err(format!(
+            "La obra social '{nombre}' está en uso por {in_use_count} médicos, suspendela en su lugar."
+        )));
+    }
+
+    conn.execute(
+        "DELETE FROM obras_sociales WHERE nombre = ?1 COLLATE NOCASE",
+        params![nombre],
+    )?;
+    Ok(Ok(()))
+}
+
+/// Registra atómicamente un paciente nuevo y su correspondiente contratante/afiliado.
+pub fn registrar_contratante_con_paciente_nuevo(
+    tx: &Transaction<'_>,
+    req: &super::dto::RegistrarContratanteConPacienteNuevoReq,
+    usuario: &str,
+    rol: &str,
+) -> Result<(super::dto::Patient, serde_json::Value), AppError> {
+    // 1. Validar unicidad de DNI (en pacientes activos y no eliminados)
+    let existing_dni: Option<(String, String)> = tx
+        .query_row(
+            "SELECT apellido, nombre FROM patients WHERE dni = ?1 AND deleted_at IS NULL",
+            params![&req.dni],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+
+    if let Some((ap, nom)) = existing_dni {
+        return Err(AppError::Validation(format!(
+            "Ese DNI ya está cargado: {ap}, {nom}"
+        )));
+    }
+
+    // 2. Validar que no exista un paciente con el mismo ID
+    let existing_id: Option<i32> = tx
+        .query_row(
+            "SELECT 1 FROM patients WHERE id = ?1",
+            params![&req.patient_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing_id.is_some() {
+        return Err(AppError::Validation(format!(
+            "Ya existe un paciente con el id {}",
+            req.patient_id
+        )));
+    }
+
+    // 3. Insertar paciente
+    tx.execute(
+        "INSERT INTO patients (id, nombre, apellido, dni, telefono, email, domicilio, localidad, fecha_nacimiento, obra_social, notas, activo, version, deleted_at)
+         VALUES (?1, ?2, ?3, ?4, '', '', '', '', ?5, ?6, '', 1, 1, NULL)",
+        params![
+            &req.patient_id,
+            &req.nombre,
+            &req.apellido,
+            &req.dni,
+            &req.fecha_nacimiento,
+            &req.plan_nombre,
+        ],
+    )?;
+
+    // 4. Insertar contratante en afiliados
+    let afil_id = req
+        .afiliado_id
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("afil_{}", req.patient_id));
+
+    let afil_nombre = format!("{}, {}", req.apellido, req.nombre);
+    let afil_data = serde_json::json!({
+        "id": afil_id,
+        "patientId": req.patient_id,
+        "planId": req.plan_id,
+        "fechaInicio": req.fecha_inicio,
+        "activo": true,
+        "obraSocialAnterior": "",
+        "adherentes": []
+    });
+    let data_str = serde_json::to_string(&afil_data)?;
+
+    tx.execute(
+        "INSERT INTO afiliados (id, nombre, version, data) VALUES (?1, ?2, 1, ?3)",
+        params![&afil_id, &afil_nombre, &data_str],
+    )?;
+
+    // 5. Auditoría
+    write_audit_log(
+        tx,
+        usuario,
+        rol,
+        "CREATE_PACIENTE",
+        "pacientes",
+        Some(&req.patient_id),
+        Some("Alta de paciente junto con contratante"),
+    )?;
+
+    write_audit_log(
+        tx,
+        usuario,
+        rol,
+        "CREATE_AFILIADO",
+        "afiliados",
+        Some(&afil_id),
+        Some("Alta de contratante con paciente nuevo"),
+    )?;
+
+    let patient = super::dto::Patient {
+        id: req.patient_id.clone(),
+        nombre: req.nombre.clone(),
+        apellido: req.apellido.clone(),
+        dni: req.dni.clone(),
+        telefono: String::new(),
+        email: String::new(),
+        domicilio: String::new(),
+        localidad: String::new(),
+        fecha_nacimiento: req.fecha_nacimiento.clone(),
+        obra_social: req.plan_nombre.clone(),
+        obra_social_anterior: Some(String::new()),
+        notas: String::new(),
+        activo: Some(true),
+        version: 1,
+        deleted_at: None,
+    };
+
+    Ok((patient, afil_data))
+}
+
 #[cfg(test)]
 mod afiliados_roundtrip_tests {
     use super::*;
@@ -1271,5 +1643,121 @@ mod tablas_json_extra_tests {
         tx.commit().unwrap();
         assert_eq!(load_planes_table(&conn).unwrap(), planes);
         assert_eq!(load_cuotas_table(&conn).unwrap(), cuotas);
+    }
+}
+
+#[cfg(test)]
+mod contratante_con_paciente_nuevo_tests {
+    use super::*;
+
+    fn conn_con_todas_tablas() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(concat!(
+            include_str!("../../../migrations/0001_init.sql"),
+            "\n",
+            include_str!("../../../migrations/0006_afiliados_tablas.sql"),
+            "\n",
+            include_str!("../../../migrations/0007_pacientes_version_auditoria.sql"),
+            "\n",
+            include_str!("../../../migrations/0008_afiliados_datos_completos.sql")
+        ))
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_alta_exitosa_paciente_y_contratante() {
+        let conn = conn_con_todas_tablas();
+        let tx = conn.unchecked_transaction().unwrap();
+        let req = RegistrarContratanteConPacienteNuevoReq {
+            patient_id: "pac_nuevo_1".to_string(),
+            dni: "44111222".to_string(),
+            fecha_nacimiento: "1995-05-20".to_string(),
+            apellido: "GARCIA".to_string(),
+            nombre: "LUCAS".to_string(),
+            plan_id: "plan_individual".to_string(),
+            plan_nombre: "Individual".to_string(),
+            fecha_inicio: "2026-11-09".to_string(),
+            afiliado_id: None,
+        };
+
+        let (pac, afil) = registrar_contratante_con_paciente_nuevo(&tx, &req, "Admin", "admin").unwrap();
+        tx.commit().unwrap();
+
+        assert_eq!(pac.dni, "44111222");
+        assert_eq!(pac.apellido, "GARCIA");
+        assert_eq!(pac.nombre, "LUCAS");
+        assert_eq!(pac.fecha_nacimiento, "1995-05-20");
+        assert_eq!(pac.obra_social, "Individual");
+
+        assert_eq!(afil["patientId"], "pac_nuevo_1");
+        assert_eq!(afil["planId"], "plan_individual");
+
+        let db_pac = load_patients(&conn).unwrap();
+        let found_pac = db_pac.iter().find(|p| p.id == "pac_nuevo_1").unwrap();
+        assert_eq!(found_pac.dni, "44111222");
+        assert_eq!(found_pac.obra_social, "Individual");
+
+        let db_afil = load_afiliados_table(&conn).unwrap();
+        assert_eq!(db_afil.len(), 1);
+        assert_eq!(db_afil[0]["patientId"], "pac_nuevo_1");
+    }
+
+    #[test]
+    fn test_dni_repetido_devuelve_error_y_no_crea() {
+        let conn = conn_con_todas_tablas();
+        conn.execute(
+            "INSERT INTO patients (id, nombre, apellido, dni, activo, version) VALUES ('p_orig', 'JUAN', 'PEREZ', '33444555', 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        let tx = conn.unchecked_transaction().unwrap();
+        let req = RegistrarContratanteConPacienteNuevoReq {
+            patient_id: "p_otro".to_string(),
+            dni: "33444555".to_string(),
+            fecha_nacimiento: "1990-01-01".to_string(),
+            apellido: "OTRO".to_string(),
+            nombre: "MARCOS".to_string(),
+            plan_id: "plan_ind".to_string(),
+            plan_nombre: "Individual".to_string(),
+            fecha_inicio: "2026-11-09".to_string(),
+            afiliado_id: None,
+        };
+
+        let res = registrar_contratante_con_paciente_nuevo(&tx, &req, "Admin", "admin");
+        assert!(res.is_err());
+        let err_msg = format!("{}", res.err().unwrap());
+        assert!(err_msg.contains("Ese DNI ya está cargado: PEREZ, JUAN"));
+    }
+
+    #[test]
+    fn test_rollback_atomico_no_deja_paciente_huerfano() {
+        let conn = conn_con_todas_tablas();
+        conn.execute(
+            "INSERT INTO afiliados (id, nombre, version, data) VALUES ('afil_forzado', 'Ya existe', 1, '{}')",
+            [],
+        )
+        .unwrap();
+
+        let tx = conn.unchecked_transaction().unwrap();
+        let req = RegistrarContratanteConPacienteNuevoReq {
+            patient_id: "p_huerfano".to_string(),
+            dni: "99887766".to_string(),
+            fecha_nacimiento: "2000-01-01".to_string(),
+            apellido: "LOPEZ".to_string(),
+            nombre: "ANA".to_string(),
+            plan_id: "plan_ind".to_string(),
+            plan_nombre: "Individual".to_string(),
+            fecha_inicio: "2026-11-09".to_string(),
+            afiliado_id: Some("afil_forzado".to_string()),
+        };
+
+        let res = registrar_contratante_con_paciente_nuevo(&tx, &req, "Admin", "admin");
+        assert!(res.is_err(), "Debe fallar al intentar duplicar afiliado");
+        drop(tx);
+
+        let db_pac = load_patients(&conn).unwrap();
+        assert!(!db_pac.iter().any(|p| p.id == "p_huerfano"), "El paciente no debe haber quedado persistido");
     }
 }

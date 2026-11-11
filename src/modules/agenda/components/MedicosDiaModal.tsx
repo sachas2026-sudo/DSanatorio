@@ -78,7 +78,7 @@ export function MedicosDiaModal({ isOpen, onClose, doctors, selectedDate }: Prop
                         <div className="medicos-dia__obras-list">
                           {doctor.obrasSociales.map((os, idx) => (
                             <span key={idx} className="medicos-dia__obra medicos-dia__obra--modern">
-                              {os}
+                              {typeof os === 'string' ? os : os.nombre}
                             </span>
                           ))}
                         </div>

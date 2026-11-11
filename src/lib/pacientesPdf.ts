@@ -1,4 +1,4 @@
-import { format } from 'date-fns'
+import { format, parseISO, isValid } from 'date-fns'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { DNI_PAC_LABEL } from './dniLabels'
@@ -52,6 +52,13 @@ function drawListMeta(doc: jsPDF, pageW: number, y: number, count: number): numb
   return drawPdfPeriodMetaBlock(doc, pageW, y, '', [
     `${count} paciente${count === 1 ? '' : 's'} · Listado alfabético`,
   ])
+}
+
+function formatFechaNac(fechaNac: string): string {
+  if (!fechaNac || fechaNac === '-') return '-'
+  const date = parseISO(fechaNac)
+  if (!isValid(date)) return '-'
+  return format(date, 'dd-MM-yy')
 }
 
 function drawPacientesTotalBar(
@@ -184,4 +191,104 @@ export function buildPacientesPdf(patients: Patient[]): {
 
 export function pacientesPdfPreviewTitle(count: number): string {
   return `Pacientes (${count})`
+}
+
+export interface PacientesListadoGrupo {
+  obraSocial: string
+  patients: Patient[]
+}
+
+export function buildPacientesListadoPdf(
+  groups: PacientesListadoGrupo[],
+): { doc: jsPDF; filename: string; title: string } {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+  const pageW = doc.internal.pageSize.getWidth()
+
+  const headerBottom = drawPdfHeader(doc, pageW, 'Listado de pacientes')
+  let y = pdfBodyStartYAfterHeader(headerBottom, PDF_BODY_EXTRA_DOWN_PLAIN)
+
+  const totalPacientes = groups.reduce((s, g) => s + g.patients.length, 0)
+
+  if (totalPacientes === 0) {
+    doc.setFontSize(10)
+    doc.setTextColor(107, 124, 147)
+    doc.text('No hay pacientes para el filtro seleccionado.', PAGOS_PDF_MARGIN, y + 2)
+    const stamp = format(new Date(), 'yyyy-MM-dd')
+    stampPdfGeneratedFooterOnAllPages(doc)
+    return { doc, filename: `pacientes-listado-${stamp}.pdf`, title: `Listado de pacientes (0)` }
+  }
+
+  for (let gi = 0; gi < groups.length; gi++) {
+    const group = groups[gi]
+    const sorted = sortPatientsAlphabetic(group.patients)
+    if (sorted.length === 0) continue
+
+    // Titulo de la obra social (encima de la barra de titulos de la tabla)
+    if (gi > 0) {
+      y += 6
+    }
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    doc.setTextColor(26, 39, 68)
+    doc.text(group.obraSocial || 'Sin obra social', PAGOS_PDF_MARGIN, y)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.setTextColor(61, 74, 92)
+    doc.text(
+      `${sorted.length} paciente${sorted.length === 1 ? '' : 's'}`,
+      pageW - PAGOS_PDF_MARGIN,
+      y,
+      { align: 'right' },
+    )
+    y += 3
+    // linea divisoria
+    doc.setDrawColor(210, 222, 238)
+    doc.setLineWidth(0.3)
+    doc.line(PAGOS_PDF_MARGIN, y, pageW - PAGOS_PDF_MARGIN, y)
+    y += 4
+
+    const tableLeft = PAGOS_PDF_MARGIN
+    const tableWidth = pageW - 2 * PAGOS_PDF_MARGIN
+    const colWidths = [12, 34, 34, 26, 30, 52, 45]
+    const sum = colWidths.reduce((a, b) => a + b, 0)
+    const scale = tableWidth / sum
+    const widths = colWidths.map((w) => Math.round(w * scale * 100) / 100)
+    const headers = ['Nro', 'Apellido', 'Nombre', 'F. nacimiento', 'Teléfono', 'Domicilio', 'Observaciones']
+    const tableStartY = y
+
+    const columnStyles: Record<number, { cellWidth: number; halign?: 'left' | 'center' | 'right'; valign?: 'middle' }> = {}
+    widths.forEach((w, i) => {
+      columnStyles[i] = { cellWidth: w, valign: 'middle', ...(i === 0 ? { halign: 'center' } : {}) }
+    })
+
+    autoTable(doc, {
+      startY: tableStartY,
+      head: [headers],
+      body: sorted.map((p, idx) => [
+        String(idx + 1),
+        p.apellido || '-',
+        p.nombre || '-',
+        formatFechaNac(p.fechaNacimiento),
+        p.telefono || '-',
+        p.domicilio || '-',
+        p.notas || '-',
+      ]),
+      styles: TABLE_BODY_STYLES,
+      headStyles: TABLE_HEAD_STYLES,
+      alternateRowStyles: { fillColor: [248, 251, 255] },
+      columnStyles,
+      tableWidth,
+      margin: { left: tableLeft, right: PAGOS_PDF_MARGIN },
+      showHead: 'everyPage',
+      rowHeight: 15,
+    })
+
+    const finalY = tableFinalY(doc, tableStartY)
+    strokePagosTableRoundFrame(doc, tableLeft, y, tableWidth, finalY - y, PAGOS_DOCTOR_BLOCK_RADIUS)
+    y = finalY + 18
+  }
+
+  const stamp = format(new Date(), 'yyyy-MM-dd')
+  stampPdfGeneratedFooterOnAllPages(doc)
+  return { doc, filename: `pacientes-listado-${stamp}.pdf`, title: `Listado de pacientes (${totalPacientes})` }
 }

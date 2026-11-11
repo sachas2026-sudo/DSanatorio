@@ -186,7 +186,7 @@ export function buildMedicosPdf(
       head: [headers],
       body: sorted.map((d, index) => {
         const os = (d.obrasSociales?.length
-          ? d.obrasSociales
+          ? d.obrasSociales.map((x) => (typeof x === 'string' ? x : x.nombre))
           : d.obraSocial
             ? [d.obraSocial]
             : []

@@ -50,7 +50,7 @@ export function AgendaMedicoModal({
   const obrasSocialesLabel = useMemo(() => {
     if (!doctor) return ''
     const list = (doctor.obrasSociales?.length
-      ? doctor.obrasSociales
+      ? doctor.obrasSociales.map((x) => (typeof x === 'string' ? x : x.nombre))
       : doctor.obraSocial
         ? [doctor.obraSocial]
         : []
