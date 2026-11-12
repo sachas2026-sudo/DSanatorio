@@ -94,11 +94,11 @@ pub struct Doctor {
     pub tipo_agenda: Option<String>,
     pub activo: Option<bool>,
     #[serde(default)]
-    pub valor: i64,
+    pub valor: Option<i64>,
     #[serde(default)]
-    pub particular: i64,
+    pub particular: Option<i64>,
     #[serde(default)]
-    pub cuidar: i64,
+    pub cuidar: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

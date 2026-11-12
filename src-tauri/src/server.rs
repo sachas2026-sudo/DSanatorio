@@ -3,7 +3,8 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::OnceLock;
 
 use axum::{
     extract::{DefaultBodyLimit, Query, State},
@@ -15,6 +16,7 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use pbkdf2::pbkdf2_hmac;
+use rand::Rng;
 use rcgen::generate_simple_self_signed;
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -52,6 +54,11 @@ struct Session {
     display_name: String,
     must_change_password: bool,
     expiry: Instant,
+    device_id: String,
+    device_name: String,
+    connected_at: u64,
+    last_seen: u64,
+    last_activity: Instant,
 }
 
 #[derive(Clone)]
@@ -60,13 +67,87 @@ struct AppState {
     data_dir: std::path::PathBuf,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     login_attempts: Arc<Mutex<HashMap<String, LoginAttempt>>>,
+    device_access: Arc<Mutex<HashMap<String, DeviceAccessRecord>>>,
+    pairing_code: Arc<Mutex<Option<String>>>,
+    pairing_attempts: Arc<Mutex<Vec<Instant>>>,
+}
+
+static ACTIVE_SERVER_STATE: OnceLock<Mutex<Option<AppState>>> = OnceLock::new();
+
+const CONNECTED_DEVICE_WINDOW: Duration = Duration::from_secs(75);
+const DEVICE_ACCESS_FILE: &str = "device-access.json";
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum DeviceAccessStatus {
+    Pending,
+    Approved,
+    Revoked,
+}
+
+impl DeviceAccessStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Approved => "approved",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceAccessRecord {
+    device_id: String,
+    device_name: String,
+    status: DeviceAccessStatus,
+    first_seen: u64,
+    last_seen: u64,
+    approved_at: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceAccessRequest {
+    device_id: String,
+    device_name: String,
+    #[serde(default)]
+    pairing_code: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceAccessReply {
+    status: &'static str,
+    server_name: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedDevice {
+    pub device_id: String,
+    pub device_name: String,
+    pub username: String,
+    pub display_name: String,
+    pub role: String,
+    pub connected_at: u64,
+    pub last_seen: u64,
+    pub status: String,
+    pub connected: bool,
 }
 
 #[derive(Serialize)]
 struct Health { status: &'static str, version: &'static str, app: &'static str, server_name: String }
 
 #[derive(Deserialize)]
-struct LoginReq { username: String, password: String }
+struct LoginReq {
+    username: String,
+    password: String,
+    #[serde(default)]
+    device_id: Option<String>,
+    #[serde(default)]
+    device_name: Option<String>,
+}
 
 #[derive(Serialize)]
 struct LoginRes {
@@ -192,8 +273,8 @@ fn load_accounts(data_dir: &std::path::Path) -> Vec<Account> {
                 "username": "Admi",
                 "role": "admin",
                 "displayName": "Admi",
-                "passwordHash": "cdXg6ncfUGvtkxkx8BjDY5Wf0Zexceg2kmvM2TD7lB4=",
-                "passwordSalt": "6nUUdlNVF/cc1cCad+FJsA==",
+                "passwordHash": "P1U/65i0gOmqYowAPc3UnzYvQXvplu85GTJ6avQES30=",
+                "passwordSalt": "fG8r56seNehNiM3JMddqSg==",
                 "mustChangePassword": false
             }),
             serde_json::json!({
@@ -201,8 +282,8 @@ fn load_accounts(data_dir: &std::path::Path) -> Vec<Account> {
                 "role": "secretaria",
                 "displayName": "Barua Andrea",
                 "turno": "Tarde",
-                "passwordHash": "B39uQCkazYHxMJ9SlDtpZTdn9zL2Ow180XRjmxyfWmA=",
-                "passwordSalt": "9CVge8phMAx3Z0Fro/1xLQ==",
+                "passwordHash": "YT572xmglGv/oF5MeUWRgq8Va1VuEQ4OaagUPXuVZNE=",
+                "passwordSalt": "cvNyyRkx1ju95x/Clzdelg==",
                 "mustChangePassword": false
             }),
             serde_json::json!({
@@ -210,22 +291,25 @@ fn load_accounts(data_dir: &std::path::Path) -> Vec<Account> {
                 "role": "secretaria",
                 "displayName": "Aguirre Mary",
                 "turno": "Mañana",
-                "passwordHash": "hYciznwnfauEs0WX5Kvl35qOfdQqzRuvIeJrH9XaA0o=",
-                "passwordSalt": "5eblfsE7lEcPSKZL5z3V0w==",
+                "passwordHash": "+8z8K3Yq1ypaTr5lAHt8f+ZfzEGEDq++UAS4ok4UTCg=",
+                "passwordSalt": "4atQN0lY+daonfSIg0516Q==",
                 "mustChangePassword": false
             }),
             serde_json::json!({
-                "username": "Afiliados",
+                "username": "Contratantes",
                 "role": "afiliado",
-                "displayName": "Afiliados",
-                "passwordHash": "aOaCzUYT8j8CncD1r6r2TK/ONEUIU89y+IeI78YmRIM=",
-                "passwordSalt": "3LCSP4eze0v4edkvz64NMQ==",
+                "displayName": "Contratantes",
+                "passwordHash": "XSB27daQ5HQsdh+d7XTLg4iFNc87l3R3U1WVUdb0gLs=",
+                "passwordSalt": "QdWC1HoUiu6h8xqWq2JrKA==",
                 "mustChangePassword": false
             }),
         ];
         if let Ok(raw) = serde_json::to_string_pretty(&accounts) {
             let _ = std::fs::write(&path, raw);
         }
+    }
+    if let Err(error) = crate::auth_defaults::migrate_initial_credentials_file(&path) {
+        log::error!("No se pudieron migrar las credenciales iniciales: {error}");
     }
     let raw = std::fs::read_to_string(&path).unwrap_or_default();
     if raw.trim().is_empty() { return vec![]; }
@@ -254,16 +338,6 @@ fn verify_password(account: &Account, password: &str) -> bool {
         }
     }
 
-    // Fallbacks de recuperación para contraseñas estándar del sistema
-    let u = account.username.to_lowercase();
-    let role = account.role.to_lowercase();
-    if role == "afiliado" || u.contains("afiliad") {
-        if p == "456" { return true; }
-    } else if role == "admin" || u == "admi" || u == "admin" {
-        if p.eq_ignore_ascii_case("admi") || p.eq_ignore_ascii_case("admin") { return true; }
-    } else if role == "secretaria" || u.contains("aguirre") || u.contains("barua") {
-        if p == "123" || p == "1379" || p.eq_ignore_ascii_case("secretaria") { return true; }
-    }
     false
 }
 
@@ -276,7 +350,8 @@ struct LoginAttempt {
 fn check_rate_limit(state: &AppState, username: &str) -> Result<(), StatusCode> {
     let mut attempts = state.login_attempts.lock().unwrap();
     let now = Instant::now();
-    let a = attempts.entry(username.to_string()).or_insert(LoginAttempt { failures: 0, first_fail: now });
+    let key = username.trim().to_lowercase();
+    let a = attempts.entry(key).or_insert(LoginAttempt { failures: 0, first_fail: now });
     if a.failures >= 5 && (now - a.first_fail) < Duration::from_secs(15 * 60) {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
@@ -289,7 +364,8 @@ fn check_rate_limit(state: &AppState, username: &str) -> Result<(), StatusCode> 
 fn record_failure(state: &AppState, username: &str) {
     let mut attempts = state.login_attempts.lock().unwrap();
     let now = Instant::now();
-    let a = attempts.entry(username.to_string()).or_insert(LoginAttempt { failures: 0, first_fail: now });
+    let key = username.trim().to_lowercase();
+    let a = attempts.entry(key).or_insert(LoginAttempt { failures: 0, first_fail: now });
     a.failures += 1;
 }
 
@@ -299,11 +375,380 @@ fn authenticate_request(state: &AppState, headers: &HeaderMap, _token_expiry_sec
         .and_then(|s| s.strip_prefix("Bearer "))
         .map(|s| s.to_string())
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let sessions = state.sessions.lock().unwrap();
-    match sessions.get(&token) {
-        Some(s) if s.expiry > Instant::now() => Ok(s.clone()),
+    let mut sessions = state.sessions.lock().unwrap();
+    match sessions.get_mut(&token) {
+        Some(session) if session.expiry > Instant::now() => {
+            session.last_seen = unix_timestamp();
+            session.last_activity = Instant::now();
+            Ok(session.clone())
+        }
         _ => Err(StatusCode::UNAUTHORIZED),
     }
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn safe_device_value(value: Option<String>, fallback: &str, max_len: usize) -> String {
+    let cleaned: String = value
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(max_len)
+        .collect();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn load_device_access(data_dir: &Path) -> Result<HashMap<String, DeviceAccessRecord>, String> {
+    let path = data_dir.join(DEVICE_ACCESS_FILE);
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|error| format!("No se pudo leer el registro de dispositivos: {error}"))?;
+    let records: HashMap<String, DeviceAccessRecord> = serde_json::from_str(&raw)
+        .map_err(|error| format!("El registro de dispositivos no es válido: {error}"))?;
+    if records
+        .iter()
+        .any(|(id, record)| id != &record.device_id || id.trim().is_empty())
+    {
+        return Err("El registro de dispositivos contiene identificadores inconsistentes.".into());
+    }
+    Ok(records)
+}
+
+fn persist_device_access(
+    data_dir: &Path,
+    records: &HashMap<String, DeviceAccessRecord>,
+) -> Result<(), String> {
+    let raw = serde_json::to_vec_pretty(records)
+        .map_err(|error| format!("No se pudo serializar el registro de dispositivos: {error}"))?;
+    let path = data_dir.join(DEVICE_ACCESS_FILE);
+    let temporary_path = data_dir.join(format!("{DEVICE_ACCESS_FILE}.tmp"));
+    std::fs::write(&temporary_path, raw)
+        .map_err(|error| format!("No se pudo guardar el registro de dispositivos: {error}"))?;
+    if let Err(error) = std::fs::rename(&temporary_path, &path) {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(format!("No se pudo actualizar el registro de dispositivos: {error}"));
+    }
+    Ok(())
+}
+
+fn record_device_request(
+    state: &AppState,
+    device_id: String,
+    device_name: String,
+    pairing_code: Option<&str>,
+) -> Result<DeviceAccessStatus, String> {
+    let now = unix_timestamp();
+    let mut records = state
+        .device_access
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut updated = records.clone();
+    let active_code = state
+        .pairing_code
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let code_matches = active_code.as_deref().is_some_and(|active| {
+        pairing_code
+            .map(str::trim)
+            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(active))
+    });
+
+    let existing_status = updated.get(&device_id).map(|record| record.status);
+    if existing_status == Some(DeviceAccessStatus::Approved) {
+        if let Some(record) = updated.get_mut(&device_id) {
+            record.device_name = device_name;
+            record.last_seen = now;
+            let status = record.status;
+            persist_device_access(&state.data_dir, &updated)?;
+            *records = updated;
+            return Ok(status);
+        }
+    }
+    if existing_status == Some(DeviceAccessStatus::Revoked) {
+        return Ok(DeviceAccessStatus::Revoked);
+    }
+
+    if !code_matches {
+        let mut attempts = state
+            .pairing_attempts
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let now_instant = Instant::now();
+        attempts.retain(|attempt| now_instant.duration_since(*attempt) < Duration::from_secs(60));
+        if attempts.len() >= 20 {
+            return Err("pairing_rate_limited".into());
+        }
+        attempts.push(now_instant);
+        return Ok(DeviceAccessStatus::Pending);
+    }
+
+    let record = updated
+        .entry(device_id.clone())
+        .or_insert_with(|| DeviceAccessRecord {
+            device_id,
+            device_name: device_name.clone(),
+            status: DeviceAccessStatus::Pending,
+            first_seen: now,
+            last_seen: now,
+            approved_at: None,
+        });
+    record.device_name = device_name;
+    record.last_seen = now;
+    if code_matches {
+        record.status = DeviceAccessStatus::Approved;
+        record.approved_at = Some(now);
+    }
+    let status = record.status;
+    persist_device_access(&state.data_dir, &updated)?;
+    *records = updated;
+    Ok(status)
+}
+
+fn set_device_access_status(
+    state: &AppState,
+    device_id: &str,
+    status: DeviceAccessStatus,
+) -> Result<(), String> {
+    let mut records = state
+        .device_access
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut updated = records.clone();
+    let record = updated
+        .get_mut(device_id)
+        .ok_or_else(|| "No existe una solicitud para ese dispositivo.".to_string())?;
+    record.status = status;
+    record.approved_at = (status == DeviceAccessStatus::Approved).then(unix_timestamp);
+    persist_device_access(&state.data_dir, &updated)?;
+    *records = updated;
+    Ok(())
+}
+
+fn revoke_device_access(state: &AppState, device_id: &str) -> Result<(), String> {
+    set_device_access_status(state, device_id, DeviceAccessStatus::Revoked)?;
+    state
+        .sessions
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .retain(|_, session| session.device_id != device_id);
+    Ok(())
+}
+
+fn connected_devices_from_sessions(
+    sessions: &HashMap<String, Session>,
+    now: Instant,
+) -> Vec<ConnectedDevice> {
+    let now_unix = unix_timestamp();
+    let mut devices: Vec<_> = sessions
+        .values()
+        .filter(|session| {
+            session.expiry > now
+                && now
+                    .checked_duration_since(session.last_activity)
+                    .is_some_and(|elapsed| elapsed <= CONNECTED_DEVICE_WINDOW)
+        })
+        .map(|session| ConnectedDevice {
+            device_id: session.device_id.clone(),
+            device_name: session.device_name.clone(),
+            username: session.username.clone(),
+            display_name: session.display_name.clone(),
+            role: session.role.clone(),
+            connected_at: session.connected_at,
+            last_seen: session.last_seen.min(now_unix),
+            status: "connected".to_string(),
+            connected: true,
+        })
+        .collect();
+    devices.sort_by(|left, right| {
+        left.device_name
+            .cmp(&right.device_name)
+            .then_with(|| left.username.cmp(&right.username))
+    });
+    devices
+}
+
+fn combine_device_access_and_sessions(
+    records: &HashMap<String, DeviceAccessRecord>,
+    active_sessions: Vec<ConnectedDevice>,
+) -> Vec<ConnectedDevice> {
+    let mut devices: HashMap<String, ConnectedDevice> = records
+        .values()
+        .map(|record| {
+            (
+                record.device_id.clone(),
+                ConnectedDevice {
+                    device_id: record.device_id.clone(),
+                    device_name: record.device_name.clone(),
+                    username: String::new(),
+                    display_name: String::new(),
+                    role: String::new(),
+                    connected_at: 0,
+                    last_seen: record.last_seen,
+                    status: record.status.as_str().to_string(),
+                    connected: false,
+                },
+            )
+        })
+        .collect();
+
+    for mut session in active_sessions {
+        session.status = "connected".to_string();
+        session.connected = true;
+        devices
+            .entry(session.device_id.clone())
+            .and_modify(|device| {
+                device.device_name = session.device_name.clone();
+                device.username = session.username.clone();
+                device.display_name = session.display_name.clone();
+                device.role = session.role.clone();
+                device.connected_at = session.connected_at;
+                device.last_seen = session.last_seen;
+                device.status = "connected".to_string();
+                device.connected = true;
+            })
+            .or_insert(session);
+    }
+
+    let mut devices: Vec<_> = devices.into_values().collect();
+    devices.sort_by(|left, right| {
+        left.device_name
+            .cmp(&right.device_name)
+            .then_with(|| left.device_id.cmp(&right.device_id))
+    });
+    devices
+}
+
+fn activate_server_state(state: AppState) {
+    let active = ACTIVE_SERVER_STATE.get_or_init(|| Mutex::new(None));
+    *active.lock().unwrap_or_else(|error| error.into_inner()) = Some(state);
+}
+
+fn active_server_state() -> Result<AppState, String> {
+    ACTIVE_SERVER_STATE
+        .get()
+        .and_then(|active| active.lock().ok()?.clone())
+        .ok_or_else(|| "El servidor HTTPS todavía no está iniciado.".to_string())
+}
+
+#[tauri::command]
+pub fn get_connected_devices() -> Result<Vec<ConnectedDevice>, String> {
+    if crate::client_mode::load_config()?.mode != crate::client_mode::AppMode::Local {
+        return Err("La lista de dispositivos solo está disponible en modo servidor.".to_string());
+    }
+    let state = active_server_state()?;
+    let now = Instant::now();
+    let mut sessions = state
+        .sessions
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    sessions.retain(|_, session| session.expiry > now);
+    let active = connected_devices_from_sessions(&sessions, now);
+    let records = state
+        .device_access
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    Ok(combine_device_access_and_sessions(&records, active))
+}
+
+#[tauri::command]
+pub fn approve_client_device(device_id: String) -> Result<(), String> {
+    if crate::client_mode::load_config()?.mode != crate::client_mode::AppMode::Local {
+        return Err("La aprobación de dispositivos solo está disponible en modo servidor.".into());
+    }
+    let state = active_server_state()?;
+    set_device_access_status(&state, &device_id, DeviceAccessStatus::Approved)
+}
+
+#[tauri::command]
+pub fn revoke_client_device(device_id: String) -> Result<(), String> {
+    if crate::client_mode::load_config()?.mode != crate::client_mode::AppMode::Local {
+        return Err("La revocación de dispositivos solo está disponible en modo servidor.".into());
+    }
+    let state = active_server_state()?;
+    revoke_device_access(&state, &device_id)
+}
+
+fn generate_pairing_code() -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let mut random = rand::thread_rng();
+    (0..6)
+        .map(|_| ALPHABET[random.gen_range(0..ALPHABET.len())] as char)
+        .collect()
+}
+
+#[tauri::command]
+pub fn get_server_pairing_code() -> Result<String, String> {
+    if crate::client_mode::load_config()?.mode != crate::client_mode::AppMode::Local {
+        return Err("La clave de conexión solo está disponible en modo servidor.".into());
+    }
+    let state = active_server_state()?;
+    let mut pairing_code = state
+        .pairing_code
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if pairing_code.is_none() {
+        *pairing_code = Some(generate_pairing_code());
+        state
+            .pairing_attempts
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+    }
+    pairing_code
+        .clone()
+        .ok_or_else(|| "No se pudo generar la clave de conexión.".to_string())
+}
+
+#[tauri::command]
+pub fn regenerate_server_pairing_code() -> Result<String, String> {
+    if crate::client_mode::load_config()?.mode != crate::client_mode::AppMode::Local {
+        return Err("La clave de conexión solo está disponible en modo servidor.".into());
+    }
+    let state = active_server_state()?;
+    let code = generate_pairing_code();
+    *state
+        .pairing_code
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(code.clone());
+    state
+        .pairing_attempts
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clear();
+    Ok(code)
+}
+
+#[tauri::command]
+pub fn hide_server_pairing_code() -> Result<(), String> {
+    if crate::client_mode::load_config()?.mode != crate::client_mode::AppMode::Local {
+        return Err("La clave de conexión solo está disponible en modo servidor.".into());
+    }
+    let state = active_server_state()?;
+    *state
+        .pairing_code
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = None;
+    state
+        .pairing_attempts
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clear();
+    Ok(())
 }
 
 fn role_allowed(role: &str, path: &str) -> bool {
@@ -428,24 +873,98 @@ async fn check_write_enabled(state: &AppState) -> Result<(), (StatusCode, axum::
     }
 }
 
+fn server_tls_names(tls_dir: &Path) -> Result<Vec<String>, String> {
+    let _ = tls_dir;
+    Ok(crate::tls_cert::desired_names(&[]))
+}
+
+pub fn server_nickname() -> String {
+    let configured = option_env!("SAN_NAME")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let computer_name = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok();
+    safe_device_value(
+        configured.or(computer_name),
+        "Sanatorio Server",
+        64,
+    )
+}
+
 async fn health() -> Json<Health> {
-    let server_name = option_env!("SAN_NAME").unwrap_or("Sanatorio").to_string();
-    Json(Health { status: "ok", version: env!("CARGO_PKG_VERSION"), app: "sanatorio", server_name })
+    Json(Health {
+        status: "ok",
+        version: env!("CARGO_PKG_VERSION"),
+        app: "sanatorio",
+        server_name: server_nickname(),
+    })
+}
+
+async fn request_device_access(
+    State(state): State<AppState>,
+    Json(body): Json<DeviceAccessRequest>,
+) -> Result<Json<DeviceAccessReply>, StatusCode> {
+    let device_id = safe_device_value(Some(body.device_id), "", 128);
+    if device_id.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let device_name = safe_device_value(Some(body.device_name), "Equipo cliente", 64);
+    let status = record_device_request(
+        &state,
+        device_id,
+        device_name,
+        body.pairing_code.as_deref(),
+    )
+    .map_err(|error| {
+        if error == "pairing_rate_limited" {
+            StatusCode::TOO_MANY_REQUESTS
+        } else {
+            log::error!("No se pudo registrar la solicitud de dispositivo: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
+    Ok(Json(DeviceAccessReply {
+        status: if status == DeviceAccessStatus::Pending {
+            "invalid_code"
+        } else {
+            status.as_str()
+        },
+        server_name: server_nickname(),
+    }))
+}
+
+async fn session_heartbeat(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    authenticate_request(&state, &headers, None)?;
+    Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
 async fn login(State(state): State<AppState>, Json(body): Json<LoginReq>) -> Result<Json<LoginRes>, StatusCode> {
     check_rate_limit(&state, &body.username)?;
+    let device_id = body
+        .device_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|device_id| !device_id.is_empty())
+        .ok_or(StatusCode::FORBIDDEN)?;
+    let is_approved = state
+        .device_access
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(device_id)
+        .is_some_and(|record| record.status == DeviceAccessStatus::Approved);
+    if !is_approved {
+        return Err(StatusCode::FORBIDDEN);
+    }
     let accounts = state.accounts.lock().unwrap();
     let u_req = body.username.trim().to_lowercase();
-    let account_opt = accounts.iter().find(|a| {
-        let u_acc = a.username.trim().to_lowercase();
-        u_acc == u_req 
-        || (u_req == "afiliado" && u_acc == "afiliados")
-        || (u_req == "afiliados" && u_acc == "afiliado")
-        || (u_req == "admi" && u_acc == "admin")
-        || (u_req == "admin" && u_acc == "admi")
-        || (u_req == "secretaria" && a.role == "secretaria")
-    });
+    let account_opt = accounts
+        .iter()
+        .find(|account| account.username.trim().eq_ignore_ascii_case(&u_req));
 
     if let Some(account) = account_opt {
         if verify_password(account, &body.password) {
@@ -467,12 +986,23 @@ async fn login(State(state): State<AppState>, Json(body): Json<LoginReq>) -> Res
             }
 
             let token = Uuid::new_v4().to_string();
+            let now = Instant::now();
+            let connected_at = unix_timestamp();
             let session = Session {
                 username: username.clone(),
                 role: role.clone(),
                 display_name: display_name.clone(),
                 must_change_password: must_change,
-                expiry: Instant::now() + Duration::from_secs(12 * 3600),
+                expiry: now + Duration::from_secs(12 * 3600),
+                device_id: safe_device_value(
+                    body.device_id,
+                    &format!("session-{}", Uuid::new_v4()),
+                    128,
+                ),
+                device_name: safe_device_value(body.device_name, "Equipo sin identificar", 64),
+                connected_at,
+                last_seen: connected_at,
+                last_activity: now,
             };
             state.sessions.lock().unwrap().insert(token.clone(), session);
 
@@ -2185,6 +2715,8 @@ async fn post_cobrar_pagos_afiliados(
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/device-access", axum::routing::post(request_device_access))
+        .route("/api/session/heartbeat", get(session_heartbeat))
         .route("/api/login", axum::routing::post(login))
         .route("/api/change-password", axum::routing::post(change_password))
         .route("/api/auth-accounts", get(get_auth_accounts).post(post_auth_accounts))
@@ -2243,28 +2775,56 @@ pub fn run_server() {
         }
     };
 
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    service::ensure_initialized().expect("init storage");
-    let data_dir = settings::data_dir();
-    let _ = std::fs::create_dir_all(&data_dir);
+    if rustls::crypto::CryptoProvider::get_default().is_none()
+        && rustls::crypto::ring::default_provider().install_default().is_err()
+    {
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - Error TLS")
+            .set_description("No se pudo inicializar el proveedor criptográfico TLS.")
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
+    if let Err(error) = service::ensure_initialized() {
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - Error de almacenamiento")
+            .set_description(&format!("No se pudo inicializar el almacenamiento: {error}"))
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
+    if let Err(error) = std::fs::create_dir_all(&data_dir) {
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - Error de almacenamiento")
+            .set_description(&format!("No se pudo crear el directorio de datos: {error}"))
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
 
     // TLS
     let tls_dir = settings::sanatorio_root().join("config").join("tls");
-    let _ = std::fs::create_dir_all(&tls_dir);
+    if let Err(error) = std::fs::create_dir_all(&tls_dir) {
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - Error de certificado")
+            .set_description(&format!("No se pudo crear la carpeta TLS: {error}"))
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
     let cert_path = tls_dir.join("server-cert.pem");
     let key_path = tls_dir.join("server-key.pem");
-    let extra_names = match crate::tls_files::load_extra_names(&tls_dir) {
+    let cert_names = match server_tls_names(&tls_dir) {
         Ok(v) => v,
         Err(e) => {
             rfd::MessageDialog::new()
-                .set_title("Sanatorio - Error de certificado")
+                .set_title("Sanatorio - Error de red/certificado")
                 .set_description(&e)
                 .set_buttons(rfd::MessageButtons::Ok)
                 .show();
             std::process::exit(1);
         }
     };
-    let cert_names = crate::tls_cert::desired_names(&extra_names);
     match crate::tls_files::ensure_server_cert(&tls_dir, &cert_names) {
         Ok(crate::tls_files::CertOutcome::Regenerated) => {
             eprintln!("[tls] certificado generado para: {}", cert_names.join(", "));
@@ -2279,104 +2839,237 @@ pub fn run_server() {
             std::process::exit(1);
         }
     }
+    #[cfg(windows)]
+    check_firewall_rules();
 
     let accounts = load_accounts(&data_dir);
+    let device_access = match load_device_access(&data_dir) {
+        Ok(records) => records,
+        Err(error) => {
+            rfd::MessageDialog::new()
+                .set_title("Sanatorio - Error de dispositivos")
+                .set_description(&error)
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+            std::process::exit(1);
+        }
+    };
 
     let state = AppState {
         accounts: Arc::new(Mutex::new(accounts)),
         data_dir: data_dir.clone(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
+        device_access: Arc::new(Mutex::new(device_access)),
+        pairing_code: Arc::new(Mutex::new(None)),
+        pairing_attempts: Arc::new(Mutex::new(Vec::new())),
     };
+    activate_server_state(state.clone());
 
     let app = build_router(state);
 
-    let rt = tokio::runtime::Runtime::new().expect("runtime");
-    rt.block_on(async {
-        let addr: SocketAddr = "0.0.0.0:8787".parse().unwrap();
+    let cert_pem = std::fs::read_to_string(&cert_path)
+        .unwrap_or_else(|error| {
+            rfd::MessageDialog::new()
+                .set_title("Sanatorio - Error TLS")
+                .set_description(&format!("No se pudo leer el certificado: {error}"))
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+            std::process::exit(1);
+        });
+    let rt = tokio::runtime::Runtime::new().unwrap_or_else(|error| {
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - Error")
+            .set_description(&format!("No se pudo crear tokio runtime: {error}"))
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    });
+    let startup: Result<(), String> = rt.block_on(async {
+        let addr: SocketAddr = "0.0.0.0:8787"
+            .parse()
+            .map_err(|error| format!("Dirección del servidor inválida: {error}"))?;
         let rustls_config = RustlsConfig::from_pem_file(&cert_path, &key_path)
             .await
-            .expect("rustls config");
-
-        println!("Servidor Sanatorio en https://0.0.0.0:8787");
-        axum_server::bind_rustls(addr, rustls_config)
-            .serve(app.into_make_service())
+            .map_err(|error| format!("No se pudo cargar TLS: {error}"))?;
+        let handle = axum_server::Handle::new();
+        let task = tokio::spawn(
+            axum_server::bind_rustls(addr, rustls_config)
+                .handle(handle.clone())
+                .serve(app.into_make_service()),
+        );
+        let listening = tokio::time::timeout(Duration::from_secs(5), handle.listening())
             .await
-            .expect("server");
+            .map_err(|_| "Timeout esperando HTTPS en TCP 8787".to_string())?
+            .ok_or_else(|| "HTTPS no confirmó que está escuchando".to_string())?;
+        log::info!("API HTTPS escuchando en {listening}");
+        if let Err(error) =
+            crate::discovery::start_udp_responder(server_nickname(), cert_pem)
+        {
+            log::error!("API HTTPS disponible, pero no inició discovery UDP: {error}");
+            let _ = crate::login_diagnostics::record_server_startup_diagnostic("discovery");
+        }
+        match task.await {
+            Ok(Ok(())) => Err("El servidor HTTPS terminó inesperadamente".to_string()),
+            Ok(Err(error)) => Err(format!("Falló el servidor HTTPS: {error}")),
+            Err(error) => Err(format!("Falló la tarea HTTPS: {error}")),
+        }
     });
+    if let Err(error) = startup {
+        log::error!("No se pudo mantener el servidor Sanatorio: {error}");
+        record_startup_diagnostic("server");
+        rfd::MessageDialog::new()
+            .set_title("Sanatorio - Error de servidor")
+            .set_description(&error)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+        std::process::exit(1);
+    }
 }
 
-/// Inicia el servidor HTTP/HTTPS en segundo plano junto con el responder UDP para descubrimiento automático.
+static BACKGROUND_SERVER_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Inicia el servidor HTTPS en todas las interfaces y el responder UDP LAN.
 pub fn start_background_server() {
-    static SERVER_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if SERVER_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+    if BACKGROUND_SERVER_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
 
-    std::thread::Builder::new()
+    let thread = std::thread::Builder::new()
         .name("sanatorio-bg-server".to_string())
         .spawn(|| {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-            let _ = service::ensure_initialized();
-            let data_dir = settings::data_dir();
-            let _ = std::fs::create_dir_all(&data_dir);
+            let result = (|| -> Result<(), String> {
+                if rustls::crypto::CryptoProvider::get_default().is_none() {
+                    rustls::crypto::ring::default_provider()
+                        .install_default()
+                        .map_err(|_| "No se pudo inicializar el proveedor criptográfico TLS".to_string())?;
+                }
+                service::ensure_initialized()
+                    .map_err(|error| format!("No se pudo inicializar el almacenamiento: {error}"))?;
+                let data_dir = settings::data_dir();
+                std::fs::create_dir_all(&data_dir)
+                    .map_err(|error| format!("No se pudo crear el directorio de datos: {error}"))?;
 
-            // TLS
-            let tls_dir = settings::sanatorio_root().join("config").join("tls");
-            let _ = std::fs::create_dir_all(&tls_dir);
-            let cert_path = tls_dir.join("server-cert.pem");
-            let key_path = tls_dir.join("server-key.pem");
-            let extra_names = crate::tls_files::load_extra_names(&tls_dir).unwrap_or_default();
-            let cert_names = crate::tls_cert::desired_names(&extra_names);
-            let _ = crate::tls_files::ensure_server_cert(&tls_dir, &cert_names);
+                let tls_dir = settings::sanatorio_root().join("config").join("tls");
+                let cert_path = tls_dir.join("server-cert.pem");
+                let key_path = tls_dir.join("server-key.pem");
+                let cert_names = server_tls_names(&tls_dir)?;
+                crate::tls_files::ensure_server_cert(&tls_dir, &cert_names)?;
+                let cert_pem = std::fs::read_to_string(&cert_path)
+                    .map_err(|error| format!("No se pudo leer el certificado TLS: {error}"))?;
 
-            let cert_pem = std::fs::read_to_string(&cert_path).unwrap_or_default();
+                #[cfg(windows)]
+                check_firewall_rules();
 
-            // Iniciar responder UDP para que las terminales en red lo encuentren automáticamente
-            crate::discovery::start_udp_responder("Sanatorio Server".to_string(), cert_pem);
-
-            // Abrir puertos de red en Firewall de Windows de manera silenciosa
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                let _ = Command::new("netsh")
-                    .args(["advfirewall", "firewall", "add", "rule", "name=Sanatorio Server", "dir=in", "action=allow", "protocol=TCP", "localport=8787", "profile=any"])
-                    .creation_flags(0x08000000)
-                    .status();
-                let _ = Command::new("netsh")
-                    .args(["advfirewall", "firewall", "add", "rule", "name=Sanatorio Discovery", "dir=in", "action=allow", "protocol=UDP", "localport=8788", "profile=any"])
-                    .creation_flags(0x08000000)
-                    .status();
+                let accounts = load_accounts(&data_dir);
+                let device_access = load_device_access(&data_dir)?;
+                let state = AppState {
+                    accounts: Arc::new(Mutex::new(accounts)),
+                    data_dir: data_dir.clone(),
+                    sessions: Arc::new(Mutex::new(HashMap::new())),
+                    login_attempts: Arc::new(Mutex::new(HashMap::new())),
+                    device_access: Arc::new(Mutex::new(device_access)),
+                    pairing_code: Arc::new(Mutex::new(None)),
+                    pairing_attempts: Arc::new(Mutex::new(Vec::new())),
+                };
+                activate_server_state(state.clone());
+                let app = build_router(state);
+                let rt = tokio::runtime::Runtime::new()
+                    .map_err(|error| format!("No se pudo crear tokio runtime: {error}"))?;
+                rt.block_on(async {
+                    let rustls_config = RustlsConfig::from_pem_file(&cert_path, &key_path)
+                        .await
+                        .map_err(|error| format!("No se pudo cargar el certificado/clave TLS: {error}"))?;
+                    let addr: SocketAddr = "0.0.0.0:8787".parse()
+                        .map_err(|error| format!("Dirección del servidor inválida: {error}"))?;
+                    let handle = axum_server::Handle::new();
+                    let server = axum_server::bind_rustls(addr, rustls_config)
+                        .handle(handle.clone())
+                        .serve(app.into_make_service());
+                    let task = tokio::spawn(server);
+                    let listening = tokio::time::timeout(
+                        Duration::from_secs(5),
+                        handle.listening(),
+                    )
+                    .await
+                    .map_err(|_| "Timeout esperando que HTTPS escuche en TCP 8787".to_string())?
+                    .ok_or_else(|| "El servidor HTTPS no confirmó una dirección de escucha".to_string())?;
+                    log::info!("API HTTPS escuchando en {listening}");
+                    if let Err(error) = crate::discovery::start_udp_responder(
+                        server_nickname(),
+                        cert_pem,
+                    ) {
+                        log::error!("API HTTPS disponible, pero no inició discovery UDP: {error}");
+                        record_startup_diagnostic("discovery");
+                    }
+                    match task.await {
+                        Ok(Ok(())) => Err("El servidor HTTPS terminó inesperadamente".to_string()),
+                        Ok(Err(error)) => Err(format!("Falló el servidor HTTPS: {error}")),
+                        Err(error) => Err(format!("Falló la tarea del servidor HTTPS: {error}")),
+                    }
+                })
+            })();
+            if let Err(error) = result {
+                log::error!("No se pudo iniciar el servidor Sanatorio: {error}");
+                eprintln!("[Sanatorio] No se pudo iniciar el servidor: {error}");
+                record_startup_diagnostic("server");
+                BACKGROUND_SERVER_STARTED.store(false, std::sync::atomic::Ordering::SeqCst);
             }
+        });
+    if let Err(error) = thread {
+        BACKGROUND_SERVER_STARTED.store(false, std::sync::atomic::Ordering::SeqCst);
+        log::error!("No se pudo crear el hilo del servidor: {error}");
+        record_startup_diagnostic("server");
+    }
+}
 
-            let accounts = load_accounts(&data_dir);
-            let state = AppState {
-                accounts: Arc::new(Mutex::new(accounts)),
-                data_dir: data_dir.clone(),
-                sessions: Arc::new(Mutex::new(HashMap::new())),
-                login_attempts: Arc::new(Mutex::new(HashMap::new())),
-            };
-
-            let app = build_router(state);
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(r) => r,
-                Err(e) => {
-                    log::error!("Error creando tokio runtime: {e}");
-                    return;
+#[cfg(windows)]
+fn check_firewall_rules() {
+    use std::os::windows::process::CommandExt;
+    for rule in ["Sanatorio Server", "Sanatorio Discovery"] {
+        match Command::new("netsh")
+            .args(["advfirewall", "firewall", "show", "rule", &format!("name={rule}")])
+            .creation_flags(0x08000000)
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let details = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+                let expected_port = if rule == "Sanatorio Server" { "8787" } else { "8788" };
+                let private_profile = details.contains("private")
+                    || details.contains("privado")
+                    || details.contains("privat");
+                if !details.contains("localsubnet")
+                    || !details.contains(expected_port)
+                    || !private_profile
+                {
+                    log::warn!(
+                        "La regla de firewall '{rule}' existe, pero no se pudo confirmar su alcance LAN LocalSubnet/puerto. Revísela antes de habilitar acceso de red."
+                    );
+                    record_startup_diagnostic("firewall");
                 }
-            };
+            }
+            Ok(output) => {
+                log::warn!(
+                    "No se verificó la regla de firewall '{rule}' (código {}). Configure TCP 8787/UDP 8788 únicamente para el perfil y segmentos LAN autorizados.",
+                    output.status
+                );
+                record_startup_diagnostic("firewall");
+            }
+            Err(error) => {
+                log::warn!(
+                    "No se pudo consultar la regla de firewall '{rule}': {error}. Configure TCP 8787/UDP 8788 únicamente para el perfil y segmentos LAN autorizados."
+                );
+                record_startup_diagnostic("firewall");
+            }
+        }
+    }
+}
 
-            rt.block_on(async {
-                let addr: SocketAddr = "0.0.0.0:8787".parse().unwrap();
-                if let Ok(rustls_config) = RustlsConfig::from_pem_file(&cert_path, &key_path).await {
-                    println!("[Sanatorio] Servidor en red activo en https://0.0.0.0:8787");
-                    let _ = axum_server::bind_rustls(addr, rustls_config)
-                        .serve(app.into_make_service())
-                        .await;
-                }
-            });
-        })
-        .ok();
+fn record_startup_diagnostic(kind: &str) {
+    if let Err(error) = crate::login_diagnostics::record_server_startup_diagnostic(kind) {
+        log::error!("No se pudo registrar el evento de inicio '{kind}': {error}");
+    }
 }
 
 
@@ -2386,6 +3079,7 @@ mod tests {
     use std::fs;
     use std::sync::{Arc, Mutex};
     use std::sync::atomic::AtomicUsize;
+    use tempfile::tempdir;
     use serde_json;
 
     use tower::ServiceExt;
@@ -2421,6 +3115,9 @@ mod tests {
             data_dir: temp_dir.clone(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             login_attempts: Arc::new(Mutex::new(HashMap::new())),
+            device_access: Arc::new(Mutex::new(HashMap::new())),
+            pairing_code: Arc::new(Mutex::new(Some("ABC123".into()))),
+            pairing_attempts: Arc::new(Mutex::new(Vec::new())),
         };
 
         let app = build_router(state);
@@ -2434,6 +3131,222 @@ mod tests {
         let (status, _) = post_json(app, "/api/write-enabled", r#"{"write_enabled":true}"#, Some(token_admin)).await;
         assert_eq!(status, StatusCode::OK, "enable_writes debe ser 200: {}", status);
         status
+    }
+
+    #[test]
+    fn credenciales_iniciales_validas_y_anterior_no() {
+        let data_dir = tempdir().unwrap();
+        let accounts = load_accounts(data_dir.path());
+        let cases = [
+            ("Aguirre Mary", "789", "123"),
+            ("Barua Andrea", "951", "1379"),
+            ("Contratantes", "465", "456"),
+            ("Admi", "753", "admin"),
+        ];
+
+        for (username, password, previous_password) in cases {
+            let account = accounts.iter().find(|account| account.username == username).unwrap();
+            assert!(verify_password(account, password), "credencial inicial invalida para {username}");
+            assert!(!verify_password(account, previous_password), "se acepto contraseña anterior para {username}");
+        }
+    }
+
+    #[test]
+    fn actualiza_la_clave_afiliados_en_semillas_anteriores() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("auth-accounts.json");
+        let raw = serde_json::json!([{
+            "username": "Afiliados",
+            "role": "afiliado",
+            "displayName": "Afiliados",
+            "password": "456"
+        }]);
+        std::fs::write(&path, raw.to_string()).unwrap();
+        let accounts = load_accounts(directory.path());
+
+        let account = accounts.iter().find(|account| account.username == "Contratantes").unwrap();
+        assert!(verify_password(account, "465"));
+        assert!(!verify_password(account, "456"));
+        assert!(!accounts.iter().any(|account| account.username == "Afiliados"));
+    }
+
+    #[tokio::test]
+    async fn login_acepta_contratantes_y_rechaza_el_nombre_anterior() {
+        let test = TestApp::new(None).await.unwrap();
+
+        let (status, _) = test
+            .post(
+                "/api/login",
+                r#"{"username":"Contratantes","password":"465"}"#,
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (old_status, _) = test
+            .post(
+                "/api/login",
+                r#"{"username":"Afiliados","password":"465"}"#,
+                None,
+            )
+            .await;
+        assert_eq!(old_status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn pairing_key_approves_persistently_and_rotation_does_not_revoke_devices() {
+        let test = TestApp::new(None).await.unwrap();
+        let request = |device_id: &str, code: &str| {
+            format!(
+                r#"{{"deviceId":"{device_id}","deviceName":"PC {device_id}","pairingCode":"{code}"}}"#
+            )
+        };
+
+        let (status, body) = test
+            .post(
+                "/api/device-access",
+                &request("client-one", "ABC123"),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["status"],
+            "approved"
+        );
+        let (login_status, _) = post_json(
+            &test.router,
+            "/api/login",
+            r#"{"username":"Contratantes","password":"465","device_id":"client-one","device_name":"PC client-one"}"#,
+            None,
+        )
+        .await;
+        assert_eq!(login_status, StatusCode::OK);
+
+        *test
+            .pairing_code
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some("NEW456".into());
+
+        let (existing_status, existing_body) = test
+            .post(
+                "/api/device-access",
+                &request("client-one", "ABC123"),
+                None,
+            )
+            .await;
+        assert_eq!(existing_status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&existing_body).unwrap()["status"],
+            "approved"
+        );
+        assert!(test
+            .server_state
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+            .any(|session| session.device_id == "client-one"));
+
+        let (old_code_status, old_code_body) = test
+            .post(
+                "/api/device-access",
+                &request("client-two", "ABC123"),
+                None,
+            )
+            .await;
+        assert_eq!(old_code_status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&old_code_body).unwrap()["status"],
+            "invalid_code"
+        );
+        let (unapproved_login_status, _) = post_json(
+            &test.router,
+            "/api/login",
+            r#"{"username":"Contratantes","password":"465","device_id":"client-two","device_name":"PC client-two"}"#,
+            None,
+        )
+        .await;
+        assert_eq!(unapproved_login_status, StatusCode::FORBIDDEN);
+
+        let (new_code_status, new_code_body) = test
+            .post(
+                "/api/device-access",
+                &request("client-two", "NEW456"),
+                None,
+            )
+            .await;
+        assert_eq!(new_code_status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&new_code_body).unwrap()["status"],
+            "approved"
+        );
+        assert_eq!(
+            load_device_access(&test.data_dir).unwrap()["client-one"].status,
+            DeviceAccessStatus::Approved
+        );
+
+        revoke_device_access(&test.server_state, "client-one").unwrap();
+        let (revoked_status, revoked_body) = test
+            .post(
+                "/api/device-access",
+                &request("client-one", "NEW456"),
+                None,
+            )
+            .await;
+        assert_eq!(revoked_status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&revoked_body).unwrap()["status"],
+            "revoked"
+        );
+        assert_eq!(
+            load_device_access(&test.data_dir).unwrap()["client-one"].status,
+            DeviceAccessStatus::Revoked
+        );
+        let (revoked_login_status, _) = post_json(
+            &test.router,
+            "/api/login",
+            r#"{"username":"Contratantes","password":"465","device_id":"client-one","device_name":"PC client-one"}"#,
+            None,
+        )
+        .await;
+        assert_eq!(revoked_login_status, StatusCode::FORBIDDEN);
+        assert!(test
+            .server_state
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+            .all(|session| session.device_id != "client-one"));
+    }
+
+    #[test]
+    fn generated_pairing_key_is_six_alphanumeric_characters() {
+        let code = generate_pairing_code();
+        assert_eq!(code.len(), 6);
+        assert!(code.chars().all(|character| character.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn limite_de_login_normaliza_mayusculas_y_espacios() {
+        let state = AppState {
+            accounts: Arc::new(Mutex::new(Vec::new())),
+            data_dir: std::path::PathBuf::new(),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            login_attempts: Arc::new(Mutex::new(HashMap::new())),
+            device_access: Arc::new(Mutex::new(HashMap::new())),
+            pairing_code: Arc::new(Mutex::new(None)),
+            pairing_attempts: Arc::new(Mutex::new(Vec::new())),
+        };
+        for _ in 0..5 {
+            record_failure(&state, "Contratantes");
+        }
+
+        assert_eq!(
+            check_rate_limit(&state, " contratantes "),
+            Err(StatusCode::TOO_MANY_REQUESTS)
+        );
+        assert!(check_rate_limit(&state, "Otro usuario").is_ok());
     }
 
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
@@ -3151,7 +4064,11 @@ mod tests {
         counter: usize,
         data_dir: std::path::PathBuf,
         router: Router,
+        server_state: AppState,
         accounts: Arc<Mutex<Vec<Account>>>,
+        sessions: Arc<Mutex<HashMap<String, Session>>>,
+        device_access: Arc<Mutex<HashMap<String, DeviceAccessRecord>>>,
+        pairing_code: Arc<Mutex<Option<String>>>,
         _phantom: std::marker::PhantomData<()>,
     }
 
@@ -3165,7 +4082,13 @@ mod tests {
             // Si se proporcionaron cuentas, escribirlas en el archivo de configuración
             if let Some(ref accounts) = accounts {
                 let raw = serde_json::to_string_pretty(accounts).unwrap();
-                let _ = fs::write(data_dir.join("auth-accounts.json"), raw);
+                fs::write(data_dir.join("auth-accounts.json"), raw)
+                    .map_err(|error| format!("No se pudieron escribir las cuentas de prueba: {error}"))?;
+                fs::write(
+                    data_dir.join(crate::auth_defaults::MIGRATION_MARKER),
+                    b"test fixture\n",
+                )
+                .map_err(|error| format!("No se pudo marcar la configuración de prueba: {error}"))?;
             }
 
             // Configurar SANATORIO_DATA_DIR para este test
@@ -3178,15 +4101,32 @@ mod tests {
             // Cargar cuentas
             let loaded = load_accounts(&data_dir);
             let accounts = Arc::new(Mutex::new(loaded));
+            let sessions = Arc::new(Mutex::new(HashMap::new()));
+            let now = unix_timestamp();
+            let device_access = Arc::new(Mutex::new(HashMap::from([(
+                "test-device".to_string(),
+                DeviceAccessRecord {
+                    device_id: "test-device".to_string(),
+                    device_name: "Equipo de prueba".to_string(),
+                    status: DeviceAccessStatus::Approved,
+                    first_seen: now,
+                    last_seen: now,
+                    approved_at: Some(now),
+                },
+            )])));
+            let pairing_code = Arc::new(Mutex::new(Some("ABC123".into())));
 
             let state = AppState {
                 accounts: accounts.clone(),
                 data_dir: data_dir.clone(),
-                sessions: Arc::new(Mutex::new(HashMap::new())),
+                sessions: sessions.clone(),
                 login_attempts: Arc::new(Mutex::new(HashMap::new())),
+                device_access: device_access.clone(),
+                pairing_code: pairing_code.clone(),
+                pairing_attempts: Arc::new(Mutex::new(Vec::new())),
             };
 
-            let router = build_router(state);
+            let router = build_router(state.clone());
 
             Ok(TestApp {
                 mutex: Arc::new(std::sync::Mutex::new(())),
@@ -3194,7 +4134,11 @@ mod tests {
                 counter,
                 data_dir,
                 router,
+                server_state: state,
                 accounts,
+                sessions,
+                device_access,
+                pairing_code,
                 _phantom: std::marker::PhantomData,
             })
         }
@@ -3220,7 +4164,10 @@ mod tests {
             let (status, body) = post_json(
                 &self.router,
                 "/api/login",
-                &format!(r#"{{"username":"{}","password":"{}"}}"#, username, password),
+                &format!(
+                    r#"{{"username":"{}","password":"{}","device_id":"test-device","device_name":"Equipo de prueba"}}"#,
+                    username, password
+                ),
                 None,
             )
             .await;
@@ -3249,6 +4196,38 @@ mod tests {
         }
 
         pub async fn post(&self, uri: &str, body: &str, token: Option<&str>) -> (StatusCode, String) {
+            if uri == "/api/login" {
+                if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(body) {
+                    let device_id = value
+                        .get("device_id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("test-device")
+                        .to_string();
+                    let device_name = value
+                        .get("device_name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("Equipo de prueba")
+                        .to_string();
+                    value["device_id"] = serde_json::Value::String(device_id.clone());
+                    value["device_name"] = serde_json::Value::String(device_name.clone());
+                    if let Ok(raw) = serde_json::to_string(&value) {
+                        let now = unix_timestamp();
+                        self.device_access
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .entry(device_id.clone())
+                            .or_insert(DeviceAccessRecord {
+                                device_id,
+                                device_name,
+                                status: DeviceAccessStatus::Approved,
+                                first_seen: now,
+                                last_seen: now,
+                                approved_at: Some(now),
+                            });
+                        return post_json(&self.router, uri, &raw, token).await;
+                    }
+                }
+            }
             post_json(&self.router, uri, body, token).await
         }
 
@@ -3262,6 +4241,73 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.data_dir);
             let _ = env::remove_var("SANATORIO_DATA_DIR");
         }
+    }
+
+    #[test]
+    fn dispositivos_conectados_solo_incluye_sesiones_con_actividad_reciente() {
+        let now = Instant::now();
+        let active = Session {
+            username: "Ana".to_string(),
+            role: "admin".to_string(),
+            display_name: "Ana".to_string(),
+            must_change_password: false,
+            expiry: now + Duration::from_secs(3600),
+            device_id: "device-1".to_string(),
+            device_name: "Recepcion-1".to_string(),
+            connected_at: 100,
+            last_seen: 200,
+            last_activity: now,
+        };
+        let inactive = Session {
+            device_id: "device-2".to_string(),
+            device_name: "Recepcion-2".to_string(),
+            last_activity: now - Duration::from_secs(90),
+            ..active.clone()
+        };
+        let expired = Session {
+            device_id: "device-3".to_string(),
+            device_name: "Recepcion-3".to_string(),
+            expiry: now - Duration::from_secs(1),
+            ..active.clone()
+        };
+        let sessions = HashMap::from([
+            ("token-1".to_string(), active),
+            ("token-2".to_string(), inactive),
+            ("token-3".to_string(), expired),
+        ]);
+
+        let devices = connected_devices_from_sessions(&sessions, now);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].device_id, "device-1");
+        assert_eq!(devices[0].device_name, "Recepcion-1");
+        assert_eq!(devices[0].username, "Ana");
+    }
+
+    #[tokio::test]
+    async fn heartbeat_requiere_una_sesion_autenticada() {
+        let test = TestApp::new(Some(cuentas_estandar())).await.unwrap();
+        assert_eq!(
+            test.get("/api/session/heartbeat", None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+
+        let (login_status, login_body) = test
+            .post(
+                "/api/login",
+                r#"{"username":"Admin","password":"admin123","device_id":"test-device","device_name":"Test PC"}"#,
+                None,
+            )
+            .await;
+        assert_eq!(login_status, StatusCode::OK, "{login_body}");
+        let token = serde_json::from_str::<serde_json::Value>(&login_body).unwrap()["token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(!token.is_empty());
+        assert_eq!(
+            test.get("/api/session/heartbeat", Some(&token)).await.0,
+            StatusCode::OK
+        );
     }
 
     #[tokio::test]

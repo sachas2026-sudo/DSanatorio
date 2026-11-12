@@ -1,9 +1,11 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 import {
   ensureAuthAccountsLoaded,
   authenticate,
   formatLoginRateLimitMessage,
   getEffectiveAccounts,
+  getLoginUserOptions,
+  getLoginUserOptionsForInstallProfile,
   resetAuthAccountsCacheForTests,
   revalidateStoredSession,
   storeSession,
@@ -61,6 +63,58 @@ describe('authenticate rate limit', () => {
     localStorage.clear()
     resetAuthAccountsCacheForTests()
     await ensureAuthAccountsLoaded()
+  })
+
+  it('acepta las credenciales iniciales acordadas', async () => {
+    const credentials = [
+      ['Aguirre Mary', '789', 'secretaria'],
+      ['Barua Andrea', '951', 'secretaria'],
+      ['Contratantes', '465', 'afiliado'],
+      ['Admi', '753', 'admin'],
+    ] as const
+
+    for (const [username, password, role] of credentials) {
+      const result = await authenticate(username, password)
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.session.role).toBe(role)
+    }
+  })
+
+  it('rechaza los usuarios y las contraseñas anteriores', async () => {
+    const obsoleteCredentials = [
+      ['Afiliados', '465'],
+      ['Contratantes', '456'],
+      ['Aguirre Mary', '123'],
+      ['Barua Andrea', '1379'],
+      ['Admi', 'admin'],
+    ] as const
+
+    for (const [username, password] of obsoleteCredentials) {
+      expect((await authenticate(username, password)).ok).toBe(false)
+    }
+  })
+
+  it('limita los usuarios de ingreso al rol del perfil instalado', () => {
+    expect(getLoginUserOptions('secretaria')).toEqual([
+      'Aguirre Mary',
+      'Barua Andrea',
+    ])
+    expect(getLoginUserOptions('afiliado')).toEqual(['Contratantes'])
+    expect(getLoginUserOptions('admin')).toEqual(['Admi'])
+  })
+
+  it('no expone cuentas si el perfil instalado falta o no es válido', () => {
+    expect(getLoginUserOptionsForInstallProfile(null)).toEqual([])
+    expect(getLoginUserOptionsForInstallProfile('desconocido')).toEqual([])
+  })
+
+  it('limita las cuentas visibles al perfil exacto de instalación', () => {
+    expect(getLoginUserOptionsForInstallProfile('server')).toEqual([
+      'Aguirre Mary',
+      'Barua Andrea',
+    ])
+    expect(getLoginUserOptionsForInstallProfile('contratantes')).toEqual(['Contratantes'])
+    expect(getLoginUserOptionsForInstallProfile('administracion')).toEqual(['Admi'])
   })
 
   it('bloquea tras varios intentos fallidos', async () => {

@@ -1,1 +1,0 @@
-import{gr as e}from"./index-D43tHSNC.js";function t(t,n){let r=e(t,n?.in);return r.setHours(23,59,59,999),r}function n(t,n){let r=e(t,n?.in),i=r.getFullYear();return r.setFullYear(i+1,0,0),r.setHours(23,59,59,999),r}function r(t,n,r){let i=+e(t,r?.in),[a,o]=[+e(n.start,r?.in),+e(n.end,r?.in)].sort((e,t)=>e-t);return i>=a&&i<=o}export{n,t as r,r as t};

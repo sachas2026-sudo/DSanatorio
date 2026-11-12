@@ -240,12 +240,11 @@ export function calcularResumenMensual(params: ResumenMensualParams): ResumenMen
       const turno = getTurnoFromFecha(a.fechaHora)
 
       // Monto adeudado sugerido según reglas vigentes
-      const resMonto = calcularMontoSugerido({
-        doctor: doc,
-        cobertura: os,
-        obrasSocialesCatalog,
-      })
-      const montoAdeudado = Math.max(0, resMonto.montoCalculado ?? (doc?.particular || 0))
+      const resMonto = calcularMontoSugerido(doc, os)
+      const montoAdeudado = Math.max(
+        0,
+        resMonto.origen === 'ok' ? resMonto.monto : (doc?.particular || 0),
+      )
 
       turnosSinPagar.push({
         id: a.id,

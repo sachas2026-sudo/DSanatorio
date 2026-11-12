@@ -17,12 +17,14 @@ describe('registroProfesionalLogic', () => {
       expect(formatThousands('1000')).toBe('1.000')
       expect(formatThousands('100000')).toBe('100.000')
       expect(formatThousands('1234567')).toBe('1.234.567')
+      expect(formatThousands('9999999')).toBe('9.999.999')
       expect(formatThousands('')).toBe('')
     })
 
     it('parsea montos con separadores a enteros', () => {
       expect(parseThousands('100.000')).toBe(100000)
       expect(parseThousands('$ 100.000')).toBe(100000)
+      expect(parseThousands('9.999.999')).toBe(9999999)
       expect(parseThousands('0')).toBe(0)
       expect(parseThousands('')).toBe(0)
       expect(parseThousands(undefined)).toBe(0)
@@ -68,43 +70,46 @@ describe('registroProfesionalLogic', () => {
       expect(res.summaryMessage).toBeUndefined()
     })
 
-    it('falla si falta apellido, nombre, dni o especialidad', () => {
+    it('falla sólo si falta apellido o nombre', () => {
       const res = validateDoctorForm({
         apellido: '',
         nombre: '',
         dni: '',
         especialidad: '',
-        telefono: '123',
-      })
-      expect(res.isValid).toBe(false)
-      expect(res.errors.apellido).toBe(true)
-      expect(res.errors.nombre).toBe(true)
-      expect(res.errors.dni).toBe(true)
-      expect(res.errors.especialidad).toBe(true)
-      expect(res.summaryMessage).toBe('Revisá los campos marcados en rojo')
-    })
-
-    it('falla si no tiene ni teléfono ni email', () => {
-      const res = validateDoctorForm({
-        apellido: 'Pérez',
-        nombre: 'Juan',
-        dni: '12345678',
-        especialidad: 'Cardiología',
         telefono: '',
         email: '',
       })
       expect(res.isValid).toBe(false)
-      expect(res.errors.telefono).toBe(true)
-      expect(res.errors.email).toBe(true)
+      expect(res.errors.apellido).toBe(true)
+      expect(res.errors.nombre).toBe(true)
+      expect(res.errors.dni).toBeUndefined()
+      expect(res.errors.especialidad).toBeUndefined()
+      expect(res.errors.telefono).toBeUndefined()
+      expect(res.errors.email).toBeUndefined()
+      expect(res.summaryMessage).toBe('Revisá los campos marcados en rojo')
+    })
+
+    it('acepta los datos opcionales vacíos con apellido y nombre', () => {
+      const res = validateDoctorForm({
+        apellido: 'Pérez',
+        nombre: 'Juan',
+        dni: '',
+        especialidad: '',
+        telefono: '',
+        email: '',
+      })
+      expect(res.isValid).toBe(true)
+      expect(res.errors).toEqual({})
+      expect(res.summaryMessage).toBeUndefined()
     })
 
     it('falla si el email tiene formato inválido', () => {
       const res = validateDoctorForm({
         apellido: 'Pérez',
         nombre: 'Juan',
-        dni: '12345678',
-        especialidad: 'Cardiología',
-        telefono: '123',
+        dni: '',
+        especialidad: '',
+        telefono: '',
         email: 'invalido',
       })
       expect(res.isValid).toBe(false)

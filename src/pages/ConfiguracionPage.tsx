@@ -30,6 +30,7 @@ import { getAppDataFilePath } from '../lib/appStorage'
 import { formatBackupSize } from '../lib/formatBackupSize'
 import { getInstallInfo, type InstallInfo } from '../lib/installInfo'
 import { canAccessConfiguracion } from '../lib/exportPermissions'
+import { NetworkSettingsPanel } from '../shared/components/NetworkSettingsPanel'
 import './pages.css'
 
 function backupWhenLabel(modifiedMs?: number): string {
@@ -474,6 +475,8 @@ export function ConfiguracionPage() {
       <header className="page-header">
         <h1>Configuración</h1>
       </header>
+
+      <NetworkSettingsPanel />
 
       <div className={esAdmi ? 'config-top-row' : 'config-top-row config-top-row--simple'}>
         <div className={esAdmi ? 'config-top-col' : 'config-top-col config-top-col--solo'}>

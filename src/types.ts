@@ -76,11 +76,11 @@ export interface Doctor {
   /** false = suspendido (no aparece en listas operativas; historial intacto). */
   activo?: boolean
   /** Monto en pesos (entero no negativo). */
-  valor?: number
+  valor?: number | null
   /** Monto en pesos (entero no negativo). */
-  particular?: number
+  particular?: number | null
   /** Monto en pesos que se queda el centro dentro de "particular" (entero no negativo). */
-  cuidar?: number
+  cuidar?: number | null
 }
 
 /** Día puntual de atención (médicos que vienen una vez al mes o fechas especiales). */

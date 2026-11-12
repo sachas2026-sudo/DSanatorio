@@ -503,6 +503,44 @@ A continuación se tabla el cruce entre los `#[tauri::command]` reales en el có
 | `get_google_drive_config` | ✅ Comando listado | ✅ Está en `commands.allow` | Ninguna |
 | `registrar_contratante_con_paciente_nuevo` | ✅ En `configuracion` modules | ✅ Está en `commands.allow` | Ninguna |
 
+---
+Reparación LAN v22
+---
+
+La configuración persistida (`serverUrl` y `serverCertPem`) tiene prioridad y no se borra por fallos de red. El cliente no cambia automáticamente a otra IP cuando falla el servidor configurado. Si no hay dirección, la búsqueda UDP 8788 solo presenta candidatos; nunca adopta ni guarda automáticamente el certificado recibido por UDP.
+
+El cliente exige HTTPS y una identidad TLS verificada. Para la primera confianza en un certificado autofirmado, comparar la huella SHA-256 que muestra el servidor con la recibida por un canal independiente, introducirla en el cliente y verificar que el certificado también cubra la IP/DNS y que `/api/health` responda. No se envían credenciales durante esta comprobación.
+
+En Windows, las reglas de instalación permiten únicamente TCP 8787 y UDP 8788 en perfil **Privado** y desde `LocalSubnet`; se eliminó la regla general de programa. Confirmar que la red esté clasificada como Privada y que los clientes no estén aislados por el punto de acceso Wi-Fi. El servicio escucha en `0.0.0.0:8787`; los errores de TLS, bind, UDP y firewall quedan registrados, no se presentan como conexión operativa.
+
+La fecha de última comunicación correcta se mantiene durante la ejecución actual. Los eventos persistidos en `Erroes.log` son categorías técnicas acotadas (sin URL, credenciales, tokens ni datos clínicos).
+
+### Configuración → Red y conexión
+
+- En modo Servidor se muestran las interfaces LAN detectadas, excluyendo loopback y adaptadores virtuales conocidos. Se puede seleccionar y guardar una IP principal; TCP 8787 se confirma por HTTPS/API antes de copiar su dirección completa.
+- En modo Servidor se muestra la huella TLS SHA-256 y se puede copiar el certificado público para transferirlo por un canal independiente cuando UDP no esté disponible.
+- En modo Cliente se pueden ingresar IP/host y puerto HTTPS. **Verificar y guardar** comprueba TLS y `/api/health` antes de persistir; si falla, conserva la configuración anterior. Para un certificado autofirmado nuevo, pegar el PEM y confirmar la huella mostrada en la PC servidor.
+- La búsqueda UDP muestra candidatos y sus huellas, pero no confía en ellos automáticamente ni reemplaza por sí sola el servidor configurado. El puerto del servidor permanece en 8787.
+- El certificado cubre las IP LAN presentes al iniciar el servidor. Si una interfaz cambia de IP mientras SANAR está abierto y TLS deja de validar, reiniciar el servidor para renovar el certificado antes de seleccionar/copiar la nueva dirección.
+
+### Instalación cliente y pantalla previa al login
+
+- En una instalación cliente nueva, NSIS permite elegir descubrimiento automático o IP/puerto manual. La dirección se guarda en `%APPDATA%\Sanatorio\client-config.json`, el mismo archivo que usa la aplicación. Una actualización no reemplaza un archivo existente.
+- Antes de enviar usuario o contraseña, el cliente comprueba el servidor guardado. Si está desconectado, el botón permanente **Configurar conexión** permite editar la dirección, buscar candidatos UDP y verificar TLS/API sin iniciar sesión ni acceder a datos.
+- La configuración manual de un servidor autofirmado exige el PEM y la huella SHA-256 confirmada por un canal independiente. Un certificado/huella distintos o un health check fallido no reemplazan la configuración anterior.
+- Los scripts heredados de PC2/PC3 también validan la huella y HTTPS/API antes de reemplazar la configuración; si la validación falla, mantienen el archivo previo.
+
+### Prueba desde dos PCs
+
+1. En la PC servidor, iniciar SANAR y confirmar que el indicador muestre la API local operativa y una IP LAN.
+2. Desde el panel de red del servidor, anotar la huella SHA-256 y, si hace falta, copiar el certificado público. Transferir ambos por un canal administrativo independiente.
+3. En cada cliente, guardar `IP_DEL_SERVIDOR:8787`. Si UDP no descubre el servidor, introducir el PEM recibido y confirmar la huella independiente.
+4. Antes del login, verificar que el estado de conexión sea operativo; con credenciales vacías debe ser posible configurar y probar el transporte.
+5. Iniciar sesión desde dos clientes; reiniciar uno y luego el servidor; confirmar que se conserva URL/certificado y que el cliente vuelve a operar en solicitudes posteriores a la recuperación.
+6. Repetir temporalmente con UDP bloqueado (TCP debe funcionar con dirección y PEM guardados) y con TCP bloqueado (diagnóstico debe identificar el fallo). Restaurar las reglas después de cada prueba.
+
+Las pruebas locales no validan el firewall real, el aislamiento Wi-Fi, reinicios entre equipos ni el uso simultáneo en la LAN del sanatorio; esos pasos requieren ejecutar el procedimiento en dos o más PCs autorizadas.
+
 **Resumen de la tabla:**
 - **Total de comandos en `allow-sanatorio-commands`:** 55
 - **Comandos con `#[tauri::command]` confirmado en el código:** 40

@@ -2,7 +2,8 @@
 mod obras_sociales_tests {
     use crate::modules::configuracion::dto::{Doctor, ObraSocialCatalog, ObraSocialWriteResult};
     use crate::modules::configuracion::repository::{
-        delete_obra_social, load_obras_sociales, save_doctors, save_obra_social_single,
+        delete_obra_social, load_doctors, load_obras_sociales, save_doctors,
+        save_obra_social_single,
     };
     use rusqlite::Connection;
     use std::env;
@@ -136,9 +137,9 @@ mod obras_sociales_tests {
             duracion_turno_minutos: Some(30),
             tipo_agenda: Some("semanal".into()),
             activo: Some(true),
-            valor: 0,
-            particular: 0,
-            cuidar: 0,
+            valor: Some(0),
+            particular: Some(0),
+            cuidar: Some(0),
         };
         let tx = conn.unchecked_transaction().unwrap();
         save_doctors(&tx, &[doc]).unwrap();
@@ -186,6 +187,62 @@ mod obras_sociales_tests {
         assert_eq!(loaded.suspendida, true);
         assert_eq!(loaded.plus, 8000);
         assert_eq!(loaded.arancel, 12000);
+    }
+
+    #[test]
+    fn test_doctor_honorarios_vacios_se_persisten_como_null() {
+        let (conn, _guard) = temp_db();
+        let doc = Doctor {
+            id: "doc-empty-fees".into(),
+            nombre: "Ana".into(),
+            apellido: "Pérez".into(),
+            dni: "".into(),
+            matricula: "".into(),
+            especialidad: "".into(),
+            obra_social: Some("".into()),
+            obras_sociales: None,
+            telefono: "".into(),
+            localidad: "".into(),
+            email: "".into(),
+            alias: Some("".into()),
+            porcentaje: None,
+            duracion_turno_minutos: Some(30),
+            tipo_agenda: Some("semanal".into()),
+            activo: Some(true),
+            valor: None,
+            particular: None,
+            cuidar: None,
+        };
+        let filled = Doctor {
+            id: "doc-filled-fees".into(),
+            porcentaje: Some(15.0),
+            valor: Some(25000),
+            particular: Some(30000),
+            cuidar: Some(500),
+            ..doc.clone()
+        };
+        let tx = conn.unchecked_transaction().unwrap();
+        save_doctors(&tx, &[doc, filled]).unwrap();
+        tx.commit().unwrap();
+
+        let loaded = load_doctors(&conn).unwrap();
+        assert_eq!(loaded.len(), 2);
+        let empty = loaded
+            .iter()
+            .find(|doctor| doctor.id == "doc-empty-fees")
+            .unwrap();
+        assert_eq!(empty.porcentaje, None);
+        assert_eq!(empty.valor, None);
+        assert_eq!(empty.particular, None);
+        assert_eq!(empty.cuidar, None);
+        let filled = loaded
+            .iter()
+            .find(|doctor| doctor.id == "doc-filled-fees")
+            .unwrap();
+        assert_eq!(filled.porcentaje, Some(15.0));
+        assert_eq!(filled.valor, Some(25000));
+        assert_eq!(filled.particular, Some(30000));
+        assert_eq!(filled.cuidar, Some(500));
     }
 }
 

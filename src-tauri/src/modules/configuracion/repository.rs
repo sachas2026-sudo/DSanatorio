@@ -183,7 +183,16 @@ pub fn save_patients(tx: &Transaction<'_>, patients: &[Patient]) -> Result<(), A
 }
 
 pub fn load_doctors(conn: &Connection) -> Result<Vec<Doctor>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, nombre, apellido, dni, matricula, especialidad, obra_social, obras_sociales_json, telefono, localidad, email, alias, porcentaje, duracion_turno_minutos, tipo_agenda, activo, COALESCE(valor, 0), COALESCE(particular, 0), COALESCE(cuidar, 0) FROM doctors")?;
+    let mut stmt = conn.prepare(
+        "SELECT d.id, d.nombre, d.apellido, d.dni, d.matricula, d.especialidad, d.obra_social, d.obras_sociales_json, d.telefono, d.localidad, d.email, d.alias,
+                CASE WHEN h.doctor_id IS NULL THEN d.porcentaje ELSE h.porcentaje END,
+                d.duracion_turno_minutos, d.tipo_agenda, d.activo,
+                CASE WHEN h.doctor_id IS NULL THEN d.valor ELSE h.valor END,
+                CASE WHEN h.doctor_id IS NULL THEN d.particular ELSE h.particular END,
+                CASE WHEN h.doctor_id IS NULL THEN d.cuidar ELSE h.cuidar END
+         FROM doctors d
+         LEFT JOIN doctor_honorarios h ON h.doctor_id = d.id"
+    )?;
     let rows = stmt.query_map([], |row| {
         let obras_sociales_json: String = row.get(7)?;
         let obras_sociales: Option<Vec<DoctorObraSocial>> = serde_json::from_str(&obras_sociales_json).ok();
@@ -200,7 +209,7 @@ pub fn load_doctors(conn: &Connection) -> Result<Vec<Doctor>, AppError> {
             localidad: row.get(9)?,
             email: row.get(10)?,
             alias: Some(row.get(11)?),
-            porcentaje: Some(row.get(12)?),
+            porcentaje: row.get(12)?,
             duracion_turno_minutos: Some(row.get(13)?),
             tipo_agenda: Some(row.get(14)?),
             activo: Some(row.get::<_, i32>(15)? != 0),
@@ -221,6 +230,10 @@ pub fn save_doctors(tx: &Transaction<'_>, doctors: &[Doctor]) -> Result<(), AppE
     let mut stmt = tx.prepare(
         "INSERT OR REPLACE INTO doctors (id, nombre, apellido, dni, matricula, especialidad, obra_social, obras_sociales_json, telefono, localidad, email, alias, porcentaje, duracion_turno_minutos, tipo_agenda, activo, valor, particular, cuidar)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"
+    )?;
+    let mut honorarios_stmt = tx.prepare(
+        "INSERT OR REPLACE INTO doctor_honorarios (doctor_id, porcentaje, valor, particular, cuidar)
+         VALUES (?1, ?2, ?3, ?4, ?5)"
     )?;
 
     for d in doctors {
@@ -243,6 +256,13 @@ pub fn save_doctors(tx: &Transaction<'_>, doctors: &[Doctor]) -> Result<(), AppE
             d.duracion_turno_minutos.unwrap_or(30),
             d.tipo_agenda.clone().unwrap_or_else(|| "semanal".to_string()),
             activo_val,
+            d.valor.unwrap_or(0),
+            d.particular.unwrap_or(0),
+            d.cuidar.unwrap_or(0)
+        ])?;
+        honorarios_stmt.execute(params![
+            d.id,
+            d.porcentaje,
             d.valor,
             d.particular,
             d.cuidar

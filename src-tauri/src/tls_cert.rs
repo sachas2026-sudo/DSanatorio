@@ -40,10 +40,14 @@ pub fn parse_tls_names(texto: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// Lista final de nombres del certificado: siempre `localhost` y `127.0.0.1`
-/// primero, después los extras, sin duplicados.
+/// Lista estable de nombres TLS del servidor. El nombre de red no depende de
+/// las interfaces locales, por lo que cambiar la IP no cambia la identidad.
 pub fn desired_names(extra: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+    let mut out: Vec<String> = vec![
+        "sanatorio-server.local".to_string(),
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+    ];
     for name in extra {
         if !out.iter().any(|existing| existing.eq_ignore_ascii_case(name)) {
             out.push(name.clone());
@@ -113,12 +117,16 @@ mod tests {
 
     #[test]
     fn desired_siempre_incluye_localhost_y_loopback() {
-        assert_eq!(desired_names(&[]), vec!["localhost", "127.0.0.1"]);
+        assert_eq!(
+            desired_names(&[]),
+            vec!["sanatorio-server.local", "localhost", "127.0.0.1"]
+        );
     }
 
     #[test]
     fn desired_no_duplica_los_base_ni_los_extras() {
         let extra = vec![
+            "SANATORIO-SERVER.LOCAL".to_string(),
             "LOCALHOST".to_string(),
             "127.0.0.1".to_string(),
             "192.168.1.50".to_string(),
@@ -126,7 +134,7 @@ mod tests {
         ];
         assert_eq!(
             desired_names(&extra),
-            vec!["localhost", "127.0.0.1", "192.168.1.50"]
+            vec!["sanatorio-server.local", "localhost", "127.0.0.1", "192.168.1.50"]
         );
     }
 }

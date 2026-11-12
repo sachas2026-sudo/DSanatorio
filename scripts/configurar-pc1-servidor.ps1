@@ -16,13 +16,16 @@ if (-not $ip) {
 
 Write-Host "IP del servidor: $ip" -ForegroundColor Yellow
 
-# 2. Configurar Firewall para el puerto 8787 (HTTPS)
+# 2. Configurar reglas de firewall limitadas al perfil privado y la subred local
 Write-Host "Configurando Firewall..." -ForegroundColor Cyan
 New-NetFirewallRule -DisplayName "Sanatorio API HTTPS" `
     -Direction Inbound -Protocol TCP -LocalPort 8787 -Action Allow `
-    -ErrorAction SilentlyContinue | Out-Null
+    -Profile Private -RemoteAddress LocalSubnet -ErrorAction SilentlyContinue | Out-Null
+New-NetFirewallRule -DisplayName "Sanatorio Discovery UDP" `
+    -Direction Inbound -Protocol UDP -LocalPort 8788 -Action Allow `
+    -Profile Private -RemoteAddress LocalSubnet -ErrorAction SilentlyContinue | Out-Null
 
-Write-Host "Firewall configurado (puerto 8787)" -ForegroundColor Green
+Write-Host "Firewall limitado a red local (TCP 8787 / UDP 8788, perfil Privado)" -ForegroundColor Green
 
 # 3. Crear carpeta TLS y agregar la IP a names.txt
 $tlsDir = "$env:APPDATA\Sanatorio\config\tls"

@@ -259,6 +259,36 @@
   min-width: 0;
 }
 
+.nt-paciente-input--selected {
+  padding-right: 42px;
+}
+
+.nt-paciente-clear {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--nt-text-muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.nt-paciente-clear:hover {
+  color: var(--nt-text-main);
+  background: var(--nt-bg-hover);
+}
+
 .nt-btn-new-paciente {
   height: 38px;
   padding: 0 12px;
@@ -415,6 +445,21 @@
   width: 100%;
 }
 
+.nt-monto-input--flash {
+  animation: nt-monto-flash 650ms ease-out;
+}
+
+@keyframes nt-monto-flash {
+  from {
+    background-color: #DCFCE7;
+    box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18);
+  }
+  to {
+    background-color: var(--nt-bg-modal);
+    box-shadow: none;
+  }
+}
+
 /* Avisos de Monto */
 .nt-monto-notice {
   font-size: 12px;
@@ -448,6 +493,13 @@
   border: 1px solid #E2E8F0;
 }
 
+.nt-monto-notice--sin-monto {
+  background: #FEF3C7;
+  color: #92400E;
+  border: 1px solid #FDE68A;
+  font-weight: 600;
+}
+
 [data-theme='dark'] .nt-monto-notice--automatic-plus,
 [data-theme='dark'] .nt-monto-notice--automatic-particular {
   background: #064E3B;
@@ -465,6 +517,12 @@
   background: #1E293B;
   color: #94A3B8;
   border-color: #334155;
+}
+
+[data-theme='dark'] .nt-monto-notice--sin-monto {
+  background: #422006;
+  color: #FDE68A;
+  border-color: #854D0E;
 }
 
 .nt-btn-usar-sugerido {
@@ -964,77 +1022,66 @@
   gap: 8px;
 }
 
-.nt-side-pill__footer {
-  padding: 6px 12px;
-  background: #F8FAFC;
-  border-top: 1px solid var(--nt-border-light);
-  font-size: 10px;
-  color: var(--nt-text-muted);
-  font-weight: 600;
+.nt-medicos-search {
   flex: none;
-}
-
-[data-theme='dark'] .nt-side-pill__footer {
-  background: #111C2E;
-}
-
-/* Fila en pastilla de Obras Sociales (Plus editable) */
-.nt-pill-os-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 3px 0;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--nt-border-light);
 }
 
-.nt-pill-os-name {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--nt-text-main);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-}
-
-.nt-pill-os-input-wrap {
+.nt-medicos-search__field {
   position: relative;
-  width: 90px;
-  flex: none;
 }
 
-.nt-pill-os-prefix {
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--nt-text-muted);
-  pointer-events: none;
-}
-
-.nt-pill-os-input {
+.nt-medicos-search__field input {
   width: 100%;
-  height: 28px;
+  height: 32px;
   border: 1px solid var(--nt-border);
-  border-radius: 6px;
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 700;
-  text-align: right;
-  padding: 0 6px 0 16px;
+  border-radius: 7px;
+  padding: 0 32px 0 9px;
   box-sizing: border-box;
   color: var(--nt-text-main);
   background: var(--nt-bg-modal);
+  font: inherit;
+  font-size: 11.5px;
   outline: none;
-  transition: all 0.12s ease;
 }
 
-.nt-pill-os-input:focus {
+.nt-medicos-search__field input:focus {
   border-color: var(--nt-accent-blue);
-  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.16);
+}
+
+.nt-medicos-search__clear {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  transform: translateY(-50%);
+  border: 0;
+  padding: 0 3px;
+  color: var(--nt-text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.nt-medicos-search__count {
+  margin-top: 5px;
+  color: var(--nt-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.nt-side-pill__body--medicos {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
+.nt-medicos-empty {
+  padding: 8px 0;
+  color: var(--nt-text-muted);
+  font-size: 11px;
 }
 
 /* Fila en pastilla de Médicos y Coberturas */
@@ -1044,6 +1091,25 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  width: 100%;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  color: var(--nt-text-main);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.nt-pill-med-item:hover {
+  background: var(--nt-bg-hover);
+}
+
+.nt-pill-med-item--selected {
+  background: var(--nt-bg-header);
+  border-bottom-color: var(--nt-primary);
 }
 
 .nt-pill-med-name {
@@ -1053,8 +1119,31 @@
 }
 
 .nt-pill-med-coberturas {
-  font-size: 10.5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.nt-pill-med-chip {
+  padding: 2px 6px;
+  border: 1px solid var(--nt-border-light);
+  border-radius: 6px;
   color: var(--nt-text-muted);
-  font-weight: 600;
+  background: var(--nt-bg-pill);
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1.3;
+}
+
+.nt-pill-med-chip--selected {
+  border-color: var(--nt-primary);
+  color: #FFFFFF;
+  background: var(--nt-primary);
+}
+
+.nt-pill-med-empty {
+  color: var(--nt-text-muted);
+  font-size: 11px;
+  font-weight: 600;
 }

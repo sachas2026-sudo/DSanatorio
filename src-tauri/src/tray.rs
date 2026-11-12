@@ -21,6 +21,8 @@ fn get_network_status_label() -> String {
         mode: AppMode::Local,
         server_url: None,
         server_cert_pem: None,
+        server_primary_ip: None,
+        device_id: None,
     });
 
     if cfg.mode == AppMode::Local {
@@ -98,8 +100,17 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 MENU_ID_RECONNECT => {
                     let handle = app_handle.clone();
                     std::thread::spawn(move || {
-                        if let Ok(srv) = tauri::async_runtime::block_on(crate::discovery::auto_connect_sanatorio_server()) {
-                            log::info!("Reconectado a servidor: {}", srv.server_url);
+                        match tauri::async_runtime::block_on(
+                            crate::discovery::get_network_connection_status(),
+                        ) {
+                            Ok(status) => log::info!(
+                                "Comprobación de conexión del menú: {} ({})",
+                                status.server_name,
+                                status.message
+                            ),
+                            Err(error) => {
+                                log::warn!("No se pudo comprobar la conexión desde el menú: {error}")
+                            }
                         }
                         if let Some(win) = handle.get_webview_window("main") {
                             let _ = win.eval("window.location.reload()");

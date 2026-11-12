@@ -9,6 +9,7 @@ import {
   parsePorcentajeAr,
   normalizeSearchText,
 } from '../../../lib/obrasSocialesCatalog'
+import { IconEdit } from '../../../shared/components/icons'
 import './obras-sociales-modal.css'
 
 interface Props {
@@ -19,8 +20,25 @@ interface Props {
   onRename?: (anterior: string, nuevo: string) => { ok: boolean; error?: string }
 }
 
-export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
-  const { data, obrasSocialesCatalog, saveObraSocialCatalog, deleteObraSocialCatalog } = useAppState()
+type PercentageField = 'cuidar' | 'impBanco' | 'impFactura' | 'gastosAdm'
+
+function parseBulkPercentage(raw: string): number | null {
+  const normalized = raw.trim().replace(',', '.')
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) return null
+  const value = Number(normalized)
+  if (!Number.isFinite(value) || value < 0 || value > 100) return null
+  return Math.round(value * 100)
+}
+
+export function ObrasSocialesModal({ onClose, onAdd, onRemove, onRename }: Props) {
+  const {
+    data,
+    obrasSocialesCatalog,
+    saveObraSocialCatalog,
+    saveObrasSocialesCatalog,
+    renameObraSocialCustom,
+    deleteObraSocialCatalog,
+  } = useAppState()
   // Sólo el administrador ve y edita Arancel, % Cuidar e impuestos/gastos.
   const { role } = useAuth()
   const esAdmin = role === 'admin'
@@ -41,6 +59,24 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
 
   // Estados locales de inputs en edición para no perder lo que escribe el usuario antes de blur
   const [inputValues, setInputValues] = useState<Record<string, string>>({})
+  const [editingNameFor, setEditingNameFor] = useState<string | null>(null)
+  const [editedName, setEditedName] = useState('')
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkValues, setBulkValues] = useState<Record<PercentageField, string>>({
+    cuidar: '',
+    impBanco: '',
+    impFactura: '',
+    gastosAdm: '',
+  })
+  const [bulkInvalid, setBulkInvalid] = useState<Partial<Record<PercentageField, boolean>>>({})
+  const [overwriteExisting, setOverwriteExisting] = useState(false)
+  const [bulkNotice, setBulkNotice] = useState('')
+  const [canUndoBulk, setCanUndoBulk] = useState(false)
+  const [highlightedCells, setHighlightedCells] = useState<Set<string>>(new Set())
+  const bulkCuidarRef = useRef<HTMLInputElement | null>(null)
+  const bulkUndoRef = useRef<{ before: ObraSocialCatalog[]; fields: PercentageField[] } | null>(null)
+  const bulkNoticeTimer = useRef<number | null>(null)
+  const bulkHighlightTimer = useRef<number | null>(null)
 
   // Cerrar con Escape
   useEffect(() => {
@@ -50,6 +86,15 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  useEffect(() => {
+    if (bulkOpen) bulkCuidarRef.current?.focus()
+  }, [bulkOpen])
+
+  useEffect(() => () => {
+    if (bulkNoticeTimer.current) clearTimeout(bulkNoticeTimer.current)
+    if (bulkHighlightTimer.current) clearTimeout(bulkHighlightTimer.current)
+  }, [])
 
   // Temporizador para feedback de "Guardado"
   const savedTimeoutRef = useRef<number | null>(null)
@@ -196,6 +241,136 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
     }
   }
 
+  const bulkFields: PercentageField[] = ['cuidar', 'impBanco', 'impFactura', 'gastosAdm']
+
+  function showBulkNotice(message: string, undo = false) {
+    setBulkNotice(message)
+    setCanUndoBulk(undo)
+    if (bulkNoticeTimer.current) clearTimeout(bulkNoticeTimer.current)
+    if (undo) {
+      bulkNoticeTimer.current = window.setTimeout(() => {
+        setCanUndoBulk(false)
+        bulkUndoRef.current = null
+      }, 5000)
+    }
+  }
+
+  async function applyBulk(fields: PercentageField[]) {
+    const valuesToApply = new Map<PercentageField, number>()
+    const invalidFields: Partial<Record<PercentageField, boolean>> = {}
+
+    for (const field of fields) {
+      const raw = bulkValues[field].trim()
+      if (!raw) {
+        if (fields.length === 1) invalidFields[field] = true
+        continue
+      }
+      const parsed = parseBulkPercentage(raw)
+      if (parsed === null) invalidFields[field] = true
+      else valuesToApply.set(field, parsed)
+    }
+    setBulkInvalid(invalidFields)
+
+    if (Object.keys(invalidFields).length > 0) {
+      setErrorMsg('Ingresá porcentajes válidos entre 0 y 100.')
+      return
+    }
+    if (valuesToApply.size === 0) {
+      showBulkNotice('Cargá un valor en la fila resaltada primero')
+      return
+    }
+
+    const before = obrasSocialesCatalog.map((item) => ({ ...item }))
+    const changedFields = new Set<PercentageField>()
+    const changedCells = new Set<string>()
+    const changedItems = obrasSocialesCatalog.flatMap((item) => {
+      const updates: Partial<Record<PercentageField, number>> = {}
+      for (const [field, value] of valuesToApply) {
+        if ((overwriteExisting || item[field] === 0) && item[field] !== value) {
+          updates[field] = value
+          changedFields.add(field)
+          changedCells.add(`${item.nombre}:${field}`)
+        }
+      }
+      return Object.keys(updates).length > 0 ? [{ ...item, ...updates }] : []
+    })
+
+    if (changedItems.length === 0) {
+      showBulkNotice('No había nada para cambiar (probá sobrescribir)')
+      return
+    }
+
+    const result = await saveObrasSocialesCatalog(changedItems)
+    if (!result.ok) {
+      setErrorMsg(result.conflict
+        ? 'Conflicto: una o más obras sociales fueron modificadas por otro usuario.'
+        : result.error || 'No se pudieron guardar los cambios.')
+      return
+    }
+
+    bulkUndoRef.current = {
+      before: before.filter((item) => changedItems.some((changed) => changed.nombre === item.nombre)),
+      fields: [...changedFields],
+    }
+    setHighlightedCells(changedCells)
+    if (bulkHighlightTimer.current) clearTimeout(bulkHighlightTimer.current)
+    bulkHighlightTimer.current = window.setTimeout(() => setHighlightedCells(new Set()), 1400)
+    const hiddenCount = busqueda.trim()
+      ? changedItems.filter((item) => !filteredList.some((visible) => visible.nombre === item.nombre)).length
+      : 0
+    showBulkNotice(
+      `Aplicado a ${changedCells.size} celdas en ${changedFields.size} columnas${busqueda.trim() ? ` (incluye ${hiddenCount} obras sociales ocultas por el filtro)` : ''}`,
+      true,
+    )
+    setErrorMsg(null)
+    showSavedIndicator()
+  }
+
+  async function undoBulk() {
+    const snapshot = bulkUndoRef.current
+    if (!snapshot) return
+    const currentByName = new Map(obrasSocialesCatalog.map((item) => [item.nombre, item]))
+    const restore = snapshot.before.flatMap((before) => {
+      const current = currentByName.get(before.nombre)
+      if (!current) return []
+      const fields: Partial<Record<PercentageField, number>> = {}
+      for (const field of snapshot.fields) fields[field] = before[field]
+      return [{ ...current, ...fields }]
+    })
+    const result = await saveObrasSocialesCatalog(restore)
+    if (!result.ok) {
+      setErrorMsg(result.conflict
+        ? 'Conflicto: una o más obras sociales fueron modificadas por otro usuario.'
+        : result.error || 'No se pudo deshacer el cambio.')
+      return
+    }
+    bulkUndoRef.current = null
+    setCanUndoBulk(false)
+    setBulkNotice('Cambios deshechos')
+    if (bulkNoticeTimer.current) clearTimeout(bulkNoticeTimer.current)
+    bulkNoticeTimer.current = window.setTimeout(() => setBulkNotice(''), 1800)
+    setHighlightedCells(new Set())
+    showSavedIndicator()
+  }
+
+  async function commitRename(item: ObraSocialCatalog) {
+    const nextName = editedName.trim()
+    if (!nextName || nextName === item.nombre) {
+      setEditingNameFor(null)
+      return
+    }
+    const result = onRename
+      ? onRename(item.nombre, nextName)
+      : renameObraSocialCustom(item.nombre, nextName)
+    if (!result.ok) {
+      setErrorMsg(result.error || 'No se pudo cambiar el nombre.')
+      return
+    }
+    setEditingNameFor(null)
+    setErrorMsg(null)
+    showSavedIndicator()
+  }
+
   // Quitar con confirmación
   async function handleDelete(item: ObraSocialCatalog) {
     setErrorMsg(null)
@@ -258,6 +433,16 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
             <button type="submit" className="os-modal-btn-add">
               Agregar
             </button>
+            {esAdmin && (
+              <button
+                type="button"
+                className={`os-modal-btn-bulk-toggle ${bulkOpen ? 'os-modal-btn-bulk-toggle--on' : ''}`}
+                aria-expanded={bulkOpen}
+                onClick={() => setBulkOpen((open) => !open)}
+              >
+                ⚡ Aplicar a todas {bulkOpen ? '▴' : '▾'}
+              </button>
+            )}
           </form>
 
           <div className="os-modal-search-wrap">
@@ -337,6 +522,56 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
 
         {/* Filas scrolleables */}
         <div className="os-modal-rows-scroll">
+          {esAdmin && bulkOpen && (
+            <div className="os-modal-bulk-row">
+              <div className="os-modal-bulk-intro">
+                <strong>⚡ Aplicar a todas</strong>
+                <span>Cargá el valor y tocá ⇩ en esa columna, o aplicá todo junto.</span>
+                <button type="button" className="os-modal-bulk-apply" onClick={() => void applyBulk(bulkFields)}>
+                  Aplicar a todas
+                </button>
+              </div>
+              {bulkFields.map((field, index) => {
+                const labels: Record<PercentageField, string> = {
+                  cuidar: '% Cuidar',
+                  impBanco: 'Imp. Banco (%)',
+                  impFactura: 'Imp. Facturación (%)',
+                  gastosAdm: 'Gastos Adm. (%)',
+                }
+                return (
+                  <div className="os-modal-bulk-cell" key={field}>
+                    <div className={`os-modal-input-box os-modal-bulk-input-box ${bulkInvalid[field] ? 'os-modal-input-box--invalid' : ''}`}>
+                      <input
+                        ref={index === 0 ? bulkCuidarRef : undefined}
+                        type="text"
+                        inputMode="decimal"
+                        className="os-modal-num-input"
+                        value={bulkValues[field]}
+                        aria-label={`Aplicar ${labels[field]} a todas`}
+                        aria-invalid={Boolean(bulkInvalid[field])}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setBulkValues((prev) => ({ ...prev, [field]: value }))
+                          setBulkInvalid((prev) => ({ ...prev, [field]: false }))
+                        }}
+                      />
+                      <span className="os-modal-affix os-modal-affix--suffix">%</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="os-modal-bulk-column-btn"
+                      title="Aplicar solo esta columna"
+                      aria-label={`Aplicar solo ${labels[field]}`}
+                      onClick={() => void applyBulk([field])}
+                    >
+                      ⇩
+                    </button>
+                  </div>
+                )
+              })}
+              <div aria-hidden="true" />
+            </div>
+          )}
           {filteredList.length === 0 ? (
             <div className="os-modal-empty">
               No hay obras sociales que coincidan con la búsqueda.
@@ -349,16 +584,37 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
               >
                 {/* Nombre y badge suspendida */}
                 <div className="os-modal-name-col">
-                  <span className="os-modal-name" title={item.nombre}>
-                    {item.nombre}
-                  </span>
-                  {planesAfiliadosNombres.has(item.nombre.trim().toLowerCase()) && (
-                    <span className="os-modal-badge-plan" title="Plan del sistema de Afiliados">
-                      Plan
-                    </span>
-                  )}
-                  {item.suspendida && (
-                    <span className="os-modal-badge-suspended">SUSPENDIDA</span>
+                  {editingNameFor === item.nombre ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      className="os-modal-name-input"
+                      value={editedName}
+                      aria-label={`Nombre de la obra social ${item.nombre}`}
+                      onChange={(event) => setEditedName(event.target.value)}
+                      onBlur={() => void commitRename(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur()
+                        if (event.key === 'Escape') {
+                          event.preventDefault()
+                          setEditingNameFor(null)
+                        }
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className="os-modal-name" title={item.nombre}>
+                        {item.nombre}
+                      </span>
+                      {planesAfiliadosNombres.has(item.nombre.trim().toLowerCase()) && (
+                        <span className="os-modal-badge-plan" title="Plan del sistema de Afiliados">
+                          Plan
+                        </span>
+                      )}
+                      {item.suspendida && (
+                        <span className="os-modal-badge-suspended">SUSPENDIDA</span>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -401,7 +657,7 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
                     </div>
 
                     {/* % Cuidar */}
-                    <div className="os-modal-input-box">
+                    <div className={`os-modal-input-box ${highlightedCells.has(`${item.nombre}:cuidar`) ? 'os-modal-input-box--applied' : ''}`}>
                       <input
                         type="text"
                         className="os-modal-num-input"
@@ -419,7 +675,7 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
                     </div>
 
                     {/* Imp. Banco */}
-                    <div className="os-modal-input-box">
+                    <div className={`os-modal-input-box ${highlightedCells.has(`${item.nombre}:impBanco`) ? 'os-modal-input-box--applied' : ''}`}>
                       <input
                         type="text"
                         className="os-modal-num-input"
@@ -437,7 +693,7 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
                     </div>
 
                     {/* Imp. Facturación */}
-                    <div className="os-modal-input-box">
+                    <div className={`os-modal-input-box ${highlightedCells.has(`${item.nombre}:impFactura`) ? 'os-modal-input-box--applied' : ''}`}>
                       <input
                         type="text"
                         className="os-modal-num-input"
@@ -455,7 +711,7 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
                     </div>
 
                     {/* Gastos Adm */}
-                    <div className="os-modal-input-box">
+                    <div className={`os-modal-input-box ${highlightedCells.has(`${item.nombre}:gastosAdm`) ? 'os-modal-input-box--applied' : ''}`}>
                       <input
                         type="text"
                         className="os-modal-num-input"
@@ -476,6 +732,18 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
 
                 {/* Acciones */}
                 <div className="os-modal-actions">
+                  <button
+                    type="button"
+                    className="os-modal-action-btn os-modal-action-btn--edit"
+                    onClick={(event) => {
+                      setEditedName(item.nombre)
+                      setEditingNameFor(item.nombre)
+                    }}
+                    aria-label={`Editar ${item.nombre}`}
+                    title={`Editar ${item.nombre}`}
+                  >
+                    <IconEdit />
+                  </button>
                   <button
                     type="button"
                     className="os-modal-action-btn os-modal-action-btn--suspend"
@@ -554,6 +822,24 @@ export function ObrasSocialesModal({ onClose, onAdd, onRemove }: Props) {
             </span>
             {savedTick && (
               <span className="os-modal-saved-indicator">Guardado</span>
+            )}
+            {bulkOpen && (
+              <label className="os-modal-overwrite">
+                <input
+                  type="checkbox"
+                  checked={overwriteExisting}
+                  onChange={(event) => setOverwriteExisting(event.target.checked)}
+                />
+                Sobrescribir también los que ya tienen valor
+              </label>
+            )}
+            {bulkNotice && (
+              <span className="os-modal-bulk-notice" role="status">
+                {bulkNotice}
+                {canUndoBulk && (
+                  <button type="button" onClick={() => void undoBulk()}>Deshacer</button>
+                )}
+              </span>
             )}
           </div>
           <button

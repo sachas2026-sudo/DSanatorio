@@ -409,6 +409,27 @@
   color: #B45309;
 }
 
+.login-network-dialog {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-height: 600px) {
+  .login-network-overlay {
+    align-items: flex-start !important;
+    overflow-y: auto;
+    padding: 8px !important;
+  }
+
+  .login-network-dialog {
+    max-height: calc(100dvh - 16px);
+    margin: auto 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .modal-ip-card {
     transition: none !important;

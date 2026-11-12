@@ -119,9 +119,105 @@
   border-radius: 12px;
   width: 90%;
   max-width: 440px;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1.5rem;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
   color: #1e293b;
+}
+
+.network-dialog__pairing-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.network-dialog__pairing-code {
+  color: #075985;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.25em;
+  white-space: nowrap;
+}
+
+.network-dialog__pairing-help {
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 420px) {
+  .network-dialog__pairing-content {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+.network-diagnostic-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(2px);
+}
+
+.network-diagnostic-dialog {
+  width: min(92vw, 560px);
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 1.25rem;
+  border-radius: 12px;
+  background: #fff;
+  color: #1e293b;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.28);
+}
+
+.network-diagnostic-dialog h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.05rem;
+}
+
+.network-diagnostic-dialog__meta {
+  margin: 0.4rem 0 0.85rem;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.network-diagnostic-dialog__checks {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.network-diagnostic-check {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #dbe3ee;
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.network-diagnostic-check--ok {
+  border-left-color: #2e7d4f;
+}
+
+.network-diagnostic-check--error {
+  border-left-color: #b3261e;
+}
+
+.network-diagnostic-check--skipped {
+  border-left-color: #94a3b8;
 }
 
 .network-dialog h2 {
@@ -233,6 +329,159 @@
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+.network-settings-panel {
+  margin-bottom: 1.25rem;
+}
+
+.network-connected-devices {
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.network-connected-devices__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.network-connected-devices__header h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+
+.network-connected-devices__header p,
+.network-connected-devices__empty {
+  margin: 0.25rem 0 0;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.network-connected-devices__list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.network-connected-device {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.network-connected-device__main,
+.network-connected-device__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.network-connected-device__main strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.network-connected-device__main span,
+.network-connected-device__meta span {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.network-connected-device__meta {
+  text-align: right;
+}
+
+.network-connected-device__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.network-settings-panel__intro {
+  margin: 0 0 0.9rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.network-settings-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0.75rem 0;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.network-settings-panel__field input,
+.network-settings-panel__field select,
+.network-settings-panel__field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  color: #0f172a;
+  background: #fff;
+  font: inherit;
+}
+
+.network-settings-panel__field textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 400;
+}
+
+.network-settings-panel__address-fields,
+.network-settings-panel__actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.network-settings-panel__address-fields > :first-child {
+  flex: 1 1 auto;
+}
+
+.network-settings-panel__address-fields > :last-child {
+  flex: 0 0 9rem;
+}
+
+@media (max-width: 640px) {
+  .network-settings-panel__address-fields,
+  .network-settings-panel__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .network-settings-panel__address-fields > :last-child {
+    flex-basis: auto;
+  }
+
+  .network-connected-devices__header,
+  .network-connected-device {
+    flex-direction: column;
+  }
+
+  .network-connected-device__meta {
+    text-align: left;
+  }
+
+  .network-connected-device__actions {
+    align-self: flex-start;
+  }
 }
 
 .network-manual-box label {
@@ -413,6 +662,137 @@
 
 .network-action-btn--link:hover:not(:disabled) {
   color: #0369a1;
+}
+
+/* Sección Configuración IP de esta PC */
+.network-section-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 1rem 0 0.5rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.network-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.network-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.network-card--primary {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.network-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.network-card__badge-primary {
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.network-card__details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.25rem 0.75rem;
+  color: #475569;
+  font-size: 0.76rem;
+}
+
+.network-card__detail-item {
+  display: flex;
+  justify-content: space-between;
+}
+
+.network-card__detail-item strong {
+  color: #1e293b;
+  font-family: monospace;
+}
+
+.network-subnet-warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  margin-top: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Lista de servidores múltiples encontrados */
+.network-multiple-servers {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.network-multiple-servers__title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #166534;
+  margin-bottom: 0.5rem;
+}
+
+.network-server-choice-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.45rem 0.75rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.78rem;
+}
+
+.network-server-choice-item:last-child {
+  margin-bottom: 0;
+}
+
+.network-server-choice-item button {
+  background: #0284c7;
+  color: #ffffff;
+  border: none;
+  border-radius: 5px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.network-server-choice-item button:hover {
+  background: #0369a1;
 }
 
 @keyframes network-fade-in {

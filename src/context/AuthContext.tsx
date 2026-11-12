@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import {
   authenticate,
   canAccessPath,
@@ -21,7 +21,7 @@ import {
   type AuthSession,
   type LoginAttemptResult,
 } from '../lib/auth'
-import { isClientMode } from '../lib/appMode'
+import { isClientMode, clearAppModeCache } from '../lib/appMode'
 import { useConfirm } from './ConfirmContext'
 
 type ClientSessionInfo = {
@@ -42,6 +42,15 @@ function sessionFromClientInfo(info: ClientSessionInfo): AuthSession | null {
     role: info.role,
     displayName: info.displayName || info.username,
     mustChangePassword: info.mustChangePassword,
+  }
+}
+
+async function writeLoginDiagnostic(kind: 'invalid_credentials' | 'network_error') {
+  if (!isTauri()) return
+  try {
+    await invoke('write_login_diagnostic', { kind })
+  } catch (error) {
+    console.error('No se pudo escribir Erroes.log:', error)
   }
 }
 
@@ -99,6 +108,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!session || !isTauri()) return
+
+    let cancelled = false
+    let timer: ReturnType<typeof setInterval> | undefined
+    const startHeartbeat = async () => {
+      try {
+        if (!(await isClientMode()) || cancelled) return
+        timer = setInterval(() => {
+          void invoke('client_heartbeat').catch((error: unknown) => {
+            console.warn('No se pudo actualizar la conexión con el servidor:', error)
+          })
+        }, 30_000)
+      } catch (error) {
+        console.error('No se pudo iniciar el heartbeat del cliente:', error)
+      }
+    }
+
+    void startHeartbeat()
+    return () => {
+      cancelled = true
+      if (timer !== undefined) clearInterval(timer)
+    }
+  }, [session])
+
   const login = useCallback(
     async (username: string, password: string): Promise<LoginAttemptResult> => {
       if (await isClientMode()) {
@@ -125,21 +159,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (result.ok) {
               storeSession(result.session)
               setSession(result.session)
+            } else if (result.reason === 'invalid_credentials') {
+              await writeLoginDiagnostic('invalid_credentials')
             }
             return result
           }
           // Error de credenciales: se muestra el mensaje estándar del login.
           if (/incorrect|credencial|usuario o contrase/i.test(message)) {
+            await writeLoginDiagnostic('invalid_credentials')
             return { ok: false, reason: 'invalid_credentials' }
           }
           // Sin conexión / configuración: que LoginScreen muestre el error genérico.
+          await writeLoginDiagnostic('network_error')
           throw err
         }
       }
       await ensureAuthAccountsLoaded()
       const wasDefaults = isUsingDefaultAccounts()
       const result = await authenticate(username, password)
-      if (!result.ok) return result
+      if (!result.ok) {
+        if (result.reason === 'invalid_credentials') {
+          await writeLoginDiagnostic('invalid_credentials')
+        }
+        return result
+      }
       storeSession(result.session)
       setSession(result.session)
       if (wasDefaults) {

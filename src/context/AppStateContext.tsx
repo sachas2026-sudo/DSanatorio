@@ -273,6 +273,9 @@ type Ctx = {
   saveObraSocialCatalog: (
     item: ObraSocialCatalog,
   ) => Promise<{ ok: boolean; conflict?: boolean; current?: ObraSocialCatalog; error?: string }>
+  saveObrasSocialesCatalog: (
+    items: ObraSocialCatalog[],
+  ) => Promise<{ ok: boolean; conflict?: boolean; error?: string }>
   deleteObraSocialCatalog: (nombre: string) => Promise<{ ok: boolean; error?: string }>
   addObraSocialCustom: (nombre: string) => { ok: boolean; error?: string }
   removeObraSocialCustom: (nombre: string) => void
@@ -964,9 +967,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         email: d.email,
         alias: d.alias ?? prevDoc?.alias,
         porcentaje: d.porcentaje,
-        valor: d.valor ?? prevDoc?.valor ?? 0,
-        particular: d.particular ?? prevDoc?.particular ?? 0,
-        cuidar: d.cuidar ?? prevDoc?.cuidar ?? 0,
+        valor: d.valor !== undefined ? d.valor : prevDoc?.valor ?? 0,
+        particular:
+          d.particular !== undefined ? d.particular : prevDoc?.particular ?? 0,
+        cuidar: d.cuidar !== undefined ? d.cuidar : prevDoc?.cuidar ?? 0,
         duracionTurnoMinutos:
           d.duracionTurnoMinutos ?? prevDoc?.duracionTurnoMinutos ?? 30,
         tipoAgenda: d.tipoAgenda ?? prevDoc?.tipoAgenda ?? 'semanal',
@@ -2484,6 +2488,57 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [persistSnapshotImmediately],
   )
 
+  const saveObrasSocialesCatalog = useCallback(
+    async (items: ObraSocialCatalog[]): Promise<{ ok: boolean; conflict?: boolean; error?: string }> => {
+      if (items.length === 0) return { ok: true }
+
+      let conflict = false
+      let error: string | undefined
+      let nextSnapshot: AppData | null = null
+
+      setData((prev) => {
+        if (!prev) {
+          error = 'Sin datos'
+          return prev
+        }
+
+        const currentList = buildObrasSocialesCatalog(
+          prev.obrasSociales,
+          prev.obrasSocialesCustom,
+          prev.planesAfiliados,
+        )
+        const currentByName = new Map(currentList.map((item) => [item.nombre.trim().toLowerCase(), item]))
+        for (const item of items) {
+          const current = currentByName.get(item.nombre.trim().toLowerCase())
+          if (!current || current.version !== item.version) {
+            conflict = true
+            return prev
+          }
+        }
+
+        const updatesByName = new Map(items.map((item) => [item.nombre.trim().toLowerCase(), item]))
+        const updated = currentList.map((current) => {
+          const incoming = updatesByName.get(current.nombre.trim().toLowerCase())
+          return incoming
+            ? { ...current, ...incoming, nombre: current.nombre, version: current.version + 1 }
+            : current
+        })
+        nextSnapshot = {
+          ...prev,
+          obrasSociales: updated,
+          obrasSocialesCustom: updated.map((item) => item.nombre),
+        }
+        return nextSnapshot
+      })
+
+      if (conflict) return { ok: false, conflict: true }
+      if (error) return { ok: false, error }
+      if (nextSnapshot) await persistSnapshotImmediately(nextSnapshot)
+      return { ok: true }
+    },
+    [persistSnapshotImmediately],
+  )
+
   const deleteObraSocialCatalog = useCallback(
     async (nombre: string): Promise<{ ok: boolean; error?: string }> => {
       const nombreNorm = nombre.trim().toLowerCase()
@@ -2604,6 +2659,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           prev.obrasSocialesCustom.some(
             (o) => obraSocialKey(o) === newKey && obraSocialKey(o) !== oldKey,
           ) ||
+          (prev.obrasSociales ?? []).some(
+            (o) => obraSocialKey(o.nombre) === newKey && obraSocialKey(o.nombre) !== oldKey,
+          ) ||
           prev.patients.some(
             (p) =>
               obraSocialKey(p.obraSocial) === newKey &&
@@ -2615,6 +2673,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         }
         return {
           ...prev,
+          obrasSociales: (prev.obrasSociales ?? []).map((item) =>
+            obraSocialKey(item.nombre) === oldKey
+              ? { ...item, nombre: n, version: item.version + 1 }
+              : item,
+          ),
           obrasSocialesCustom: prev.obrasSocialesCustom.map((o) =>
             obraSocialKey(o) === oldKey ? n : o,
           ),
@@ -2932,6 +2995,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       obrasSocialesOpciones,
       obrasSocialesCatalog,
       saveObraSocialCatalog,
+      saveObrasSocialesCatalog,
       deleteObraSocialCatalog,
       addObraSocialCustom,
       removeObraSocialCustom,
@@ -3016,6 +3080,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       obrasSocialesOpciones,
       obrasSocialesCatalog,
       saveObraSocialCatalog,
+      saveObrasSocialesCatalog,
       deleteObraSocialCatalog,
       addObraSocialCustom,
       removeObraSocialCustom,

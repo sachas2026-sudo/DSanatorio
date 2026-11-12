@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { AuthProvider, useAuthSession } from '../context/AuthContext'
-import { LoginScreen } from './LoginScreen'
+import { LoginScreen } from '../shared/components/LoginScreen'
 
 function AuthGateInner({ children }: { children: ReactNode }) {
   const { session, login } = useAuthSession()

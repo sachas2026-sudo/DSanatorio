@@ -1,0 +1,1 @@
+import{gr as e}from"./index-DFiguOCF.js";function t(t,n){let r=e(t,n?.in),i=r.getMonth();return r.setFullYear(r.getFullYear(),i+1,0),r.setHours(23,59,59,999),r}function n(t,n){let r=e(t,n?.in);return r.setDate(1),r.setHours(0,0,0,0),r}export{t as n,n as t};

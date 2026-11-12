@@ -68,6 +68,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0012_contratantes_movimientos",
         sql: include_str!("../../../migrations/0012_contratantes_movimientos.sql"),
     },
+    Migration {
+        version: 13,
+        name: "0013_doctor_honorarios_opcionales",
+        sql: include_str!("../../../migrations/0013_doctor_honorarios_opcionales.sql"),
+    },
 ];
 
 fn initialize_migrations_table(conn: &Connection) -> Result<(), AppError> {

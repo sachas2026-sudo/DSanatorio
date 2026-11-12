@@ -48,16 +48,16 @@ const ACCOUNTS_STORAGE_KEY = 'sanatorio-auth-accounts-v1'
 const DEFAULT_ACCOUNTS: AuthAccount[] = [
   {
     username: 'Admi',
-    password: '753',
-    passwordHash: 'cdXg6ncfUGvtkxkx8BjDY5Wf0Zexceg2kmvM2TD7lB4=',
-    passwordSalt: '6nUUdlNVF/cc1cCad+FJsA==',
+    passwordHash: 'P1U/65i0gOmqYowAPc3UnzYvQXvplu85GTJ6avQES30=',
+    passwordSalt: 'fG8r56seNehNiM3JMddqSg==',
     role: 'admin',
     displayName: 'Admi',
     mustChangePassword: false,
   },
   {
     username: 'Barua Andrea',
-    password: '1379',
+    passwordHash: 'YT572xmglGv/oF5MeUWRgq8Va1VuEQ4OaagUPXuVZNE=',
+    passwordSalt: 'cvNyyRkx1ju95x/Clzdelg==',
     role: 'secretaria',
     displayName: 'Barua Andrea',
     turno: 'Tarde',
@@ -65,17 +65,19 @@ const DEFAULT_ACCOUNTS: AuthAccount[] = [
   },
   {
     username: 'Aguirre Mary',
-    password: '123',
+    passwordHash: '+8z8K3Yq1ypaTr5lAHt8f+ZfzEGEDq++UAS4ok4UTCg=',
+    passwordSalt: '4atQN0lY+daonfSIg0516Q==',
     role: 'secretaria',
     displayName: 'Aguirre Mary',
     turno: 'Mañana',
     mustChangePassword: false,
   },
   {
-    username: 'Afiliados',
-    password: '456',
+    username: 'Contratantes',
+    passwordHash: 'XSB27daQ5HQsdh+d7XTLg4iFNc87l3R3U1WVUdb0gLs=',
+    passwordSalt: 'QdWC1HoUiu6h8xqWq2JrKA==',
     role: 'afiliado',
-    displayName: 'Afiliados',
+    displayName: 'Contratantes',
     mustChangePassword: false,
   },
 ]
@@ -264,7 +266,7 @@ export function getDefaultLoginUsername(): string {
   }
   if (flavor === 'afiliados' || flavor === 'afiliado') {
     const afil = accounts.find((a) => a.role === 'afiliado')
-    return afil?.username ?? 'Afiliados'
+    return afil?.username ?? 'Contratantes'
   }
 
   const found = accounts.find((a) => !isGenericRoleName(a.username) && !isGenericRoleName(a.displayName))
@@ -272,13 +274,25 @@ export function getDefaultLoginUsername(): string {
 }
 
 /** Opciones del desplegable de ingreso (orden de visualización). */
-export function getLoginUserOptions(): string[] {
-  const accounts = getEffectiveAccounts()
+export function getLoginUserOptions(role?: AppRole): string[] {
+  const accounts = getEffectiveAccounts().filter(
+    (account) => role === undefined || account.role === role,
+  )
   const sorted = [...accounts].sort((a, b) => {
     if (a.role !== b.role) return a.role === 'secretaria' ? -1 : 1
     return a.username.localeCompare(b.username, 'es', { sensitivity: 'base' })
   })
   return sorted.map((a) => a.username)
+}
+
+export function getLoginUserOptionsForInstallProfile(profile: string | null | undefined): string[] {
+  const roleByProfile: Record<string, AppRole> = {
+    server: 'secretaria',
+    contratantes: 'afiliado',
+    administracion: 'admin',
+  }
+  const role = profile ? roleByProfile[profile] : undefined
+  return role ? getLoginUserOptions(role) : []
 }
 
 async function verifyAccountPassword(
@@ -299,18 +313,6 @@ async function verifyAccountPassword(
     if (account.password.toLowerCase() === p.toLowerCase()) return true
   }
 
-  // Fallbacks de recuperación para cuentas sin hash inicial
-  const uLower = account.username.toLowerCase()
-  const pLower = p.toLowerCase()
-  if (uLower === 'admi' || uLower === 'admin' || account.role === 'admin') {
-    if (pLower === 'admi' || pLower === 'admin') return true
-  } else if (uLower.includes('aguirre') || (account.role === 'secretaria' && account.turno === 'Mañana')) {
-    if (p === '123' || pLower === 'secretaria') return true
-  } else if (uLower.includes('barua') || (account.role === 'secretaria' && account.turno === 'Tarde')) {
-    if (p === '1379' || pLower === 'secretaria') return true
-  } else if (uLower.includes('afiliad') || account.role === 'afiliado') {
-    if (p === '456') return true
-  }
   return false
 }
 
@@ -396,27 +398,6 @@ export async function authenticate(
     account = accounts.find(
       (a) => a.username.trim().toLowerCase() === u.trim().toLowerCase(),
     )
-  }
-  if (!account) {
-    const uLower = u.trim().toLowerCase()
-    if (uLower === 'admi' || uLower === 'admin') {
-      account = accounts.find((a) => a.role === 'admin')
-    } else if (uLower === 'afiliados' || uLower === 'afiliado') {
-      account = accounts.find((a) => a.role === 'afiliado')
-    } else if (uLower === 'secretaria' || uLower === 'secretario') {
-      if (p === '1379') {
-        account =
-          accounts.find((a) => a.username.toLowerCase().includes('barua')) ||
-          accounts.find((a) => a.role === 'secretaria' && a.turno === 'Tarde')
-      } else {
-        account =
-          accounts.find((a) => a.username.toLowerCase().includes('aguirre')) ||
-          accounts.find((a) => a.role === 'secretaria' && a.turno === 'Mañana')
-      }
-      if (!account) {
-        account = accounts.find((a) => a.role === 'secretaria')
-      }
-    }
   }
 
   if (!account) {

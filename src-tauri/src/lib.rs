@@ -10,6 +10,10 @@ mod api_client;
 mod client_session;
 mod client_commands;
 mod client_request;
+mod login_diagnostics;
+mod install_profile;
+mod auth_defaults;
+mod audit_log;
 pub mod discovery;
 pub mod tray;
 #[cfg(test)]
@@ -27,59 +31,67 @@ pub fn run() {
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.to_lowercase();
     let product_name = context.config().product_name.as_deref().unwrap_or("").to_lowercase();
-    let is_client_flavor = identifier.contains("afiliado") 
+    let legacy_client_flavor = identifier.contains("cliente")
+        || product_name.contains("cliente")
+        || identifier.contains("afiliado")
         || identifier.contains("administrador") 
         || identifier.contains("admi")
         || product_name.contains("afiliado")
         || product_name.contains("administrador")
         || product_name.contains("admi");
+    let is_client_flavor = match install_profile::load() {
+        Ok(Some(profile)) => profile.is_client(),
+        Ok(None) => legacy_client_flavor,
+        Err(error) => {
+            log::error!("{error}");
+            legacy_client_flavor
+        }
+    };
 
     use crate::client_mode::{load_config, StartupPlan, AppMode, ClientConfig};
 
-    let mut config = match load_config() {
-        Ok(c) => c,
+    let (mut config, config_loaded) = match load_config() {
+        Ok(c) => (c, true),
         Err(e) => {
             log::warn!("Aviso al cargar configuración ({e}). Se iniciará con valores seguros.");
-            ClientConfig {
-                mode: if is_client_flavor { AppMode::Client } else { AppMode::Local },
-                server_url: None,
-                server_cert_pem: None,
-            }
+            (
+                ClientConfig {
+                    mode: if is_client_flavor { AppMode::Client } else { AppMode::Local },
+                    server_url: None,
+                    server_cert_pem: None,
+                    server_primary_ip: None,
+                    device_id: None,
+                },
+                false,
+            )
         }
     };
 
     if is_client_flavor {
-        // En los instaladores cliente (Afiliados y Administrador) siempre opera en modo cliente
+        // En los instaladores cliente siempre opera en modo cliente.
         config.mode = AppMode::Client;
-        // Al iniciar siempre se busca el servidor por WiFi o cableada en la red local.
-        // Si lo encuentra, se guarda; si no, se borra la URL guardada para que la app
-        // no use una IP fija vieja (solo vuelve a intentar por descubrimiento o IP manual).
-        let mut discovered = None;
-        if let Ok(servers) = crate::discovery::discover_servers(1500) {
-            discovered = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127."));
-        }
-        match discovered {
-            Some(srv) => {
-                config.server_url = Some(srv.server_url);
-                config.server_cert_pem = Some("auto".to_string());
-            }
-            None => {
-                config.server_url = None;
-                config.server_cert_pem = None;
+        if config_loaded {
+            if let Err(e) = crate::client_mode::save_config(&config) {
+                log::error!("No se pudo persistir el modo cliente: {e}");
             }
         }
-        let _ = crate::client_mode::save_config(&config);
+        // La dirección configurada tiene prioridad. El descubrimiento solo
+        // completa una configuración vacía; se deja al comando de estado hacer
+        // la búsqueda en segundo plano después de mostrar la interfaz.
+        if config.server_url.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            if let Err(e) = login_diagnostics::record_startup_no_server() {
+                log::error!("No se pudo escribir el diagnóstico de inicio: {e}");
+            }
+        }
     } else {
-        // En sabor Server (Mesa de Entrada), si no hay configuración, busca si ya hay otro servidor o es local
-        if !crate::client_mode::config_path().exists() {
-            if let Ok(servers) = crate::discovery::discover_servers(500) {
-                if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
-                    config.mode = AppMode::Client;
-                    config.server_url = Some(srv.server_url);
-                    config.server_cert_pem = Some("auto".to_string());
-                    let _ = crate::client_mode::save_config(&config);
-                }
-            }
+        // El sabor Server (Mesa de Entrada) SIEMPRE es el servidor: levanta la
+        // base y la comparte en la red sin importar lo que tenga guardada la
+        // configuración. Si se quedó guardado "modo cliente" (pruebas, versiones
+        // anteriores), antes quedaba "ciego": no compartía datos ni conectaba,
+        // y las PCs Afiliados/Administrador no lo encontraban nunca.
+        config.mode = AppMode::Local;
+        if let Err(e) = crate::client_mode::save_config(&config) {
+            log::error!("No se pudo guardar el modo servidor: {e}");
         }
     }
 
@@ -164,14 +176,27 @@ pub fn run() {
             modules::reportes::commands::export_distribucion_pdf,
             modules::reportes::commands::abrir_archivo,
             client_commands::client_login,
+            client_commands::request_client_device_access,
             client_commands::client_logout,
             client_commands::client_session_info,
+            client_commands::client_heartbeat,
+            install_profile::get_install_profile,
+            login_diagnostics::write_login_diagnostic,
             client_request::client_api,
             discovery::discover_sanatorio_servers,
             discovery::auto_connect_sanatorio_server,
+            discovery::diagnose_connection,
             discovery::get_network_connection_status,
             discovery::set_manual_server_url,
             discovery::set_mode_local,
+            discovery::get_local_network_info,
+            discovery::set_server_primary_ip,
+            server::get_connected_devices,
+            server::approve_client_device,
+            server::revoke_client_device,
+            server::get_server_pairing_code,
+            server::regenerate_server_pairing_code,
+            server::hide_server_pairing_code,
             modules::configuracion::commands::minimize_window,
         ])
         .setup(move |app| {
@@ -195,8 +220,7 @@ pub fn run() {
                 server::start_background_server();
             }
 
-            // Configurar ícono de la bandeja del sistema (al lado del reloj)
-            let _ = tray::setup_tray(app.handle());
+            // Ícono de bandeja del sistema desactivado a pedido
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

@@ -28,6 +28,7 @@ import { ObrasSocialesModal } from '../../pacientes/components/ObrasSocialesModa
 import { PdfPreviewModal } from '../../../shared/components/PdfPreviewModal'
 import { NuevoTurnoModal } from './agenda/NuevoTurnoModal'
 import { calcularMontoSugerido, normalizeOsName } from '../../../lib/turnoMonto'
+import { formatPesosAr } from '../../../lib/obrasSocialesCatalog'
 import {
   buscarAfiliacionYPlanPaciente,
   calcularConsumoAfiliadoMes,
@@ -1282,16 +1283,8 @@ export function AgendaPage() {
     )
     if (disponibles.length === 1) {
       setBookingDoctorId(disponibles[0]!.id)
-      const res = calcularMontoSugerido({
-        doctor: disponibles[0],
-        cobertura: 'Particular',
-        obrasSocialesCatalog,
-      })
-      if (res.montoCalculado !== null && res.montoCalculado > 0) {
-        setBookingMonto(res.montoCalculadoFormateado)
-      } else {
-        setBookingMonto('')
-      }
+      const res = calcularMontoSugerido(disponibles[0], 'Particular')
+      setBookingMonto(formatPesosAr(res.monto))
     } else {
       setBookingDoctorId('')
     }
@@ -1322,16 +1315,8 @@ export function AgendaPage() {
     setBookingEstado('programado')
     const doc = doctorById(doctorId)
     setBookingDuracion(doc ? doctorDuracionTurno(doc) : 30)
-    const res = calcularMontoSugerido({
-      doctor: doc,
-      cobertura: 'Particular',
-      obrasSocialesCatalog,
-    })
-    if (res.montoCalculado !== null && res.montoCalculado > 0) {
-      setBookingMonto(res.montoCalculadoFormateado)
-    } else {
-      setBookingMonto('')
-    }
+    const res = calcularMontoSugerido(doc, 'Particular')
+    setBookingMonto(formatPesosAr(res.monto))
     setBookingOpen(true)
   }
   function openBookingAtSlotOnDay(doctorId: string, day: Date, hm: string) {
@@ -1361,16 +1346,8 @@ export function AgendaPage() {
     setBookingEstado('programado')
     const doc = doctorById(doctorId)
     setBookingDuracion(doc ? doctorDuracionTurno(doc) : 30)
-    const res = calcularMontoSugerido({
-      doctor: doc,
-      cobertura: 'Particular',
-      obrasSocialesCatalog,
-    })
-    if (res.montoCalculado !== null && res.montoCalculado > 0) {
-      setBookingMonto(res.montoCalculadoFormateado)
-    } else {
-      setBookingMonto('')
-    }
+    const res = calcularMontoSugerido(doc, 'Particular')
+    setBookingMonto(formatPesosAr(res.monto))
     setBookingOpen(true)
   }
   function applyPatientSelection(p: Patient) {
@@ -1390,18 +1367,8 @@ export function AgendaPage() {
 
     if (!bookingEditingId && bookingDoctorId) {
       const doc = doctorById(bookingDoctorId)
-      const res = calcularMontoSugerido({
-        doctor: doc,
-        cobertura: targetCob,
-        obrasSocialesCatalog,
-        montoActualInput: '',
-        usuarioEditoManualmente: false,
-      })
-      if (res.montoCalculado !== null && res.montoCalculado > 0) {
-        setBookingMonto(res.montoCalculadoFormateado)
-      } else {
-        setBookingMonto('')
-      }
+      const res = calcularMontoSugerido(doc, targetCob)
+      setBookingMonto(formatPesosAr(res.monto))
     }
   }
   function openBookingForEdit(c: Appointment) {
@@ -1522,16 +1489,8 @@ export function AgendaPage() {
     setBookingEstado('programado')
     if (bookingDoctorId) {
       const doc = doctorById(bookingDoctorId)
-      const res = calcularMontoSugerido({
-        doctor: doc,
-        cobertura: 'Particular',
-        obrasSocialesCatalog,
-      })
-      if (res.montoCalculado !== null && res.montoCalculado > 0) {
-        setBookingMonto(res.montoCalculadoFormateado)
-      } else {
-        setBookingMonto('')
-      }
+      const res = calcularMontoSugerido(doc, 'Particular')
+      setBookingMonto(formatPesosAr(res.monto))
     }
   }
   function resetCita() {

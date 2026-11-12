@@ -461,21 +461,14 @@ export function calcularDetalleMensual(params: DetalleMensualParams): DetalleMen
       } else {
         // Tiene plus pero no se pagó -> Pendiente
         estado = 'Pendiente'
-        const sugerido = calcularMontoSugerido({
-          doctor: doc,
-          cobertura: obraSocial,
-          obrasSocialesCatalog,
-        })
-        montoAdeudado = sugerido.montoCalculado ?? plusCatalog
+        const sugerido = calcularMontoSugerido(doc, obraSocial)
+        montoAdeudado = sugerido.origen === 'ok' ? sugerido.monto : plusCatalog
       }
     } else {
       // Es Particular
-      const sugerido = calcularMontoSugerido({
-        doctor: doc,
-        cobertura: obraSocial,
-        obrasSocialesCatalog,
-      })
-      const partMonto = sugerido.montoCalculado ?? Math.round(Number(doc?.particular || 0))
+      const sugerido = calcularMontoSugerido(doc, obraSocial)
+      const partMonto =
+        sugerido.origen === 'ok' ? sugerido.monto : Math.round(Number(doc?.particular || 0))
 
       if (partMonto <= 0) {
         // Caso especial: Particular sin arancel configurado

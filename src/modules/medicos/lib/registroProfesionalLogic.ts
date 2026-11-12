@@ -88,10 +88,7 @@ export function isValidEmail(email: string): boolean {
 }
 
 /**
- * Valida los campos obligatorios del médico:
- * - Apellido, Nombre, DNI Med, Especialidad son obligatorios.
- * - Al menos uno entre Teléfono o Email es obligatorio.
- * - Si Email está presente, debe tener formato válido.
+ * Apellido y Nombre son obligatorios; el email se valida sólo si está presente.
  */
 export function validateDoctorForm(input: DoctorFormValidationInput): DoctorFormValidationResult {
   const errors: DoctorFormValidationResult['errors'] = {}
@@ -104,21 +101,9 @@ export function validateDoctorForm(input: DoctorFormValidationInput): DoctorForm
     errors.nombre = true
   }
 
-  if (!input.dni || !input.dni.trim()) {
-    errors.dni = true
-  }
-
-  if (!input.especialidad || !input.especialidad.trim()) {
-    errors.especialidad = true
-  }
-
-  const telTrim = (input.telefono ?? '').trim()
   const emailTrim = (input.email ?? '').trim()
 
-  if (!telTrim && !emailTrim) {
-    errors.telefono = true
-    errors.email = true
-  } else if (emailTrim && !isValidEmail(emailTrim)) {
+  if (emailTrim && !isValidEmail(emailTrim)) {
     errors.email = true
   }
 

@@ -222,6 +222,7 @@ export function Layout() {
   }
 
   const displayName = session.displayName?.trim() || session.username
+  const isAffiliate = session.role === 'afiliado'
 
   return (
     <div className="app-shell">
@@ -262,18 +263,20 @@ export function Layout() {
 
           {/* CUENTA */}
           <div className="sidebar-account-section">
-            <button
-              type="button"
-              className="sidebar-account-btn sidebar-account-btn--session"
-              onClick={handleCerrarSesion}
-            >
-              <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-              <span>Cerrar sesión</span>
-            </button>
+            {!isAffiliate && (
+              <button
+                type="button"
+                className="sidebar-account-btn sidebar-account-btn--session"
+                onClick={handleCerrarSesion}
+              >
+                <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>Cerrar sesión</span>
+              </button>
+            )}
             <button
               type="button"
               className="sidebar-account-btn sidebar-account-btn--salir"
@@ -290,19 +293,17 @@ export function Layout() {
         </nav>
 
         {/* PIE */}
-        <div className="sidebar-bottom">
-          {/* 1. Botón Sincronizar (PRIMERO, arriba del clima) */}
-          <SidebarSync />
+        {!isAffiliate && (
+          <div className="sidebar-bottom">
+            <SidebarSync />
 
-          {/* 2. Fila de clima (debajo del botón, margin-bottom 10px) */}
           <SidebarWeather />
 
-          {/* 3. Servidor y F1 Ayuda en una sola línea */}
           <NetworkSelector onOpenInfo={openInfo} />
 
-          {/* 4. Google Drive */}
           <SidebarGoogleDrive onClick={() => setShowGoogleDriveSetup(true)} />
-        </div>
+          </div>
+        )}
       </aside>
 
       <main className="main-area">

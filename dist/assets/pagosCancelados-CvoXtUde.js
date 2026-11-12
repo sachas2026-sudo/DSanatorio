@@ -1,1 +1,0 @@
-import"./index-D43tHSNC.js";var e=[{value:`cancelacion_paciente`,label:`Cancelación del Paciente`},{value:`cancelacion_doctor`,label:`Cancelación del Doctor`},{value:`otros`,label:`Otros`}];function t(t){return e.find(e=>e.value===t)?.label??t}export{t as n,e as t};

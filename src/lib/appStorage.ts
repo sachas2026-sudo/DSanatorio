@@ -52,6 +52,13 @@ export async function getAppDataFilePath(): Promise<string | null> {
 export function serializeAppData(data: AppData): string {
   return JSON.stringify({
     ...data,
+    doctors: data.doctors.map((doctor) => ({
+      ...doctor,
+      porcentaje: doctor.porcentaje ?? null,
+      valor: doctor.valor ?? null,
+      particular: doctor.particular ?? null,
+      cuidar: doctor.cuidar ?? null,
+    })),
     settings: { ...data.settings, clave: '' },
   })
 }

@@ -380,36 +380,24 @@ export function PagosPage() {
   /**
    * Obras sociales que se pueden filtrar.
    *
-   * Se arma con lo que ya se usó (paciente, override del turno, override del
-   * pago) más los planes activos del Sanatorio: un plan recién creado todavía
-   * no tiene pagos ni overrides, pero tiene que poder elegirse desde el
-   * listado de arriba igual que cualquier otra cobertura.
+   * El origen es el catálogo del módulo Obras Sociales: el desplegable muestra
+   * exactamente lo que se cargó ahí, y una obra social nueva aparece sola sin
+   * necesidad de que tenga pagos o pacientes. No se mezclan nombres escritos a
+   * mano en fichas de pacientes ni overrides, para no duplicar entradas ("ASIS"
+   * vs "ASIS SALUD", "Particular" vs "PARTICULAR"). Las suspendidas del
+   * catálogo no se ofrecen.
    */
   const obrasSocialesDisponibles = useMemo(() => {
     const s = new Set<string>()
-    for (const p of data.patients) {
-      if (p.obraSocial && p.obraSocial.trim()) {
-        s.add(p.obraSocial.trim())
+    for (const os of obrasSocialesCatalog ?? []) {
+      if (!os.suspendida && os.nombre && os.nombre.trim()) {
+        s.add(os.nombre.trim())
       }
     }
-    for (const a of data.appointments) {
-      if (a.obraSocialOverride && a.obraSocialOverride.trim()) {
-        s.add(a.obraSocialOverride.trim())
-      }
-    }
-    for (const pay of data.payments) {
-      if (pay.obraSocialOverride && pay.obraSocialOverride.trim()) {
-        s.add(pay.obraSocialOverride.trim())
-      }
-    }
-    for (const plan of data.planesAfiliados ?? []) {
-      if (plan.nombre && plan.nombre.trim()) {
-        s.add(plan.nombre.trim())
-      }
-    }
+    // "Particular" es la cobertura por defecto de los cobros sin obra social.
     s.add('Particular')
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
-  }, [data.patients, data.appointments, data.payments, data.planesAfiliados])
+  }, [obrasSocialesCatalog])
 
   /**
  * Medios de pago que hay cargados en la base. Se ofrecen Efectivo y
@@ -2789,6 +2777,8 @@ async function handlePendientesPdfPreview() {
                 else if (opt === 'fac-obras-sociales') void handleDistribucionObrasSocialesPdfPreview()
                 else if (opt === 'motivos') void handleMotivosPdfPreview()
                 else if (opt === 'pendientes') void handlePendientesPdfPreview()
+                else if (opt === 'mensual') setPdfMensualOpen(true)
+                else if (opt === 'mensual-b') setPdfMensualBOpen(true)
               }}
             >
               <option value="" disabled>Seleccionar PDF...</option>
@@ -2796,11 +2786,20 @@ async function handlePendientesPdfPreview() {
               <option value="cuidar">PDF Cuidar</option>
               <option value="obra-social">PDF Obra Social</option>
               <option value="pacientes-listado">PDF Listado</option>
-              {(import.meta.env.VITE_APP_FLAVOR as string | undefined)?.toLowerCase() === 'administrador' && (
+              {(role === 'admin' || (tabListado === 'obrasSociales' && vistaOS === 'distribucion')) && (
                 <option value="fac-obras-sociales">Fac Obras Sociales</option>
               )}
               <option value="motivos">PDF Motivos</option>
               <option value="pendientes">PDF Pendientes</option>
+              {role !== 'afiliado' && (
+                ((import.meta.env.VITE_APP_FLAVOR as string | undefined)?.toLowerCase() === 'administrador' ||
+                  (role === 'admin' && tabListado === 'obrasSociales' && vistaOS === 'distribucion')) && (
+                <>
+                  <option value="mensual">PDF Mensual A</option>
+                  <option value="mensual-b">PDF Mensual B</option>
+                </>
+                )
+              )}
             </select>
             <span className="pagos-filter-chevron">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2809,41 +2808,6 @@ async function handlePendientesPdfPreview() {
             </span>
           </div>
         </div>
-
-        {/* PDF Mensual selector dropdown (solo Administración) */}
-        {role !== 'afiliado' && (import.meta.env.VITE_APP_FLAVOR as string | undefined)?.toLowerCase() === 'administrador' && (
-          <div className="pagos-filter-group">
-            <label htmlFor="pagos-filter-pdf-mensual">PDF Mensual</label>
-            <div className="pagos-filter-select-wrap">
-              <span className="pagos-filter-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                  <line x1="16" y1="2" x2="16" y2="6" />
-                  <line x1="8" y1="2" x2="8" y2="6" />
-                  <line x1="3" y1="10" x2="21" y2="10" />
-                </svg>
-              </span>
-              <select
-                id="pagos-filter-pdf-mensual"
-                value=""
-                onChange={(e) => {
-                  const opt = e.target.value
-                  if (opt === 'mensual') setPdfMensualOpen(true)
-                  else if (opt === 'mensual-b') setPdfMensualBOpen(true)
-                }}
-              >
-                <option value="" disabled>Seleccionar...</option>
-                <option value="mensual">PDF Mensual A</option>
-                <option value="mensual-b">PDF Mensual B</option>
-              </select>
-              <span className="pagos-filter-chevron">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </span>
-            </div>
-          </div>
-        )}
 
         {/* Registrar selector dropdown OR Motivos filter dropdown */}
         {tabListado === 'medicos' ? (

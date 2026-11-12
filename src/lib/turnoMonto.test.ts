@@ -4,54 +4,25 @@ import {
   doctorAttendsCoverage,
   normalizeOsName,
 } from './turnoMonto'
-import type { Doctor, ObraSocialCatalog } from '../types'
-
-const mockCatalog: ObraSocialCatalog[] = [
-  {
-    nombre: 'IPS',
-    plus: 25000,
-    arancel: 15000,
-    cuidar: 0,
-    impBanco: 0,
-    impFactura: 0,
-    gastosAdm: 0,
-    suspendida: false,
-    version: 1,
-  },
-  {
-    nombre: 'OSDE',
-    plus: 0, // Sin plus
-    arancel: 10000,
-    cuidar: 0,
-    impBanco: 0,
-    impFactura: 0,
-    gastosAdm: 0,
-    suspendida: false,
-    version: 1,
-  },
-  {
-    nombre: 'PAMI',
-    plus: 18000,
-    arancel: 8000,
-    cuidar: 0,
-    impBanco: 0,
-    impFactura: 0,
-    gastosAdm: 0,
-    suspendida: false,
-    version: 1,
-  },
-]
+import type { Doctor } from '../types'
 
 const mockDoctor: Doctor = {
   id: 'doc-1',
   nombre: 'CARMEN',
   apellido: 'ALFONSO',
+  dni: '',
   matricula: '1234',
   especialidad: 'Endocrinología',
+  telefono: '',
+  localidad: '',
+  email: '',
   particular: 40000,
   valor: 0,
   cuidar: 0,
-  obrasSociales: [{ nombre: 'IPS' }, { nombre: 'OSDE' }], // No atiende PAMI
+  obrasSociales: [
+    { nombre: 'IPS', porcentaje: 0, monto: 25000 },
+    { nombre: 'OSDE', porcentaje: 0, monto: 0 },
+  ],
 }
 
 describe('turnoMonto - normalización y atención', () => {
@@ -65,90 +36,55 @@ describe('turnoMonto - normalización y atención', () => {
     expect(doctorAttendsCoverage(mockDoctor, 'IPS')).toBe(true)
     expect(doctorAttendsCoverage(mockDoctor, 'ips')).toBe(true)
     expect(doctorAttendsCoverage(mockDoctor, 'PAMI')).toBe(false)
-    expect(doctorAttendsCoverage(mockDoctor, 'Particular')).toBe(true) // Particular siempre atendido
+    expect(doctorAttendsCoverage(mockDoctor, 'Particular')).toBe(true)
   })
 })
 
-describe('turnoMonto - calcularMontoSugerido (5 Reglas de Negocio)', () => {
-  it('Regla 1: Médico atiende la obra social y tiene Plus cargado (> 0)', () => {
-    const res = calcularMontoSugerido({
-      doctor: mockDoctor,
-      cobertura: 'IPS',
-      obrasSocialesCatalog: mockCatalog,
+describe('turnoMonto - monto según ficha del médico', () => {
+  it('usa el monto cargado para la obra social', () => {
+    expect(calcularMontoSugerido(mockDoctor, 'IPS')).toEqual({
+      monto: 25000,
+      origen: 'ok',
     })
-
-    expect(res.montoCalculado).toBe(25000)
-    expect(res.montoCalculadoFormateado).toBe('25.000')
-    expect(res.avisoTipo).toBe('automatic-plus')
-    expect(res.avisoTexto).toContain('Valor automático · Plus de IPS (Obras sociales).')
-    expect(res.mostrarBotonUsarSugerido).toBe(false)
   })
 
-  it('Regla 2: Médico no atiende esa obra social', () => {
-    const res = calcularMontoSugerido({
-      doctor: mockDoctor,
-      cobertura: 'PAMI',
-      obrasSocialesCatalog: mockCatalog,
+  it('devuelve sin-monto cuando la obra social tiene monto cero', () => {
+    expect(calcularMontoSugerido(mockDoctor, 'OSDE')).toEqual({
+      monto: 0,
+      origen: 'sin-monto',
     })
-
-    expect(res.montoCalculado).toBeNull()
-    expect(res.avisoTipo).toBe('warning-not-attended')
-    expect(res.avisoTexto).toContain('ALFONSO, CARMEN no atiende PAMI. Elegí otra cobertura.')
-    expect(res.mostrarBotonUsarSugerido).toBe(false)
   })
 
-  it('Regla 3: Obra social no tiene Plus cargado (vacío o 0)', () => {
-    const res = calcularMontoSugerido({
-      doctor: mockDoctor,
-      cobertura: 'OSDE',
-      obrasSocialesCatalog: mockCatalog,
+  it('devuelve sin-monto cuando el médico no atiende la cobertura', () => {
+    expect(calcularMontoSugerido(mockDoctor, 'PAMI')).toEqual({
+      monto: 0,
+      origen: 'sin-monto',
     })
-
-    expect(res.montoCalculado).toBeNull()
-    expect(res.avisoTipo).toBe('info-manual')
-    expect(res.avisoTexto).toBe('Esta obra social no tiene Plus cargado. Cargá el monto a mano.')
-    expect(res.mostrarBotonUsarSugerido).toBe(false)
   })
 
-  it('Regla 4: Cobertura es Particular (usa valor particular de la ficha del médico)', () => {
-    const res = calcularMontoSugerido({
-      doctor: mockDoctor,
-      cobertura: 'Particular',
-      obrasSocialesCatalog: mockCatalog,
+  it('usa el arancel Particular del médico', () => {
+    expect(calcularMontoSugerido(mockDoctor, 'Particular')).toEqual({
+      monto: 40000,
+      origen: 'ok',
     })
-
-    expect(res.montoCalculado).toBe(40000)
-    expect(res.montoCalculadoFormateado).toBe('40.000')
-    expect(res.avisoTipo).toBe('automatic-particular')
-    expect(res.avisoTexto).toBe('Valor automático · Particular de ALFONSO, CARMEN.')
-    expect(res.mostrarBotonUsarSugerido).toBe(false)
   })
 
-  it('Regla 5: Usuario escribe otro monto manualmente -> respeta monto y ofrece botón "Usar sugerido"', () => {
-    const res = calcularMontoSugerido({
-      doctor: mockDoctor,
-      cobertura: 'IPS', // Sugerido es 25.000
-      obrasSocialesCatalog: mockCatalog,
-      montoActualInput: '30.000', // Usuario escribió 30.000
-      usuarioEditoManualmente: true,
+  it('devuelve sin-monto para Particular sin arancel', () => {
+    expect(calcularMontoSugerido({ ...mockDoctor, particular: 0 }, 'Particular')).toEqual({
+      monto: 0,
+      origen: 'sin-monto',
     })
-
-    expect(res.montoCalculado).toBe(25000)
-    expect(res.sugeridoParaBoton).toBe(25000)
-    expect(res.mostrarBotonUsarSugerido).toBe(true)
   })
 
-  it('Regla 5b: Usuario escribe manualmente el mismo monto que el sugerido -> no muestra botón duplicado', () => {
-    const res = calcularMontoSugerido({
-      doctor: mockDoctor,
-      cobertura: 'IPS',
-      obrasSocialesCatalog: mockCatalog,
-      montoActualInput: '25.000',
-      usuarioEditoManualmente: true,
-    })
+  it('compara cobertura ignorando mayúsculas y espacios', () => {
+    const doctor = {
+      ...mockDoctor,
+      obrasSociales: [{ nombre: '  IPS  ', porcentaje: 0, monto: 25000 }],
+    }
 
-    expect(res.montoCalculado).toBe(25000)
-    expect(res.mostrarBotonUsarSugerido).toBe(false)
+    expect(calcularMontoSugerido(doctor, ' ips ')).toEqual({
+      monto: 25000,
+      origen: 'ok',
+    })
   })
 })
-

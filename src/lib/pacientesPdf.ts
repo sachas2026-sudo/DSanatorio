@@ -280,7 +280,6 @@ export function buildPacientesListadoPdf(
       tableWidth,
       margin: { left: tableLeft, right: PAGOS_PDF_MARGIN },
       showHead: 'everyPage',
-      rowHeight: 15,
     })
 
     const finalY = tableFinalY(doc, tableStartY)

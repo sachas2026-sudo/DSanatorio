@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Sanatorio — Centro Médico
 
 Aplicación de escritorio para gestión clínica: pacientes, médicos, agenda, pagos, PDFs y configuración SMTP.
@@ -140,3 +141,6 @@ Credenciales por defecto (cambiar en Configuración → Usuarios): usuario `Admi
 - SANATORIO_BACKUP_DIR: carpeta de respaldos (por defecto C:\Sanatorio\respaldo).
 - SANATORIO_ROOT: carpeta raiz (por defecto C:\Sanatorio).
 
+=======
+# DSanatorio
+>>>>>>> dafe71ac29592c9b7314ac48d564d1d6e833b4ee

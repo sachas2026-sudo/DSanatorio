@@ -164,12 +164,12 @@ export function MedicosPage() {
     ).map((os) => ({
       nombre: typeof os === 'string' ? os : os.nombre,
       porcentaje:
-        typeof os === 'object' && os.porcentaje != null && os.porcentaje > 0
-          ? String(os.porcentaje)
+        typeof os === 'object' && os.porcentaje != null
+          ? String(Math.round(os.porcentaje))
           : '0',
       monto:
         typeof os === 'object' && os.monto != null && os.monto > 0
-          ? formatMoneyDisplay(os.monto)
+          ? formatThousands(os.monto)
           : '',
     }))
 
@@ -186,9 +186,9 @@ export function MedicosPage() {
       email: d.email,
       alias: d.alias ?? '',
       porcentaje: formatPorcentajeInput(d.porcentaje),
-      valor: d.valor != null && d.valor > 0 ? formatMoneyDisplay(d.valor) : '',
-      particular: d.particular != null && d.particular > 0 ? formatMoneyDisplay(d.particular) : '',
-      cuidar: d.cuidar != null && d.cuidar > 0 ? formatMoneyDisplay(d.cuidar) : '',
+      valor: d.valor != null ? formatMoneyDisplay(d.valor) : '',
+      particular: d.particular != null ? formatMoneyDisplay(d.particular) : '',
+      cuidar: d.cuidar != null ? formatMoneyDisplay(d.cuidar) : '',
     }
 
     setForm(initialData)
@@ -320,11 +320,8 @@ export function MedicosPage() {
       const k = nombre.toLowerCase()
       if (seenOs.has(k)) continue
       seenOs.add(k)
-      const rawPct = parseFloat(item.porcentaje.replace(',', '.'))
-      const pct = isNaN(rawPct)
-        ? 0
-        : Math.max(0, Math.min(100, Math.round(rawPct * 10) / 10))
-      const monto = parseMoneyInput(item.monto)
+      const pct = parseThousands(item.porcentaje)
+      const monto = parseThousands(item.monto)
       deduplicatedOs.push({
         nombre,
         porcentaje: pct,
@@ -334,12 +331,14 @@ export function MedicosPage() {
 
     upsertDoctor({
       ...form,
-      alias: form.alias?.trim() || undefined,
+      alias: form.alias?.trim() ?? '',
       obrasSociales: deduplicatedOs,
       porcentaje,
-      valor: parseMoneyInput(form.valor),
-      particular: parseMoneyInput(form.particular),
-      cuidar: parseMoneyInput(form.cuidar),
+      valor: form.valor.trim() ? parseMoneyInput(form.valor) : null,
+      particular: form.particular.trim()
+        ? parseMoneyInput(form.particular)
+        : null,
+      cuidar: form.cuidar.trim() ? parseMoneyInput(form.cuidar) : null,
       id: editingId ?? undefined,
     })
     closeForm()
@@ -561,7 +560,7 @@ export function MedicosPage() {
               </button>
             </div>
 
-            <form onSubmit={submit} className="pac-modal__form">
+            <form onSubmit={submit} noValidate className="pac-modal__form">
               <div className="pac-modal__body doctor-modal-body">
                 {(validationMsg || dniMsg) && (
                   <div className="msg msg-error">
@@ -937,14 +936,13 @@ export function MedicosPage() {
                             <div>
                               <input
                                 type="text"
-                                inputMode="decimal"
-                                maxLength={6}
+                                inputMode="numeric"
                                 className="doctor-os-input-pct"
                                 placeholder="0"
                                 aria-label={`Porcentaje para ${os.nombre}`}
                                 value={os.porcentaje}
                                 onChange={(e) => {
-                                  const val = sanitizePorcentajeInput(e.target.value)
+                                  const val = e.target.value.replace(/\D/g, '')
                                   setForm((f) => {
                                     const next = [...f.obrasSociales]
                                     next[idx] = { ...next[idx], porcentaje: val }
@@ -962,10 +960,10 @@ export function MedicosPage() {
                                   className="doctor-os-input-monto"
                                   placeholder="0"
                                   aria-label={`Monto para ${os.nombre}`}
-                                  value={os.monto ? os.monto.replace(/^\$\s*/, '') : ''}
+                                  value={os.monto}
+                                  onFocus={(e) => e.currentTarget.select()}
                                   onChange={(e) => {
-                                    const clean = sanitizeMoneyTyping(e.target.value)
-                                    const val = clean ? formatMoneyDisplay(clean) : ''
+                                    const val = formatThousands(e.target.value)
                                     setForm((f) => {
                                       const next = [...f.obrasSociales]
                                       next[idx] = { ...next[idx], monto: val }

@@ -1,4 +1,5 @@
-import { useState, useRef, type FormEvent } from 'react'
+import { useEffect, useState, useRef, type FormEvent } from 'react'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import {
   getDefaultLoginUsername,
   getLoginUserOptions,
@@ -20,6 +21,7 @@ type Props = {
 
 export function LoginScreen({ onSuccess }: Props) {
   const [username, setUsername] = useState(getDefaultLoginUsername())
+  const [installProfile, setInstallProfile] = useState<string | null>(null)
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,8 +29,37 @@ export function LoginScreen({ onSuccess }: Props) {
   const [scanning, setScanning] = useState(false)
   const [netMessage, setNetMessage] = useState<string | null>(null)
   const [showNetModal, setShowNetModal] = useState(false)
-  const userOptions = getLoginUserOptions()
+  const profileRole =
+    installProfile === 'server'
+      ? 'secretaria'
+      : installProfile === 'contratantes'
+        ? 'afiliado'
+        : installProfile === 'administracion'
+          ? 'admin'
+          : undefined
+  const userOptions = getLoginUserOptions(profileRole)
   const userButtonRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    void invoke<string | null>('get_install_profile')
+      .then((profile) => {
+        if (active) setInstallProfile(profile)
+      })
+      .catch((err) => {
+        console.error('No se pudo leer el perfil de instalación:', err)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!profileRole) return
+    const suggestedUser = getLoginUserOptions(profileRole)[0]
+    if (suggestedUser) setUsername(suggestedUser)
+  }, [profileRole])
 
   async function handleAutoConnect() {
     setScanning(true)

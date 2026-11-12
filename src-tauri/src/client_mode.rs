@@ -34,6 +34,10 @@ pub struct ClientConfig {
     pub server_url: Option<String>,
     #[serde(alias = "server_cert_pem")]
     pub server_cert_pem: Option<String>,
+    #[serde(alias = "server_primary_ip", default)]
+    pub server_primary_ip: Option<String>,
+    #[serde(alias = "device_id", default)]
+    pub device_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +81,8 @@ fn quitar_claves_duplicadas(value: &mut serde_json::Value) {
     for (canonica, legacy) in [
         ("serverUrl", "server_url"),
         ("serverCertPem", "server_cert_pem"),
+        ("serverPrimaryIp", "server_primary_ip"),
+        ("deviceId", "device_id"),
     ] {
         if obj.contains_key(canonica) && obj.contains_key(legacy) {
             obj.remove(legacy);
@@ -90,6 +96,8 @@ pub fn load_config_from(path: &std::path::Path) -> Result<ClientConfig, String> 
             mode: AppMode::Local,
             server_url: None,
             server_cert_pem: None,
+            server_primary_ip: None,
+            device_id: None,
         });
     }
     let content = std::fs::read_to_string(path)
@@ -236,14 +244,17 @@ mod tests {
         let path = tmp.path().join("config.json");
         let cfg = ClientConfig {
             mode: AppMode::Client,
-            server_url: Some("https://192.168.1.10:8787".into()),
+            server_url: Some("https://192.168.1.10:9443".into()),
             server_cert_pem: Some("-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----".into()),
+            server_primary_ip: Some("192.168.1.12".into()),
+            device_id: Some("client-device-1".into()),
         };
         save_config_to(&path, &cfg).unwrap();
         let loaded = load_config_from(&path).unwrap();
         assert_eq!(loaded.mode, AppMode::Client);
-        assert_eq!(loaded.server_url.as_deref(), Some("https://192.168.1.10:8787"));
+        assert_eq!(loaded.server_url.as_deref(), Some("https://192.168.1.10:9443"));
         assert!(loaded.server_cert_pem.as_deref().unwrap().contains("CERTIFICATE"));
+        assert_eq!(loaded.server_primary_ip.as_deref(), Some("192.168.1.12"));
     }
 
     #[test]
@@ -254,6 +265,8 @@ mod tests {
             mode: AppMode::Client,
             server_url: Some("http://192.168.1.10:8787".into()),
             server_cert_pem: Some("cert".into()),
+            server_primary_ip: None,
+            device_id: None,
         };
         save_config_to(&path, &cfg).unwrap();
         let loaded = load_config_from(&path).unwrap();
@@ -268,6 +281,8 @@ mod tests {
             mode: AppMode::Client,
             server_url: Some("https://192.168.1.10:8787".into()),
             server_cert_pem: None,
+            server_primary_ip: None,
+            device_id: None,
         };
         save_config_to(&path, &cfg).unwrap();
         let loaded = load_config_from(&path).unwrap();

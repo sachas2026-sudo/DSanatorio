@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import type { AppointmentEstado, Doctor, ObraSocialCatalog, Patient } from '../../../../types'
@@ -12,6 +12,7 @@ import { patientMatchesPickerQuery, patientPickerLineLegacy } from '../../../../
 import { MOTIVO_CONSULTA_2_NINGUNO } from '../../../../lib/motivoConsulta'
 import {
   calcularMontoSugerido,
+  isParticularCobertura,
   normalizeOsName,
 } from '../../../../lib/turnoMonto'
 import {
@@ -390,8 +391,13 @@ export function NuevoTurnoModal({
 
   // Flag para rastrear si el usuario editó el monto manualmente (Regla 5)
   const [usuarioEditoManualmente, setUsuarioEditoManualmente] = useState(false)
+  const [montoFlash, setMontoFlash] = useState(false)
+  const montoFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const patientInputRef = useRef<HTMLInputElement | null>(null)
+  const patientPickerBlurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Estado local para los inputs de Plus de cada obra social en la pastilla lateral
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- se conserva la lógica Plus
   const [plusInputs, setPlusInputs] = useState<Record<string, string>>({})
   const saveTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
@@ -399,6 +405,8 @@ export function NuevoTurnoModal({
   useEffect(() => {
     return () => {
       Object.values(saveTimeoutRef.current).forEach((t) => clearTimeout(t))
+      if (montoFlashTimeoutRef.current) clearTimeout(montoFlashTimeoutRef.current)
+      if (patientPickerBlurTimeoutRef.current) clearTimeout(patientPickerBlurTimeoutRef.current)
     }
   }, [])
 
@@ -420,16 +428,31 @@ export function NuevoTurnoModal({
     return doctorById(bookingDoctorId)
   }, [bookingDoctorId, doctorById])
 
-  // Cálculo del monto automático / sugerido según las 5 reglas
+  // Cálculo del monto automático / sugerido según la ficha del médico
   const montoSugerido = useMemo(() => {
-    return calcularMontoSugerido({
-      doctor: selectedDoctor,
-      cobertura: bookingCobertura,
-      obrasSocialesCatalog,
-      montoActualInput: bookingMonto,
-      usuarioEditoManualmente,
-    })
-  }, [selectedDoctor, bookingCobertura, obrasSocialesCatalog, bookingMonto, usuarioEditoManualmente])
+    return calcularMontoSugerido(selectedDoctor, bookingCobertura)
+  }, [selectedDoctor, bookingCobertura])
+
+  const aplicarMontoSugerido = useCallback((monto: number) => {
+    const nuevoMonto = formatPesosAr(monto)
+    if (bookingMonto === nuevoMonto) return
+
+    setBookingMonto(nuevoMonto)
+    setMontoFlash(true)
+    if (montoFlashTimeoutRef.current) clearTimeout(montoFlashTimeoutRef.current)
+    montoFlashTimeoutRef.current = setTimeout(() => setMontoFlash(false), 650)
+  }, [bookingMonto, setBookingMonto])
+
+  useEffect(() => {
+    if (!selectedDoctor || bookingEditingId || usuarioEditoManualmente) return
+    aplicarMontoSugerido(montoSugerido.monto)
+  }, [
+    aplicarMontoSugerido,
+    bookingEditingId,
+    montoSugerido.monto,
+    selectedDoctor,
+    usuarioEditoManualmente,
+  ])
 
   // Fecha con formato "Viernes 6 de Noviembre"
   const fechaFormateada = useMemo(() => {
@@ -469,25 +492,13 @@ export function NuevoTurnoModal({
     setBookingDoctorId(docId)
     setBookingSlotHm(null)
     setBookingManualHm('')
+    setUsuarioEditoManualmente(false)
     const doc = doctorById(docId)
+    if (!bookingEditingId) {
+      aplicarMontoSugerido(calcularMontoSugerido(doc, bookingCobertura).monto)
+    }
     if (doc && !bookingFueraGrilla) {
       setBookingDuracion(doctorDuracionTurno(doc))
-    }
-    if (!bookingEditingId && doc) {
-      const res = calcularMontoSugerido({
-        doctor: doc,
-        cobertura: bookingCobertura,
-        obrasSocialesCatalog,
-        montoActualInput: '',
-        usuarioEditoManualmente: false,
-      })
-      if (!usuarioEditoManualmente) {
-        if (res.montoCalculado !== null && res.montoCalculado > 0) {
-          setBookingMonto(res.montoCalculadoFormateado)
-        } else {
-          setBookingMonto('')
-        }
-      }
     }
   }
 
@@ -495,19 +506,8 @@ export function NuevoTurnoModal({
   const handleCoberturaChange = (newCob: string) => {
     setBookingCobertura(newCob)
     setUsuarioEditoManualmente(false)
-    if (!bookingEditingId && selectedDoctor) {
-      const res = calcularMontoSugerido({
-        doctor: selectedDoctor,
-        cobertura: newCob,
-        obrasSocialesCatalog,
-        montoActualInput: '',
-        usuarioEditoManualmente: false,
-      })
-      if (res.montoCalculado !== null && res.montoCalculado > 0) {
-        setBookingMonto(res.montoCalculadoFormateado)
-      } else {
-        setBookingMonto('')
-      }
+    if (!bookingEditingId) {
+      aplicarMontoSugerido(calcularMontoSugerido(selectedDoctor, newCob).monto)
     }
   }
 
@@ -519,39 +519,17 @@ export function NuevoTurnoModal({
 
   // Botón "Usar sugerido"
   const handleUsarSugerido = () => {
-    if (montoSugerido.sugeridoParaBoton !== null) {
-      setBookingMonto(formatPesosAr(montoSugerido.sugeridoParaBoton))
-      setUsuarioEditoManualmente(false)
-    }
+    setBookingMonto(formatPesosAr(montoSugerido.monto))
+    setUsuarioEditoManualmente(false)
   }
 
   // Edición de Plus en la pastilla lateral con retardo (Regla 3)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- se conserva la lógica Plus
   const handlePlusInputChange = (os: ObraSocialCatalog, rawValue: string) => {
     const formatted = formatMontoFieldInput(rawValue)
     setPlusInputs((prev) => ({ ...prev, [os.nombre]: formatted }))
 
     const nuevoPlus = parsePesosAr(formatted)
-
-    // Recalcular monto en vivo si coincide con la cobertura actual del turno
-    if (
-      normalizeOsName(os.nombre) === normalizeOsName(bookingCobertura) &&
-      !usuarioEditoManualmente &&
-      !bookingEditingId
-    ) {
-      if (selectedDoctor) {
-        const atiende = selectedDoctor.obrasSociales?.some(
-          (o) => normalizeOsName(typeof o === 'string' ? o : o.nombre) === normalizeOsName(os.nombre),
-        ) || (selectedDoctor.obraSocial && normalizeOsName(selectedDoctor.obraSocial) === normalizeOsName(os.nombre))
-
-        if (atiende) {
-          if (nuevoPlus > 0) {
-            setBookingMonto(formatPesosAr(nuevoPlus))
-          } else {
-            setBookingMonto('')
-          }
-        }
-      }
-    }
 
     // Debounce guardado en base de datos
     if (saveTimeoutRef.current[os.nombre]) {
@@ -578,20 +556,20 @@ export function NuevoTurnoModal({
     const nuevaCob = canonicalMatch || pacOs || 'Particular'
     setBookingCobertura(nuevaCob)
 
-    if (!bookingEditingId && selectedDoctor) {
-      const res = calcularMontoSugerido({
-        doctor: selectedDoctor,
-        cobertura: nuevaCob,
-        obrasSocialesCatalog,
-        montoActualInput: '',
-        usuarioEditoManualmente: false,
-      })
-      if (res.montoCalculado !== null && res.montoCalculado > 0) {
-        setBookingMonto(res.montoCalculadoFormateado)
-      } else {
-        setBookingMonto('')
-      }
+  }
+
+  const handleClearPatient = () => {
+    if (patientPickerBlurTimeoutRef.current) {
+      clearTimeout(patientPickerBlurTimeoutRef.current)
+      patientPickerBlurTimeoutRef.current = null
     }
+    setBookingPatientId('')
+    setBookingPatientQuery('')
+    setBookingPatientPickerOpen(false)
+    window.requestAnimationFrame(() => {
+      patientInputRef.current?.focus()
+      setBookingPatientPickerOpen(false)
+    })
   }
 
   // Médicos ordenados para la pastilla lateral
@@ -602,6 +580,39 @@ export function NuevoTurnoModal({
       }),
     )
   }, [bookingDoctors])
+
+  const [busquedaMedicos, setBusquedaMedicos] = useState('')
+  const medicosFiltrados = useMemo(() => {
+    const normalizar = (value: string) =>
+      value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es')
+    const query = normalizar(busquedaMedicos.trim())
+    if (!query) return medicosOrdenados
+
+    return medicosOrdenados.filter((doc) => {
+      const coberturasList: string[] = []
+      if (Array.isArray(doc.obrasSociales) && doc.obrasSociales.length > 0) {
+        doc.obrasSociales.forEach((os) => {
+          const nombre = typeof os === 'string' ? os : os.nombre
+          if (nombre && nombre.trim()) coberturasList.push(nombre.trim())
+        })
+      } else if (doc.obraSocial && doc.obraSocial.trim()) {
+        coberturasList.push(doc.obraSocial.trim())
+      }
+
+      const partVal = Math.round(Number(doc.particular || 0))
+      if (partVal > 0) {
+        coberturasList.push(`Particular $ ${formatPesosAr(partVal)}`)
+      } else if (coberturasList.length === 0) {
+        coberturasList.push('Particular (sin arancel)')
+      }
+
+      return normalizar(`${doc.apellido} ${doc.nombre} ${coberturasList.join(' ')}`).includes(query)
+    })
+  }, [busquedaMedicos, medicosOrdenados])
+  const mostrarSugerido =
+    Boolean(selectedDoctor) &&
+    (usuarioEditoManualmente || Boolean(bookingEditingId)) &&
+    parsePesosAr(bookingMonto) !== montoSugerido.monto
 
   return (
     <div
@@ -671,7 +682,8 @@ export function NuevoTurnoModal({
                       <input
                         id="nt-pac"
                         name="sanatorio-agenda-paciente"
-                        className="nt-input"
+                        ref={patientInputRef}
+                        className={`nt-input nt-paciente-input${bookingPatientId ? ' nt-paciente-input--selected' : ''}`}
                         style={{ width: '100%' }}
                         autoComplete="off"
                         value={bookingPatientQuery}
@@ -714,7 +726,8 @@ export function NuevoTurnoModal({
                           handleSelectPatient(pick)
                         }}
                         onBlur={() => {
-                          window.setTimeout(() => {
+                          patientPickerBlurTimeoutRef.current = window.setTimeout(() => {
+                            patientPickerBlurTimeoutRef.current = null
                             setBookingPatientPickerOpen(false)
                             const q = bookingPatientQuery.trim()
                             if (!q) return
@@ -728,6 +741,18 @@ export function NuevoTurnoModal({
                         }}
                         placeholder="Buscar por DNI o apellido…"
                       />
+                      {bookingPatientId && (
+                        <button
+                          type="button"
+                          className="nt-paciente-clear"
+                          title="Quitar paciente"
+                          aria-label="Quitar paciente"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={handleClearPatient}
+                        >
+                          ✕
+                        </button>
+                      )}
                       {bookingPatientPickerOpen && (
                         <div className="nt-paciente-menu">
                           {(bookingPatientQuery.trim()
@@ -866,7 +891,7 @@ export function NuevoTurnoModal({
                         <span className="nt-monto-prefix">$</span>
                         <input
                           id="nt-monto"
-                          className="nt-input nt-monto-input"
+                          className={`nt-input nt-monto-input${montoFlash ? ' nt-monto-input--flash' : ''}`}
                           style={{ width: '100%' }}
                           inputMode="numeric"
                           placeholder="0"
@@ -913,21 +938,21 @@ export function NuevoTurnoModal({
                     </div>
                   </div>
 
-                  {/* Aviso del monto con botón "Usar sugerido" si aplica */}
-                  {montoSugerido.avisoTexto &&
-                    !montoSugerido.avisoTexto.toLowerCase().includes('calcular el monto') && (
-                    <div className={`nt-monto-notice nt-monto-notice--${montoSugerido.avisoTipo}`}>
-                      <span>{montoSugerido.avisoTexto}</span>
-                      {montoSugerido.mostrarBotonUsarSugerido &&
-                        montoSugerido.sugeridoParaBoton !== null && (
-                          <button
-                            type="button"
-                            className="nt-btn-usar-sugerido"
-                            onClick={handleUsarSugerido}
-                          >
-                            Usar sugerido ($ {formatPesosAr(montoSugerido.sugeridoParaBoton)})
-                          </button>
-                        )}
+                  {selectedDoctor && montoSugerido.origen === 'sin-monto' && (
+                    <div className="nt-monto-notice nt-monto-notice--sin-monto">
+                      Este médico no tiene monto cargado para {bookingCobertura}
+                    </div>
+                  )}
+                  {mostrarSugerido && (
+                    <div className="nt-monto-notice nt-monto-notice--info-manual">
+                      <span>Sugerido: $ {formatPesosAr(montoSugerido.monto)}</span>
+                      <button
+                        type="button"
+                        className="nt-btn-usar-sugerido"
+                        onClick={handleUsarSugerido}
+                      >
+                        Usar sugerido
+                      </button>
                     </div>
                   )}
 
@@ -1290,6 +1315,7 @@ export function NuevoTurnoModal({
                   type="submit"
                   className="nt-btn-confirm"
                   disabled={
+                    !bookingPatientId ||
                     !bookingResolvedHm() ||
                     (bookingFueraGrilla &&
                       bookingManualSlotCheck !== null &&
@@ -1306,81 +1332,94 @@ export function NuevoTurnoModal({
           </form>
         </div>
 
-        {/* Columna Lateral: Dos Pastillas (236px) */}
+        {/* Columna lateral de médicos (236px) */}
         <div className={`nt-col-side${sidePillsOpen ? '' : ' nt-col-side--hidden'}`}>
-          {/* Pastilla 1: OBRAS SOCIALES · COLUMNA PLUS (EDITABLE) */}
-          <div className="nt-side-pill">
-            <div className="nt-side-pill__head">
-              <h3 className="nt-side-pill__title">OBRAS SOCIALES · COLUMNA PLUS (EDITABLE)</h3>
-              <div className="nt-side-pill__sub">PLUS CONFIGURABLE</div>
-            </div>
-            <div className="nt-side-pill__body">
-              {obrasSocialesCatalog.map((os) => {
-                const inputValue =
-                  plusInputs[os.nombre] !== undefined
-                    ? plusInputs[os.nombre]
-                    : os.plus > 0
-                    ? formatPesosAr(os.plus)
-                    : ''
-
-                return (
-                  <div key={os.nombre} className="nt-pill-os-row">
-                    <span className="nt-pill-os-name" title={os.nombre}>
-                      {os.nombre}
-                    </span>
-                    <div className="nt-pill-os-input-wrap">
-                      <span className="nt-pill-os-prefix">$</span>
-                      <input
-                        className="nt-pill-os-input"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={inputValue}
-                        onChange={(e) => handlePlusInputChange(os, e.target.value)}
-                      />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="nt-side-pill__footer">
-              Cambiá un Plus y mirá cómo se actualiza el Monto del turno.
-            </div>
-          </div>
-
-          {/* Pastilla 2: MÉDICOS Y SUS COBERTURAS */}
-          <div className="nt-side-pill">
+          <div className="nt-side-pill nt-side-pill--medicos">
             <div className="nt-side-pill__head">
               <h3 className="nt-side-pill__title">MÉDICOS Y SUS COBERTURAS</h3>
-              <div className="nt-side-pill__sub">OBRAS SOCIALES QUE ATIENDEN</div>
+              <div className="nt-side-pill__sub">OBRAS SOCIALES QUE ATIENDEN · MONTO</div>
             </div>
-            <div className="nt-side-pill__body">
-              {medicosOrdenados.map((doc) => {
-                const coberturasList: string[] = []
-                if (Array.isArray(doc.obrasSociales) && doc.obrasSociales.length > 0) {
-                  doc.obrasSociales.forEach((os) => {
-                    const nombre = typeof os === 'string' ? os : os.nombre
-                    if (nombre && nombre.trim()) coberturasList.push(nombre.trim())
-                  })
-                } else if (doc.obraSocial && doc.obraSocial.trim()) {
-                  coberturasList.push(doc.obraSocial.trim())
+            <div className="nt-medicos-search">
+              <div className="nt-medicos-search__field">
+                <input
+                  type="text"
+                  aria-label="Buscar médico"
+                  placeholder="Buscar médico..."
+                  value={busquedaMedicos}
+                  onChange={(e) => setBusquedaMedicos(e.target.value)}
+                />
+                {busquedaMedicos && (
+                  <button
+                    type="button"
+                    className="nt-medicos-search__clear"
+                    aria-label="Borrar búsqueda"
+                    onClick={() => setBusquedaMedicos('')}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="nt-medicos-search__count" aria-live="polite">
+                {medicosFiltrados.length} médico{medicosFiltrados.length === 1 ? '' : 's'}
+              </div>
+            </div>
+            <div className="nt-side-pill__body nt-side-pill__body--medicos">
+              {medicosFiltrados.length === 0 ? (
+                <div className="nt-medicos-empty">Sin resultados.</div>
+              ) : medicosFiltrados.map((doc) => {
+                const coberturasList: Array<{ nombre: string; monto: number | null }> =
+                  Array.isArray(doc.obrasSociales)
+                  ? doc.obrasSociales
+                      .map((os) => ({
+                        nombre: os.nombre.trim(),
+                        monto: Math.round(Number(os.monto || 0)),
+                      }))
+                      .filter((os) => os.nombre)
+                  : []
+                if (coberturasList.length === 0 && doc.obraSocial?.trim()) {
+                  coberturasList.push({ nombre: doc.obraSocial.trim(), monto: null })
                 }
-
                 const partVal = Math.round(Number(doc.particular || 0))
-                if (partVal > 0) {
-                  coberturasList.push(`Particular $ ${formatPesosAr(partVal)}`)
-                } else if (coberturasList.length === 0) {
-                  coberturasList.push('Particular (sin arancel)')
-                }
-
-                const resumen = coberturasList.join(' · ')
+                const medicoSeleccionado = doc.id === bookingDoctorId
 
                 return (
-                  <div key={doc.id} className="nt-pill-med-item">
+                  <button
+                    key={doc.id}
+                    type="button"
+                    className={`nt-pill-med-item${medicoSeleccionado ? ' nt-pill-med-item--selected' : ''}`}
+                    aria-pressed={medicoSeleccionado}
+                    onClick={() => handleDoctorChange(doc.id)}
+                  >
                     <div className="nt-pill-med-name">
                       {doc.apellido}, {doc.nombre}
                     </div>
-                    <div className="nt-pill-med-coberturas">{resumen}</div>
-                  </div>
+                    <div className="nt-pill-med-coberturas">
+                      {coberturasList.map((os) => {
+                        const coberturaSeleccionada =
+                          medicoSeleccionado &&
+                          !isParticularCobertura(bookingCobertura) &&
+                          normalizeOsName(os.nombre) === normalizeOsName(bookingCobertura)
+                        return (
+                          <span
+                            key={os.nombre}
+                            className={`nt-pill-med-chip${coberturaSeleccionada ? ' nt-pill-med-chip--selected' : ''}`}
+                          >
+                            {os.nombre}
+                            {os.monto !== null ? ` $ ${formatPesosAr(os.monto)}` : ''}
+                          </span>
+                        )
+                      })}
+                      {partVal > 0 ? (
+                        <span
+                          className={`nt-pill-med-chip${medicoSeleccionado && isParticularCobertura(bookingCobertura) ? ' nt-pill-med-chip--selected' : ''}`}
+                        >
+                          Particular $ {formatPesosAr(partVal)}
+                        </span>
+                      ) : coberturasList.length === 0 ? (
+                        <span className="nt-pill-med-empty">Particular (sin arancel)</span>
+                      ) : null}
+                    </div>
+                  </button>
                 )
               })}
             </div>

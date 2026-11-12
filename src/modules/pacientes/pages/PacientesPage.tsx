@@ -793,7 +793,7 @@ export function PacientesPage() {
                       <tr
                         key={p.id}
                         className={summaryPatientId === p.id ? 'is-selected' : ''}
-                        onClick={() => openSummaryModal(p)}
+                        onClick={() => openEditModal(p)}
                       >
                         <td className="pacientes-td-dni">{p.dni || '—'}</td>
                         <td className="pacientes-td-apellido">{p.apellido || '—'}</td>

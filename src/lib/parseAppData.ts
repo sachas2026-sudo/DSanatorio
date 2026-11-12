@@ -125,6 +125,20 @@ function clampMoney(val: unknown): number {
   return n > 0 ? Math.min(Math.round(n), 100_000_000) : 0
 }
 
+function parseUnboundedMoney(val: unknown): number {
+  if (typeof val === 'number') {
+    return Number.isFinite(val) && val > 0 ? Math.round(val) : 0
+  }
+  if (typeof val !== 'string' || val.trim().startsWith('-')) return 0
+  const digits = val.replace(/\D/g, '')
+  const parsed = Number.parseInt(digits, 10)
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+}
+
+function parseNullableMoney(val: unknown): number | null {
+  return val === null ? null : clampMoney(val)
+}
+
 export function parseDoctor(raw: unknown): Doctor | null {
   if (!isRecord(raw)) return null
   const id = nonEmptyId(raw.id)
@@ -153,10 +167,10 @@ export function parseDoctor(raw: unknown): Doctor | null {
             : typeof item.porcentaje === 'string'
               ? parseFloat(item.porcentaje.replace(',', '.'))
               : 0
-          const porcentaje = isNaN(rawPct)
+          const porcentaje = !Number.isFinite(rawPct)
             ? 0
-            : Math.max(0, Math.min(100, Math.round(rawPct * 10) / 10))
-          const monto = clampMoney(item.monto)
+            : Math.max(0, Math.round(rawPct))
+          const monto = parseUnboundedMoney(item.monto)
           result.push({ nombre, porcentaje, monto })
         }
       }
@@ -179,7 +193,7 @@ export function parseDoctor(raw: unknown): Doctor | null {
     email: asString(raw.email),
     alias: (() => {
       const a = asString(raw.alias).trim()
-      return a || undefined
+      return a
     })(),
     porcentaje: parsePorcentajeStored(raw.porcentaje),
     duracionTurnoMinutos: (() => {
@@ -191,9 +205,9 @@ export function parseDoctor(raw: unknown): Doctor | null {
       return t === 'mensual' ? 'mensual' : 'semanal'
     })(),
     activo: asBoolean(raw.activo, true),
-    valor: clampMoney((raw as Record<string, unknown>).valor),
-    particular: clampMoney((raw as Record<string, unknown>).particular),
-    cuidar: clampMoney((raw as Record<string, unknown>).cuidar),
+    valor: parseNullableMoney((raw as Record<string, unknown>).valor),
+    particular: parseNullableMoney((raw as Record<string, unknown>).particular),
+    cuidar: parseNullableMoney((raw as Record<string, unknown>).cuidar),
   }
 }
 

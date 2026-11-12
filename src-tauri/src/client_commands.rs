@@ -7,8 +7,8 @@
 use crate::api_client::build_http_client;
 use crate::client_mode::{self, AppMode, ClientConfig};
 use crate::client_session::{ClientSession, SessionInfo};
+use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, MutexGuard};
-use tokio::time::{timeout, Instant, Duration};
 
 /// Cliente HTTPS ya configurado + URL base del servidor.
 #[derive(Clone)]
@@ -20,6 +20,21 @@ pub struct Conn {
 pub struct ClientState {
     pub session: ClientSession,
     conn: Mutex<Option<Conn>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDeviceAccessInfo {
+    pub status: String,
+    pub server_name: String,
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceAccessReply {
+    status: String,
+    server_name: String,
 }
 
 impl ClientState {
@@ -55,133 +70,39 @@ impl ClientState {
         if cfg.mode != AppMode::Client {
             return Err("La aplicación no está en modo cliente".into());
         }
-        let mut base_url_opt = cfg.server_url.clone();
-        let mut pem_opt = cfg.server_cert_pem.clone();
+        let base_url = cfg
+            .server_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .ok_or_else(|| {
+                "No hay un servidor configurado. Usá «Configurar conexión» antes de iniciar sesión."
+                    .to_string()
+            })?
+            .trim_end_matches('/')
+            .to_string();
+        let pem = cfg.server_cert_pem.as_deref().unwrap_or("auto").to_string();
 
-        // Paso 1: Si hay URL configurada, hacer health check antes de usarla.
-        if base_url_opt.is_some() {
-            let base = base_url_opt.as_ref().unwrap().clone();
-            let pem_for_check = pem_opt.as_deref().unwrap_or("auto").to_string();
-            let client_for_check = build_http_client(&pem_for_check).unwrap();
-            let start = Instant::now();
-            let health_ok = timeout(
-                Duration::from_millis(1500),
-                async move {
-                    let resp = client_for_check.get(format!("{}/api/health", base)).send().await;
-                    let elapsed = start.elapsed();
-                    (resp.map(|r| r.status().is_success()).unwrap_or(false), elapsed)
-                },
+        crate::discovery::check_server_health(&base_url, &pem)
+            .await
+            .map_err(|(_, message)| message)?;
+        let client = build_http_client(&pem)?;
+        let device_id = cfg.device_id.as_deref().unwrap_or("legacy-client");
+        let device_name = std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_else(|_| "Equipo cliente".to_string());
+        let info = self
+            .session
+            .login_with_device(
+                &client,
+                &base_url,
+                username,
+                password,
+                device_id,
+                &device_name,
             )
-            .await;
-            match health_ok {
-                Ok((ok, elapsed)) => {
-                    if elapsed.as_millis() > 1500 || !ok {
-                        // Health check falló: limpiar URL y redescubrir en toda la red (cableada y Wi-Fi)
-                        base_url_opt = None;
-                        pem_opt = None;
-                        if let Ok(servers) = crate::discovery::discover_servers(2000) {
-                            if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
-                                base_url_opt = Some(srv.server_url);
-                                pem_opt = srv.cert_pem.or_else(|| Some("auto".to_string()));
-                                let mut updated = cfg.clone();
-                                updated.server_url = base_url_opt.clone();
-                                updated.server_cert_pem = pem_opt.clone();
-                                let _ = client_mode::save_config(&updated);
-                            }
-                        }
-                    }
-                }
-                Err(_) => {
-                    // Timeout: redescubrir en toda la red (cableada y Wi-Fi)
-                    base_url_opt = None;
-                    pem_opt = None;
-                    if let Ok(servers) = crate::discovery::discover_servers(2000) {
-                        if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
-                            base_url_opt = Some(srv.server_url);
-                            pem_opt = srv.cert_pem.or_else(|| Some("auto".to_string()));
-                            let mut updated = cfg.clone();
-                            updated.server_url = base_url_opt.clone();
-                            updated.server_cert_pem = pem_opt.clone();
-                            let _ = client_mode::save_config(&updated);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Si aun no hay URL, intentar descubrimiento en toda la red (cableada y Wi-Fi)
-        if base_url_opt.is_none() {
-            if let Ok(servers) = crate::discovery::discover_servers(2000) {
-                if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
-                    base_url_opt = Some(srv.server_url);
-                    pem_opt = srv.cert_pem.or_else(|| Some("auto".to_string()));
-                    let mut updated = cfg.clone();
-                    updated.server_url = base_url_opt.clone();
-                    updated.server_cert_pem = pem_opt.clone();
-                    let _ = client_mode::save_config(&updated);
-                }
-            }
-        }
-
-        let base_url = match base_url_opt {
-            Some(u) => u,
-            None => {
-                // Verificar si esta misma máquina tiene el servidor local activo
-                let local_health_url = format!("https://127.0.0.1:{}/api/health", crate::discovery::SERVER_PORT);
-                let local_client = build_http_client("auto").unwrap();
-                let is_local_online = local_client
-                    .get(&local_health_url)
-                    .timeout(Duration::from_millis(600))
-                    .send()
-                    .await
-                    .map(|r| r.status().is_success())
-                    .unwrap_or(false);
-
-                if is_local_online {
-                    let _ = crate::discovery::set_mode_local();
-                    return Err("servidor_local_detectado".to_string());
-                }
-
-                return Err("No se encontró ningún servidor Sanatorio en la red local (cableada o Wi-Fi). Verificá que la PC principal esté encendida con el programa abierto, o hacé clic en 'Usar Servidor Local' si esta es la PC principal.".to_string());
-            }
-        };
-        let pem = pem_opt.unwrap_or_else(|| "auto".to_string());
-        let client = match build_http_client(&pem) {
-            Ok(c) => c,
-            Err(_) => build_http_client("auto")?,
-        };
-        let (info, active_client) = match self.session.login(&client, &base_url, username, password).await {
-            Ok(info) => (info, client),
-            Err(e) => {
-                // Si falló por error de conexión (no credenciales), reintentá una vez con redescubrimiento
-                let err_str = e.to_string();
-                if !err_str.contains("incorrect") && !err_str.contains("credencial") {
-                    // Intentar redescubrimiento y reintentar login con la nueva URL
-                    if let Ok(servers) = crate::discovery::discover_servers(1200) {
-                        if let Some(srv) = servers.into_iter().find(|s| s.ip != "127.0.0.1" && !s.ip.starts_with("127.")) {
-                            let mut updated = client_mode::load_config()?;
-                            updated.server_url = Some(srv.server_url.clone());
-                            updated.server_cert_pem = Some("auto".to_string());
-                            client_mode::save_config(&updated)?;
-                            client_mode::set_runtime_mode(AppMode::Client);
-                            let new_base = srv.server_url.clone();
-                            let new_pem = "auto".to_string();
-                            let new_client = build_http_client(&new_pem).unwrap();
-                            let info2 = self
-                                .session
-                                .login(&new_client, &new_base, username, password)
-                                .await
-                                .map_err(|e2| format!("No se pudo conectar con el servidor: {e2}"))?;
-                            *self.conn_lock() = Some(Conn { client: new_client, base_url: new_base });
-                            return Ok(info2);
-                        }
-                    }
-                }
-                // Si no fue error de credenciales, relanzar el error original
-                return Err(e);
-            }
-        };
-        *self.conn_lock() = Some(Conn { client: active_client, base_url });
+            .await?;
+        *self.conn_lock() = Some(Conn { client, base_url });
         Ok(info)
     }
 }
@@ -192,8 +113,95 @@ pub async fn client_login(
     username: String,
     password: String,
 ) -> Result<SessionInfo, String> {
-    let cfg = client_mode::load_config()?;
+    let mut cfg = client_mode::load_config()?;
+    if cfg.mode == AppMode::Client {
+        if let Some(server_url) = cfg.server_url.as_deref() {
+            crate::discovery::set_manual_server_url(server_url.to_string(), None).await?;
+            cfg = client_mode::load_config()?;
+        }
+    }
+    if cfg
+        .device_id
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        cfg.device_id = Some(uuid::Uuid::new_v4().to_string());
+        client_mode::save_config(&cfg)?;
+    }
     state.login_with_config(&cfg, &username, &password).await
+}
+
+#[tauri::command]
+pub async fn request_client_device_access(
+    pairing_code: String,
+) -> Result<ClientDeviceAccessInfo, String> {
+    let mut cfg = client_mode::load_config()?;
+    if cfg.mode != AppMode::Client {
+        return Err("La solicitud de acceso solo está disponible en modo cliente.".into());
+    }
+    let base_url = cfg
+        .server_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .ok_or_else(|| "Primero configure la dirección del servidor.".to_string())?
+        .trim_end_matches('/')
+        .to_string();
+    if cfg
+        .device_id
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        cfg.device_id = Some(uuid::Uuid::new_v4().to_string());
+        client_mode::save_config(&cfg)?;
+    }
+
+    crate::discovery::set_manual_server_url(base_url.clone(), None).await?;
+    cfg = client_mode::load_config()?;
+    let pem = cfg.server_cert_pem.as_deref().unwrap_or("auto");
+    let client = build_http_client(pem)?;
+    let device_name = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "Equipo cliente".to_string());
+    let response = client
+        .post(format!("{base_url}/api/device-access"))
+        .json(&serde_json::json!({
+            "device_id": cfg.device_id.as_deref().unwrap_or_default(),
+            "device_name": device_name,
+            "pairing_code": pairing_code,
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("No se pudo enviar la solicitud al servidor: {error}"))?;
+
+    if !response.status().is_success() {
+        return Err(match response.status().as_u16() {
+            404 | 405 => {
+                "El servidor no admite solicitudes de dispositivos; actualice el servidor."
+                    .to_string()
+            }
+            status => format!("El servidor rechazó la solicitud de acceso (HTTP {status})."),
+        });
+    }
+    let reply: DeviceAccessReply = response.json().await.map_err(|error| {
+        format!("El servidor devolvió una respuesta de acceso inválida: {error}")
+    })?;
+    let message = match reply.status.as_str() {
+        "pending" => "Solicitud enviada; espere la aprobación del servidor.",
+        "approved" => "Este dispositivo está aprobado para conectarse.",
+        "revoked" => "El acceso de este dispositivo fue revocado por el servidor.",
+        "invalid_code" => "Clave incorrecta, vencida o no visible en el servidor. Ingrese la clave actual de seis caracteres.",
+        _ => "El servidor devolvió un estado de acceso desconocido.",
+    };
+    Ok(ClientDeviceAccessInfo {
+        status: reply.status,
+        server_name: reply.server_name,
+        message: message.to_string(),
+    })
 }
 
 #[tauri::command]
@@ -206,12 +214,31 @@ pub fn client_session_info(state: tauri::State<'_, ClientState>) -> Option<Sessi
     state.session.info()
 }
 
+#[tauri::command]
+pub async fn client_heartbeat(state: tauri::State<'_, ClientState>) -> Result<(), String> {
+    let reply = state
+        .api_call("GET", "/api/session/heartbeat", None)
+        .await?;
+    if (200..300).contains(&reply.status) {
+        Ok(())
+    } else {
+        Err(format!(
+            "El servidor rechazó el heartbeat de conexión (HTTP {}).",
+            reply.status
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tls_cert::desired_names;
     use crate::tls_files::ensure_server_cert;
-    use axum::{http::StatusCode, routing::post, Json, Router};
+    use axum::{
+        http::StatusCode,
+        routing::{get, post},
+        Json, Router,
+    };
     use axum_server::tls_rustls::RustlsConfig;
     use tempfile::TempDir;
 
@@ -237,15 +264,15 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path().join("tls");
         ensure_server_cert(&dir, &desired_names(&[])).unwrap();
-        let cfg = RustlsConfig::from_pem_file(
-            dir.join("server-cert.pem"),
-            dir.join("server-key.pem"),
-        )
-        .await
-        .unwrap();
+        let cfg =
+            RustlsConfig::from_pem_file(dir.join("server-cert.pem"), dir.join("server-key.pem"))
+                .await
+                .unwrap();
         let handle = axum_server::Handle::new();
         let h = handle.clone();
-        let app = Router::new().route("/api/login", post(fake_login));
+        let app = Router::new()
+            .route("/api/health", get(fake_health))
+            .route("/api/login", post(fake_login));
         tokio::spawn(async move {
             axum_server::bind_rustls("127.0.0.1:0".parse().unwrap(), cfg)
                 .handle(h)
@@ -253,7 +280,10 @@ mod tests {
                 .await
                 .unwrap();
         });
-        let addr = handle.listening().await.expect("el servidor de prueba no arrancó");
+        let addr = handle
+            .listening()
+            .await
+            .expect("el servidor de prueba no arrancó");
         let pem = std::fs::read_to_string(dir.join("server-cert.pem")).unwrap();
         Fixture {
             _tmp: tmp,
@@ -284,11 +314,21 @@ mod tests {
         }
     }
 
+    async fn fake_health() -> Json<serde_json::Value> {
+        Json(serde_json::json!({
+            "status": "ok",
+            "app": "sanatorio",
+            "server_name": "Servidor de prueba"
+        }))
+    }
+
     fn cfg_cliente(fx: &Fixture) -> ClientConfig {
         ClientConfig {
             mode: AppMode::Client,
             server_url: Some(fx.base_url.clone()),
             server_cert_pem: Some(fx.pem.clone()),
+            server_primary_ip: None,
+            device_id: None,
         }
     }
 
@@ -312,8 +352,30 @@ mod tests {
         let st = ClientState::new();
         let mut cfg = cfg_cliente(&fx);
         cfg.mode = AppMode::Local;
-        let err = st.login_with_config(&cfg, "ana", "secreto").await.unwrap_err();
+        let err = st
+            .login_with_config(&cfg, "ana", "secreto")
+            .await
+            .unwrap_err();
         assert!(err.contains("modo cliente"));
+        assert!(st.conn().is_none());
+        assert!(st.session.bearer().is_none());
+    }
+
+    #[tokio::test]
+    async fn login_sin_direccion_no_descubre_ni_autentica_automaticamente() {
+        let st = ClientState::new();
+        let cfg = ClientConfig {
+            mode: AppMode::Client,
+            server_url: None,
+            server_cert_pem: None,
+            server_primary_ip: None,
+            device_id: None,
+        };
+        let err = st
+            .login_with_config(&cfg, "ana", "secreto")
+            .await
+            .unwrap_err();
+        assert!(err.contains("Configurar conexión"));
         assert!(st.conn().is_none());
         assert!(st.session.bearer().is_none());
     }
@@ -329,8 +391,11 @@ mod tests {
         let st = ClientState::new();
         let mut cfg = cfg_cliente(&fx);
         cfg.server_cert_pem = Some(otro_pem);
-        let err = st.login_with_config(&cfg, "ana", "secreto").await.unwrap_err();
-        assert!(err.contains("conectar"));
+        let err = st
+            .login_with_config(&cfg, "ana", "secreto")
+            .await
+            .unwrap_err();
+        assert!(err.contains("TLS") || err.contains("certificado"));
         assert!(st.conn().is_none());
         assert!(st.session.bearer().is_none());
     }

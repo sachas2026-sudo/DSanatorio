@@ -6,10 +6,10 @@
 
 use std::time::Duration;
 
-/// Construye un cliente que confía ÚNICAMENTE en el certificado del servidor
-/// (el guardado en `client-config.json`), sin usar los certificados del sistema
-/// ni proxies, sin seguir redirecciones y solo por HTTPS. La verificación de
-/// nombre/IP la hace rustls: el certificado tiene que cubrir el host de la URL.
+/// Construye un cliente HTTPS sin proxies ni redirecciones. Un PEM explícito
+/// fija la confianza en el certificado PEM recibido por un canal confiable;
+/// `auto` usa las raíces del sistema y nunca
+/// omite la validación del certificado o del nombre/IP.
 pub fn build_http_client(cert_pem: &str) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .https_only(true)
@@ -19,8 +19,8 @@ pub fn build_http_client(cert_pem: &str) -> Result<reqwest::Client, String> {
         .timeout(Duration::from_secs(25));
 
     if cert_pem == "auto" {
-        // En red local permite conectar inmediatamente con el certificado autofirmado del servidor
-        builder = builder.danger_accept_invalid_certs(true);
+        // Mantiene las raíces TLS nativas de reqwest. Los certificados
+        // autofirmados del servidor requieren el certificado PEM de confianza.
     } else {
         if !cert_pem.contains("-----BEGIN CERTIFICATE-----") {
             return Err("el certificado del servidor no tiene formato PEM".into());
@@ -109,6 +109,18 @@ mod tests {
         // El cliente confía en OTRO certificado distinto al del servidor.
         let pem_otro = std::fs::read_to_string(dir_otro.join("server-cert.pem")).unwrap();
         let client = build_http_client(&pem_otro).unwrap();
+        assert!(client.get(health_url(addr)).send().await.is_err());
+        handle.shutdown();
+    }
+
+    #[tokio::test]
+    async fn modo_auto_no_acepta_certificados_autofirmados_invalidos() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("tls");
+        ensure_server_cert(&dir, &desired_names(&[])).unwrap();
+        let (handle, addr) =
+            start_tls_server(&dir.join("server-cert.pem"), &dir.join("server-key.pem")).await;
+        let client = build_http_client("auto").unwrap();
         assert!(client.get(health_url(addr)).send().await.is_err());
         handle.shutdown();
     }

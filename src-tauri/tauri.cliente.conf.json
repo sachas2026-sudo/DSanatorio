@@ -1,0 +1,30 @@
+{
+  "productName": "Sanatorio Cliente",
+  "identifier": "com.sanatorio.cliente",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Sanatorio Cliente",
+        "width": 2000,
+        "height": 1020,
+        "minWidth": 1280,
+        "minHeight": 800,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "maximized": true,
+        "visible": true,
+        "focus": true,
+        "decorations": false
+      }
+    ]
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "startMenuFolder": "Sanatorio Cliente"
+      }
+    }
+  }
+}

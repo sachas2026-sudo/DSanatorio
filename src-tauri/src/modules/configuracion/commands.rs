@@ -187,6 +187,7 @@ pub fn load_auth_accounts() -> Result<String, String> {
     if !path.is_file() {
         return Ok(String::new());
     }
+    crate::auth_defaults::migrate_initial_credentials_file(&path)?;
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 

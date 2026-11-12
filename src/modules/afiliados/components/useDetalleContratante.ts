@@ -60,7 +60,6 @@ const DEFAULT_SAMPLE_AFILIADO: Afiliado = {
     {
       patientId: 'sample-pac-ramirez',
       relacion: 'Hijo/a',
-      fechaAlta: '2026-11-09',
     },
   ],
 }
@@ -72,6 +71,11 @@ const DEFAULT_SAMPLE_PACIENTE: Patient = {
   dni: '62',
   obraSocial: 'Familiar',
   fechaNacimiento: '1975-04-12',
+  telefono: '',
+  email: '',
+  domicilio: '',
+  localidad: '',
+  notas: '',
 }
 
 const DEFAULT_SAMPLE_PLAN: PlanAfiliado = {
@@ -91,7 +95,6 @@ const DEFAULT_SAMPLE_ADHERENTES: AdherenteDetalleItem[] = [
     adherente: {
       patientId: 'sample-pac-ramirez',
       relacion: 'Hijo/a',
-      fechaAlta: '2026-11-09',
     },
     paciente: {
       id: 'sample-pac-ramirez',
@@ -100,6 +103,11 @@ const DEFAULT_SAMPLE_ADHERENTES: AdherenteDetalleItem[] = [
       dni: '33333333',
       fechaNacimiento: '2000-12-12',
       obraSocial: 'Familiar',
+      telefono: '',
+      email: '',
+      domicilio: '',
+      localidad: '',
+      notas: '',
     },
     consultasUsadas: 0,
     cupoConsultas: 3,
@@ -380,6 +388,7 @@ export function useDetalleContratante(options: UseDetalleContratanteOptions = {}
         ...prev,
         activo: false,
         baja: {
+          activa: true,
           fecha: format(new Date(), 'yyyy-MM-dd'),
           motivo: 'A pedido del contratante',
         },

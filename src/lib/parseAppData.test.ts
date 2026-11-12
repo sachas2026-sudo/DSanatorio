@@ -93,7 +93,7 @@ describe('parseDoctor', () => {
 
   it('guarda alias opcional', () => {
     expect(parseDoctor({ id: 'd1', alias: '  DR-G  ' })?.alias).toBe('DR-G')
-    expect(parseDoctor({ id: 'd1', alias: '   ' })?.alias).toBeUndefined()
+    expect(parseDoctor({ id: 'd1', alias: '   ' })?.alias).toBe('')
   })
 
   it('parsea valor, particular y cuidar como enteros no negativos acotados', () => {
@@ -123,6 +123,19 @@ describe('parseDoctor', () => {
     expect(docInvalid?.cuidar).toBe(0)
   })
 
+  it('conserva honorarios vacíos como null', () => {
+    const doc = parseDoctor({
+      id: 'd-empty',
+      valor: null,
+      particular: null,
+      cuidar: null,
+    })
+    expect(doc?.porcentaje).toBeUndefined()
+    expect(doc?.valor).toBeNull()
+    expect(doc?.particular).toBeNull()
+    expect(doc?.cuidar).toBeNull()
+  })
+
   it('convierte obrasSociales viejas (strings sueltos) al nuevo formato con porcentaje 0 y monto 0', () => {
     const doc = parseDoctor({
       id: 'd-os-leg',
@@ -134,19 +147,34 @@ describe('parseDoctor', () => {
     ])
   })
 
-  it('parsea obrasSociales con objeto { nombre, porcentaje, monto }, acota valores y elimina duplicados', () => {
+  it('parsea obrasSociales enteras y elimina duplicados', () => {
     const doc = parseDoctor({
       id: 'd-os-new',
       obrasSociales: [
         { nombre: 'OSDE', porcentaje: 15.54, monto: 12000 },
         { nombre: 'osde', porcentaje: 10, monto: 5000 }, // duplicado case-insensitive
         { nombre: '  ', porcentaje: 20, monto: 3000 }, // vacío
-        { nombre: 'Swiss Medical', porcentaje: 150, monto: -500 }, // fuera de rango
+        { nombre: 'Swiss Medical', porcentaje: 150, monto: -500 },
       ],
     })
     expect(doc?.obrasSociales).toEqual([
-      { nombre: 'OSDE', porcentaje: 15.5, monto: 12000 },
-      { nombre: 'Swiss Medical', porcentaje: 100, monto: 0 },
+      { nombre: 'OSDE', porcentaje: 16, monto: 12000 },
+      { nombre: 'Swiss Medical', porcentaje: 150, monto: 0 },
+    ])
+  })
+
+  it('conserva montos y porcentajes altos al volver a abrir la ficha', () => {
+    const doc = parseDoctor({
+      id: 'd-os-high',
+      obrasSociales: [
+        { nombre: 'IPS', porcentaje: 250, monto: 9_999_999 },
+        { nombre: 'OSDE', porcentaje: 1000, monto: 999_999_999 },
+      ],
+    })
+
+    expect(doc?.obrasSociales).toEqual([
+      { nombre: 'IPS', porcentaje: 250, monto: 9_999_999 },
+      { nombre: 'OSDE', porcentaje: 1000, monto: 999_999_999 },
     ])
   })
 })

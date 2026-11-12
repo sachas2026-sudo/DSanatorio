@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, MutexGuard};
+use std::time::Instant as StdInstant;
 
 /// Lo único que se le muestra a la interfaz. No incluye el token.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -72,22 +73,101 @@ impl ClientSession {
         username: &str,
         password: &str,
     ) -> Result<SessionInfo, String> {
+        self.login_with_device(
+            client,
+            base_url,
+            username,
+            password,
+            "legacy-client",
+            "Equipo cliente",
+        )
+        .await
+    }
+
+    pub async fn login_with_device(
+        &self,
+        client: &reqwest::Client,
+        base_url: &str,
+        username: &str,
+        password: &str,
+        device_id: &str,
+        device_name: &str,
+    ) -> Result<SessionInfo, String> {
         self.logout();
         if username.trim().is_empty() || password.is_empty() {
             return Err("Ingresá usuario y contraseña".into());
         }
         let url = format!("{}/api/login", base_url.trim_end_matches('/'));
+        let started = StdInstant::now();
         let resp = client
             .post(&url)
-            .json(&serde_json::json!({ "username": username, "password": password }))
+            .json(&serde_json::json!({
+                "username": username,
+                "password": password,
+                "device_id": device_id,
+                "device_name": device_name,
+            }))
             .send()
             .await
-            .map_err(|e| format!("No se pudo conectar con el servidor: {e}"))?;
+            .map_err(|error| {
+                let details = format!("{error:?}").to_ascii_lowercase();
+                let tls_error = details.contains("certificate") || details.contains("tls");
+                let kind = if tls_error {
+                    "tls"
+                } else if error.is_timeout() {
+                    "timeout"
+                } else if error.is_connect() {
+                    "connection"
+                } else {
+                    "transport"
+                };
+                crate::audit_log::record_client_request(
+                    "POST",
+                    "/api/login",
+                    Some(username),
+                    None,
+                    None,
+                    None,
+                    None,
+                    started.elapsed().as_millis(),
+                    Some(kind),
+                );
+                if tls_error {
+                    format!("No se pudo verificar la identidad TLS del servidor: {error}")
+                } else {
+                    format!("No se pudo conectar con el servidor: {error}")
+                }
+            })?;
 
+        crate::discovery::mark_connection_success();
         let status = resp.status();
         if !status.is_success() {
+            let error = if status == reqwest::StatusCode::UNAUTHORIZED {
+                "invalid_credentials"
+            } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                "rate_limited"
+            } else {
+                "http_error"
+            };
+            crate::audit_log::record_client_request(
+                "POST",
+                "/api/login",
+                Some(username),
+                None,
+                Some(status.as_u16()),
+                None,
+                None,
+                started.elapsed().as_millis(),
+                Some(error),
+            );
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 return Err("Usuario o contraseña incorrectos".into());
+            }
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                return Err(
+                    "El servidor limitó temporalmente los intentos para este usuario. Esperá hasta 15 minutos desde el primer intento fallido y volvé a probar."
+                        .into(),
+                );
             }
             return Err(format!("El servidor respondió con error {}", status.as_u16()));
         }
@@ -95,6 +175,17 @@ impl ClientSession {
             .json()
             .await
             .map_err(|_| "Respuesta de login inválida del servidor".to_string())?;
+        crate::audit_log::record_client_request(
+            "POST",
+            "/api/login",
+            Some(username),
+            None,
+            Some(status.as_u16()),
+            None,
+            None,
+            started.elapsed().as_millis(),
+            None,
+        );
 
         let info = SessionInfo {
             username: username.trim().to_string(),
@@ -222,6 +313,18 @@ mod tests {
         assert!(err.contains("incorrectos"));
         assert!(s.bearer().is_none());
         assert!(s.info().is_none());
+    }
+
+    #[tokio::test]
+    async fn demasiados_intentos_muestra_mensaje_claro_y_no_guarda_sesion() {
+        let app = Router::new()
+            .route("/api/login", post(|| async { StatusCode::TOO_MANY_REQUESTS }));
+        let fx = fixture(app).await;
+        let s = ClientSession::new();
+        let err = s.login(&fx.client, &fx.base_url, "ana", "secreto").await.unwrap_err();
+        assert!(err.contains("limitó temporalmente"));
+        assert!(err.contains("15 minutos"));
+        assert!(s.bearer().is_none());
     }
 
     #[tokio::test]

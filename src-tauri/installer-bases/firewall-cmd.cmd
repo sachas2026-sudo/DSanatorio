@@ -19,11 +19,10 @@ if exist "%LOG%" (
 netsh advfirewall firewall delete rule name="Sanatorio Server" >> "%LOG%" 2>&1
 netsh advfirewall firewall delete rule name="Sanatorio Discovery" >> "%LOG%" 2>&1
 netsh advfirewall firewall delete rule name="Sanatorio App" >> "%LOG%" 2>&1
-netsh advfirewall firewall add rule name="Sanatorio Server" dir=in action=allow protocol=TCP localport=8787 profile=any >> "%LOG%" 2>&1
-netsh advfirewall firewall add rule name="Sanatorio Discovery" dir=in action=allow protocol=UDP localport=8788 profile=any >> "%LOG%" 2>&1
-netsh advfirewall firewall add rule name="Sanatorio App" dir=in action=allow program="C:\Sanatorio\app\app.exe" profile=any >> "%LOG%" 2>&1
+netsh advfirewall firewall add rule name="Sanatorio Server" dir=in action=allow protocol=TCP localport=8787 profile=private remoteip=LocalSubnet >> "%LOG%" 2>&1
+netsh advfirewall firewall add rule name="Sanatorio Discovery" dir=in action=allow protocol=UDP localport=8788 profile=private remoteip=LocalSubnet >> "%LOG%" 2>&1
 
-echo Puertos TCP 8787 / UDP 8788 abiertos. Se actualizo "%LOG%" >> "%LOG%"
+echo Reglas LAN TCP 8787 / UDP 8788 (perfil Privado). Se actualizo "%LOG%" >> "%LOG%"
 echo. >> "%LOG%"
 echo Guarde "%LOG%" para ver los detalles si algo bloquea la conexion.
 pause

@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useRef, useEffect } from 'react'
+import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { useAppState } from '../../../context/AppStateContext'
 import { useAuth } from '../../../context/AuthContext'
 import { useConfirm } from '../../../context/ConfirmContext'
@@ -1816,17 +1816,23 @@ export function AfiliadosPage() {
                             <DetalleContratanteCuotas
                               afiliado={a}
                               paciente={p}
-                              plan={plan ?? null}
+                              plan={plan ?? undefined}
                               cuotas={cuotasAfiliado}
                               adherentesDetalle={adherentesDetalle}
                               onVolver={() => setExpandidoId(null)}
                               onCobrarCuota={async (c) => { upsertCuotaMensual(c) }}
                               onAnularCuota={async (c) => { upsertCuotaMensual(c) }}
                               onChangeMedioPago={async (c, medio) => { upsertCuotaMensual({ ...c, formaPago: medio }) }}
-                              onSuspenderReactivar={async (af) => { if (esContratanteSuspendido(af)) { handleReactivar(af) } else { handleOpenSuspender(af) } }}
-                              onDarDeBaja={async () => { handleOpenBaja(a) }}
+                              onSuspenderReactivar={async (af) => {
+                                if (esContratanteSuspendido(af)) {
+                                  handleReactivarContratante(af)
+                                } else {
+                                  setAccionModal({ tipo: 'suspender', afiliadoId: af.id })
+                                }
+                              }}
+                              onDarDeBaja={async () => { setAccionModal({ tipo: 'baja', afiliadoId: a.id }) }}
                               onQuitarAdherente={async (adhPatientId) => { quitarAdherente(a.id, adhPatientId) }}
-                              onCambiarCobertura={() => { handleOpenCambiarCobertura(a) }}
+                              onCambiarCobertura={() => { setAccionModal({ tipo: 'cambiarCobertura', afiliadoId: a.id }) }}
                               onPdfContratante={() => { void handlePdfPreview('selected') }}
                               onPdfComprobante={(c, nombreMes) => { void handleComprobantePago(c, nombreMes) }}
                               onImprimirComprobante={(c, nombreMes) => { void handleImprimirComprobante(c, nombreMes) }}
